@@ -18,6 +18,7 @@ final class TelegramService: ObservableObject {
     @Published private(set) var phase: TelegramAuthPhase = .initializing
     @Published private(set) var isSubmitting = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var codeDeliveryInfo: TelegramCodeDeliveryInfo?
 
     private let configuration: TelegramConfiguration?
     private var manager: TDLibClientManager?
@@ -60,6 +61,16 @@ final class TelegramService: ObservableObject {
         perform(TelegramRequestFactory.make(CheckAuthenticationCode(code: value)))
     }
 
+    func resendCode() {
+        guard phase == .code, !isSubmitting,
+              let info = codeDeliveryInfo, info.nextMethod != nil else { return }
+        guard Date() >= info.resendAvailableAt else {
+            errorMessage = "Повторный запрос пока не разрешён Telegram."
+            return
+        }
+        perform(TelegramRequestFactory.make(ResendAuthenticationCode(reason: nil)))
+    }
+
     func submitPassword(_ password: String) {
         guard phase == .password, !isSubmitting else { return }
         guard !password.isEmpty else {
@@ -83,12 +94,20 @@ final class TelegramService: ObservableObject {
         case "authorizationStateWaitTdlibParameters":
             configureTDLib()
         case "authorizationStateWaitPhoneNumber":
+            codeDeliveryInfo = nil
             phase = .phoneNumber
         case "authorizationStateWaitCode":
+            if let rawInfo = state["code_info"] as? [String: Any] {
+                codeDeliveryInfo = TelegramCodeDeliveryInfo(raw: rawInfo)
+            } else {
+                codeDeliveryInfo = nil
+            }
             phase = .code
         case "authorizationStateWaitPassword":
+            codeDeliveryInfo = nil
             phase = .password
         case "authorizationStateReady":
+            codeDeliveryInfo = nil
             phase = .ready
         case "authorizationStateWaitEmailAddress":
             phase = .actionRequired("Telegram требует адрес электронной почты. Этот шаг входа ещё не реализован.")
