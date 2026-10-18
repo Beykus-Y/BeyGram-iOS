@@ -1,0 +1,10 @@
+# Xcode / XcodeGen generated output
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+build/
+*.xcuserstate
+*.xcuserdata/
+*.ipa
+*.xcarchive
+.DS_Store
