@@ -61,6 +61,8 @@ struct TelegramLoginView: View {
             actionButton("Получить код") {
                 service.submitPhone(phoneNumber)
             }
+
+            qrSignInButton
         case .code:
             Text("Введите код подтверждения")
                 .font(.headline)
@@ -97,6 +99,29 @@ struct TelegramLoginView: View {
             } else {
                 description("Telegram пока не предложил повторную отправку кода.")
             }
+
+            qrSignInButton
+        case .qrCode(let link):
+            Text("Войти через QR-код")
+                .font(.headline)
+
+            if let qr = TelegramQRCodeGenerator.image(for: link) {
+                Image(uiImage: qr)
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 250, height: 250)
+                    .padding(16)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .accessibilityLabel("QR-код для входа через другой сеанс Telegram")
+            } else {
+                description("Не удалось сформировать QR-код. Повторите попытку.")
+            }
+
+            description("На другом устройстве, где вы уже вошли в Telegram: Настройки → Устройства → Подключить устройство. Отсканируйте код камерой Telegram.")
+
+            description("QR-код автоматически обновляется через TDLib. Никому не отправляйте его фотографию: это временный ключ входа в аккаунт.")
         case .password:
             Text("Двухэтапная аутентификация")
                 .font(.headline)
@@ -109,6 +134,8 @@ struct TelegramLoginView: View {
                 service.submitPassword(password)
                 password = ""
             }
+
+            qrSignInButton
         case .ready:
             Image(systemName: "checkmark.circle.fill")
                 .font(.largeTitle)
@@ -118,9 +145,22 @@ struct TelegramLoginView: View {
             description("Сессия сохранена на устройстве. Экран чатов и отправка сообщений появятся в следующем этапе.")
         case .actionRequired(let message):
             description(message)
+
+            qrSignInButton
         case .failed(let message):
             description(message)
         }
+    }
+
+    private var qrSignInButton: some View {
+        Button {
+            service.requestQRLogin()
+        } label: {
+            Label("Войти через QR-код", systemImage: "qrcode")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .disabled(service.isSubmitting)
     }
 
     private func description(_ message: String) -> some View {
