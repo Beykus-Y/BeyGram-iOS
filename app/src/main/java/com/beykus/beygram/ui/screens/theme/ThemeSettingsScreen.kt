@@ -59,7 +59,8 @@ fun ThemeSettingsScreen(saved: AppearanceConfig, onSave: (AppearanceConfig) -> U
     val systemDark = isSystemInDarkTheme()
     var preset by rememberSaveable { mutableStateOf(saved.preset) }
     var mode by rememberSaveable { mutableStateOf(saved.mode) }
-    val draft = AppearanceConfig(preset, mode)
+    // Keeps the bubble style and density that the screen does not edit, so picking a palette never resets them.
+    val draft = saved.copy(preset = preset, mode = mode)
     BackHandler(onBack = onBack)
 
     Column(Modifier.fillMaxSize().background(palette.screen).windowInsetsPadding(WindowInsets.safeDrawing)) {

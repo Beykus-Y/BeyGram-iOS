@@ -76,6 +76,7 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.beykus.beygram.R
+import com.beykus.beygram.data.appearance.ListDensity
 import com.beykus.beygram.domain.UiText
 import com.beykus.beygram.domain.model.ChatPreview
 import com.beykus.beygram.ui.components.Avatar
@@ -426,6 +427,13 @@ internal data class ChatListDensity(
 )
 
 internal val LocalChatListDensity = compositionLocalOf { ChatListDensity() }
+
+/** Строки списка чатов для выбранной плотности. [ListDensity.Comfortable] даёт прежний отступ строки. */
+internal fun chatListDensityFor(density: ListDensity): ChatListDensity = when (density) {
+    ListDensity.Compact -> ChatListDensity(rowVerticalPadding = 6.dp)
+    ListDensity.Comfortable -> ChatListDensity()
+    ListDensity.Spacious -> ChatListDensity(rowVerticalPadding = 14.dp)
+}
 
 @Composable
 internal fun ChatListItem(chat: ChatPreview, observeFile: (Int) -> StateFlow<MediaFileState>, downloadFile: (Int) -> Unit, onClick: () -> Unit) {

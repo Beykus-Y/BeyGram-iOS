@@ -12,6 +12,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +23,10 @@ import com.beykus.beygram.notifications.NotificationIntents
 import com.beykus.beygram.notifications.NotificationRuntime
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.beykus.beygram.ui.screens.chat.LocalBubbleMetrics
+import com.beykus.beygram.ui.screens.chat.bubbleMetricsFor
+import com.beykus.beygram.ui.screens.chats.LocalChatListDensity
+import com.beykus.beygram.ui.screens.chats.chatListDensityFor
 import com.beykus.beygram.ui.theme.AppearanceViewModel
 import com.beykus.beygram.ui.theme.BeyGramTheme
 import com.beykus.beygram.ui.theme.tokensFor
@@ -51,16 +56,22 @@ class MainActivity : ComponentActivity() {
             }
 
             BeyGramTheme(darkTheme = isDarkTheme, tokens = tokensFor(config.preset, config.mode, systemDark)) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                // Bubble shape and list density come from the same saved choice as the colours.
+                CompositionLocalProvider(
+                    LocalBubbleMetrics provides bubbleMetricsFor(config.bubbleStyle, config.density),
+                    LocalChatListDensity provides chatListDensityFor(config.density)
                 ) {
-                    BeyGramApp(
-                        notificationRequest = notificationRequest,
-                        onNotificationHandled = { if (notificationRequest?.token == it) notificationRequest = null },
-                        appearance = config,
-                        onAppearanceChange = appearance::save
-                    )
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        BeyGramApp(
+                            notificationRequest = notificationRequest,
+                            onNotificationHandled = { if (notificationRequest?.token == it) notificationRequest = null },
+                            appearance = config,
+                            onAppearanceChange = appearance::save
+                        )
+                    }
                 }
             }
         }

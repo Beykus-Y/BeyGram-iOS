@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.beykus.beygram.R
+import com.beykus.beygram.data.appearance.BubbleStyle
+import com.beykus.beygram.data.appearance.ListDensity
 import com.beykus.beygram.domain.model.ChatMessage
 import com.beykus.beygram.domain.model.MessageSendState
 import com.beykus.beygram.ui.components.beyGramPalette
@@ -52,7 +54,11 @@ internal data class BubbleMetrics(
     /** Промежуток между соседними элементами списка сообщений. */
     val itemSpacing: Dp = 8.dp,
     /** Отступ над первым и под последним элементом списка сообщений. */
-    val listPadding: Dp = 16.dp
+    val listPadding: Dp = 16.dp,
+    /** Радиус скруглённой цитаты ответа внутри пузыря. */
+    val replyRadius: Dp = 12.dp,
+    /** Отступ сверху у текста под кружком видео. */
+    val circleTopInset: Dp = 4.dp
 )
 
 internal val LocalBubbleMetrics = compositionLocalOf { BubbleMetrics() }
@@ -62,6 +68,20 @@ internal fun bubbleShape(outgoing: Boolean, metrics: BubbleMetrics): RoundedCorn
     val corner = metrics.cornerRadius
     val tail = metrics.tailRadius
     return if (outgoing) RoundedCornerShape(corner, corner, tail, corner) else RoundedCornerShape(corner, corner, corner, tail)
+}
+
+/** Размеры для выбранной формы пузырей и плотности. Скруглённые пузыри при комфортной плотности дают прежний вид. */
+internal fun bubbleMetricsFor(style: BubbleStyle, density: ListDensity): BubbleMetrics {
+    val shaped = when (style) {
+        BubbleStyle.Rounded -> BubbleMetrics()
+        BubbleStyle.Soft -> BubbleMetrics(cornerRadius = 14.dp, tailRadius = 4.dp, replyRadius = 9.dp)
+        BubbleStyle.Square -> BubbleMetrics(cornerRadius = 8.dp, tailRadius = 2.dp, replyRadius = 4.dp)
+    }
+    return when (density) {
+        ListDensity.Compact -> shaped.copy(itemSpacing = 4.dp, listPadding = 8.dp)
+        ListDensity.Comfortable -> shaped
+        ListDensity.Spacious -> shaped.copy(itemSpacing = 12.dp, listPadding = 20.dp)
+    }
 }
 
 /**

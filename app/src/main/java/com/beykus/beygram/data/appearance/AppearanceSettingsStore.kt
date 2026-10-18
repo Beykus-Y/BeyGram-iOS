@@ -19,6 +19,8 @@ private const val LEGACY_DARK_THEME = "dark_theme"
 
 private val ThemeModeKey = stringPreferencesKey("theme_mode")
 private val ThemePresetKey = stringPreferencesKey("theme_preset")
+private val BubbleStyleKey = stringPreferencesKey("bubble_style")
+private val ListDensityKey = stringPreferencesKey("list_density")
 
 private val Context.appearanceDataStore by preferencesDataStore(
     name = "appearance",
@@ -35,7 +37,9 @@ class AppearanceSettingsStore(context: Context) {
         .map { preferences ->
             AppearanceConfig(
                 preset = themePresetFromStored(preferences[ThemePresetKey]),
-                mode = themeModeFromStored(preferences[ThemeModeKey])
+                mode = themeModeFromStored(preferences[ThemeModeKey]),
+                bubbleStyle = bubbleStyleFromStored(preferences[BubbleStyleKey]),
+                density = listDensityFromStored(preferences[ListDensityKey])
             )
         }
 
@@ -43,6 +47,8 @@ class AppearanceSettingsStore(context: Context) {
         dataStore.edit { preferences ->
             preferences[ThemePresetKey] = config.preset.name
             preferences[ThemeModeKey] = config.mode.name
+            preferences[BubbleStyleKey] = config.bubbleStyle.name
+            preferences[ListDensityKey] = config.density.name
         }
     }
 }
