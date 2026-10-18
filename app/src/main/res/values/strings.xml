@@ -440,6 +440,8 @@
     <string name="profile_members_all">Все участники · %1$d</string>
     <string name="profile_members_header">УЧАСТНИКИ</string>
     <string name="profile_members_load_failed">Не удалось загрузить участников</string>
+    <string name="profile_members_tab">Участники</string>
+    <string name="profile_members_hidden">Список участников скрыт</string>
     <string name="profile_member_open_failed">Не удалось открыть профиль участника</string>
     <string name="profile_members_title">Участники</string>
     <string name="profile_badge_premium">Telegram Premium</string>

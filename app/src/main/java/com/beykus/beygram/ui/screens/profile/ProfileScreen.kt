@@ -1,5 +1,6 @@
 package com.beykus.beygram.ui.screens.profile
 
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -84,7 +85,13 @@ fun ProfileScreen(
         }
     }
     BackHandler { if (!saving && !preparing) onBack() }
-    if (pendingPhoto == null) Column(Modifier.fillMaxSize().background(palette.screen).windowInsetsPadding(WindowInsets.safeDrawing)) {
+    val groupInfo = state.info?.takeIf { it.kind == ProfileKind.Group }
+    if (pendingPhoto == null && groupInfo != null) GroupProfileScreen(
+        info = groupInfo, state = state, lastSeenStyle = lastSeenStyle, observeFile = observeFile, downloadFile = downloadFile,
+        onBack = { if (!saving && !preparing) onBack() }, onRefresh = onRefresh, onAvatarClick = { showPhoto = true },
+        onMembers = onMembers, onOpenUser = onOpenUser, sharedMessages = sharedMessages, confirmExport = confirmExport,
+        onContentOpened = onContentOpened, onOpenMessage = onOpenMessage
+    ) else if (pendingPhoto == null) Column(Modifier.fillMaxSize().background(palette.screen).windowInsetsPadding(WindowInsets.safeDrawing)) {
         ProfileToolbar(if (isOwnProfile) stringResource(R.string.profile_title_own) else stringResource(R.string.profile_title_chat), { if (!saving && !preparing) onBack() }) {
             IconButton(onClick = onRefresh, enabled = !state.isLoading && !saving) { Icon(Icons.Rounded.Refresh, stringResource(R.string.common_refresh), tint = palette.textSecondary) }
         }
@@ -98,7 +105,7 @@ fun ProfileScreen(
                     Text(info.title.ifBlank { stringResource(R.string.user_name_unknown) }, color = palette.textPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                     Spacer(Modifier.height(4.dp))
                     ProfileSubtitle(info, lastSeenStyle)
-                    if (info.isVerified || info.isPremium) Text(listOfNotNull(if (info.isVerified) stringResource(R.string.profile_badge_verified) else null, if (info.isPremium) stringResource(R.string.profile_badge_premium) else null).joinToString(" · "), color = palette.accentInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    ProfileBadges(info)
                     if (isOwnProfile) {
                         Spacer(Modifier.height(14.dp))
                         FilledTonalButton(onClick = onEdit, enabled = !state.isLoading && state.error == null && !saving && !preparing, shape = RoundedCornerShape(14.dp),
@@ -106,37 +113,7 @@ fun ProfileScreen(
                         TextButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, enabled = !saving && !preparing) { Text(if (preparing) stringResource(R.string.profile_photo_preparing) else stringResource(R.string.profile_action_change_photo), fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
                     }
                 }
-                Column(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(20.dp)).background(palette.surface).padding(vertical = 4.dp)) {
-                    val rows = buildList {
-                        if (info.phone.isNotBlank()) add(context.getString(R.string.profile_row_phone) to "+${info.phone.removePrefix("+")}")
-                        (info.usernames + info.username.takeIf { it.isNotBlank() }).filterNotNull().distinct().forEach { add(context.getString(R.string.profile_username) to "@$it") }
-                        if (info.bio.isNotBlank()) add((if (info.kind == ProfileKind.Group || info.kind == ProfileKind.Channel) context.getString(R.string.profile_row_description) else context.getString(R.string.profile_about_me)) to info.bio)
-                        info.birthday?.let { birthdayText(it, Locale.getDefault()) }?.let { add(context.getString(R.string.profile_row_birthday) to it) }
-                        if (info.address.isNotBlank()) add(context.getString(R.string.profile_row_address) to info.address)
-                        info.commonGroupCount?.let { add(context.getString(R.string.profile_row_common_groups) to it.toString()) }
-                        if (info.inviteLink.isNotBlank()) add(context.getString(R.string.profile_row_invite_link) to info.inviteLink)
-                        if (info.memberCount != null) add((if (info.kind == ProfileKind.Channel) context.getString(R.string.profile_row_subscribers) else context.getString(R.string.profile_row_members)) to info.memberCount.toString())
-                        info.administratorCount?.let { add(context.getString(R.string.profile_row_administrators) to it.toString()) }
-                        add(context.getString(R.string.profile_row_type) to when (info.kind) {
-                            ProfileKind.Person -> if (info.isSelf) context.getString(R.string.profile_type_own_account) else context.getString(R.string.profile_type_private_chat)
-                            ProfileKind.Bot -> context.getString(R.string.profile_type_bot)
-                            ProfileKind.Group -> context.getString(R.string.profile_type_group)
-                            ProfileKind.Channel -> context.getString(R.string.profile_type_channel)
-                            ProfileKind.Secret -> context.getString(R.string.profile_type_secret_chat)
-                        })
-                        // Со вкладками счётчики стоят в заголовках; без них (профиль участника) остаются строками карточки.
-                        if (sharedMessages == null) info.sharedCounts?.let { counts ->
-                            counts.media?.let { add(context.getString(R.string.profile_shared_media) to it.toString()) }
-                            counts.files?.let { add(context.getString(R.string.profile_shared_files) to it.toString()) }
-                            counts.links?.let { add(context.getString(R.string.profile_shared_links) to it.toString()) }
-                            counts.voice?.let { add(context.getString(R.string.profile_shared_voice) to it.toString()) }
-                        }
-                    }
-                    rows.forEachIndexed { index, (label, value) ->
-                        if (index > 0) HorizontalDivider(color = palette.divider, modifier = Modifier.padding(start = 20.dp))
-                        InfoRow(label, value)
-                    }
-                }
+                ProfileRowsCard(profileRows(context, info, withSharedCounts = sharedMessages == null))
                 if (info.administrators.isNotEmpty()) AdministratorsSection(info.administrators, onOpenUser)
                 if (info.canListMembers && info.memberPreview.isNotEmpty()) MembersSection(info, observeFile, downloadFile, onMembers, onOpenUser)
                 if (sharedMessages != null) SharedMediaSection(info.id, info.sharedCounts, sharedMessages, observeFile, downloadFile, confirmExport, onContentOpened, onOpenMessage)
@@ -187,7 +164,7 @@ fun ProfileScreen(
     }
 }
 
-@Composable private fun ProfileSubtitle(info: ProfileInfo, lastSeenStyle: LastSeenStyle) {
+@Composable internal fun ProfileSubtitle(info: ProfileInfo, lastSeenStyle: LastSeenStyle) {
     val palette = beyGramPalette()
     // Тик времени перерисовывает только подпись, а не весь экран профиля.
     val now by rememberPresenceClock(info.status is ProfilePresence.LastSeen)
@@ -217,8 +194,57 @@ internal fun birthdayText(birthday: ProfileBirthday, locale: Locale): String? = 
     else LocalDate.of(birthday.year, birthday.month, birthday.day).format(DateTimeFormatter.ofPattern("d MMMM yyyy", locale))
 }.getOrNull()
 
+/** Строки карточки профиля. Счётчики медиа входят сюда, только если под профилем нет вкладок с ними. */
+internal fun profileRows(context: Context, info: ProfileInfo, withSharedCounts: Boolean): List<Pair<String, String>> = buildList {
+    if (info.phone.isNotBlank()) add(context.getString(R.string.profile_row_phone) to "+${info.phone.removePrefix("+")}")
+    (info.usernames + info.username.takeIf { it.isNotBlank() }).filterNotNull().distinct().forEach { add(context.getString(R.string.profile_username) to "@$it") }
+    if (info.bio.isNotBlank()) add((if (info.kind == ProfileKind.Group || info.kind == ProfileKind.Channel) context.getString(R.string.profile_row_description) else context.getString(R.string.profile_about_me)) to info.bio)
+    info.birthday?.let { birthdayText(it, Locale.getDefault()) }?.let { add(context.getString(R.string.profile_row_birthday) to it) }
+    if (info.address.isNotBlank()) add(context.getString(R.string.profile_row_address) to info.address)
+    info.commonGroupCount?.let { add(context.getString(R.string.profile_row_common_groups) to it.toString()) }
+    if (info.inviteLink.isNotBlank()) add(context.getString(R.string.profile_row_invite_link) to info.inviteLink)
+    if (info.memberCount != null) add((if (info.kind == ProfileKind.Channel) context.getString(R.string.profile_row_subscribers) else context.getString(R.string.profile_row_members)) to info.memberCount.toString())
+    info.administratorCount?.let { add(context.getString(R.string.profile_row_administrators) to it.toString()) }
+    add(context.getString(R.string.profile_row_type) to when (info.kind) {
+        ProfileKind.Person -> if (info.isSelf) context.getString(R.string.profile_type_own_account) else context.getString(R.string.profile_type_private_chat)
+        ProfileKind.Bot -> context.getString(R.string.profile_type_bot)
+        ProfileKind.Group -> context.getString(R.string.profile_type_group)
+        ProfileKind.Channel -> context.getString(R.string.profile_type_channel)
+        ProfileKind.Secret -> context.getString(R.string.profile_type_secret_chat)
+    })
+    // Со вкладками счётчики стоят в заголовках; без них (профиль участника) остаются строками карточки.
+    if (withSharedCounts) info.sharedCounts?.let { counts ->
+        counts.media?.let { add(context.getString(R.string.profile_shared_media) to it.toString()) }
+        counts.files?.let { add(context.getString(R.string.profile_shared_files) to it.toString()) }
+        counts.links?.let { add(context.getString(R.string.profile_shared_links) to it.toString()) }
+        counts.voice?.let { add(context.getString(R.string.profile_shared_voice) to it.toString()) }
+    }
+}
+
+/** Карточка строк профиля: подпись над значением, разделители между строками. */
 @Composable
-private fun InfoRow(label: String, value: String) {
+internal fun ProfileRowsCard(rows: List<Pair<String, String>>) {
+    val palette = beyGramPalette()
+    Column(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(20.dp)).background(palette.surface).padding(vertical = 4.dp)) {
+        rows.forEachIndexed { index, (label, value) ->
+            if (index > 0) HorizontalDivider(color = palette.divider, modifier = Modifier.padding(start = 20.dp))
+            InfoRow(label, value)
+        }
+    }
+}
+
+/** Значки подтверждения и Premium под названием. */
+@Composable
+internal fun ProfileBadges(info: ProfileInfo) {
+    val palette = beyGramPalette()
+    if (info.isVerified || info.isPremium) Text(
+        listOfNotNull(if (info.isVerified) stringResource(R.string.profile_badge_verified) else null, if (info.isPremium) stringResource(R.string.profile_badge_premium) else null).joinToString(" · "),
+        color = palette.accentInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp)
+    )
+}
+
+@Composable
+internal fun InfoRow(label: String, value: String) {
     val palette = beyGramPalette()
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Text(label, color = palette.accentInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -228,7 +254,7 @@ private fun InfoRow(label: String, value: String) {
 }
 
 @Composable
-private fun AdministratorsSection(administrators: List<ProfileAdmin>, onOpenUser: (Long) -> Unit) {
+internal fun AdministratorsSection(administrators: List<ProfileAdmin>, onOpenUser: (Long) -> Unit) {
     val palette = beyGramPalette()
     Text(stringResource(R.string.profile_admins_header), color = palette.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold,
         modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp))
