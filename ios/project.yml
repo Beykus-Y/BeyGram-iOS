@@ -1,0 +1,34 @@
+name: BeyGramIOS
+
+options:
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    iOS: "16.0"
+
+targets:
+  BeyGramIOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: BeyGramIOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.beykus.beygram.ios
+        PRODUCT_NAME: BeyGramIOS
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: BeyGram
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+
+schemes:
+  BeyGramIOS:
+    build:
+      targets:
+        BeyGramIOS: all
+    run:
+      config: Debug
+    archive:
+      config: Release
