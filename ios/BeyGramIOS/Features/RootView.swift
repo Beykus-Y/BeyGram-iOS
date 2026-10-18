@@ -5,7 +5,13 @@ struct RootView: View {
 
     var body: some View {
         TabView {
-            TelegramLoginView(service: telegram)
+            Group {
+                if telegram.phase == .ready {
+                    BeyGramChatsView(conversations: telegram.conversations)
+                } else {
+                    TelegramLoginView(service: telegram)
+                }
+            }
                 .tabItem {
                     Label("Чаты", systemImage: "bubble.left.and.bubble.right")
                 }
@@ -14,7 +20,7 @@ struct RootView: View {
                 title: "Контакты",
                 symbol: "person.crop.circle",
                 heading: "Контакты",
-                detail: "Раздел появится после реализации списка чатов и пользователей."
+                detail: "Контакты Telegram станут доступны после следующего этапа переноса."
             )
             .tabItem {
                 Label("Контакты", systemImage: "person.crop.circle")

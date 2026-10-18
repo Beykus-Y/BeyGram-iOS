@@ -34,8 +34,14 @@ final class TelegramConversations: ObservableObject {
         refreshChatList()
     }
 
+    func loadMoreChats() {
+        request(TelegramRequestFactory.make(LoadChats(chatList: .chatListMain, limit: 80))) { [weak self] _ in
+            self?.refreshChatList()
+        }
+    }
+
     func refreshChatList() {
-        for list: ChatList in [.chatListMain, .chatListArchive] {
+        for list in [ChatList.chatListMain, ChatList.chatListArchive] {
             request(TelegramRequestFactory.make(GetChats(chatList: list, limit: 100))) { [weak self] result in
                 let ids = result["chat_ids"] as? [Any] ?? []
                 for value in ids {

@@ -54,7 +54,6 @@ struct BeyGramConversationView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 16)
                 }
-                .defaultScrollAnchor(.bottom)
                 .onChange(of: messages.count) { _ in
                     if let id = messages.last?.id {
                         withAnimation(.easeOut(duration: 0.22)) {
