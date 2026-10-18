@@ -68,7 +68,7 @@ final class TelegramService: ObservableObject {
         guard !isSubmitting else { return }
         switch phase {
         case .phoneNumber, .code, .password, .actionRequired:
-            perform(TelegramRequestFactory.make(RequestQrCodeAuthentication(otherUserIds: nil)))
+            perform(TelegramRequestFactory.make(RequestQrCodeAuthentication(otherUserIds: [])))
         default:
             return
         }
