@@ -20,6 +20,7 @@ jobs:
   unsigned-ipa:
     name: Build unsigned IPA
     runs-on: macos-15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +34,35 @@ jobs:
         working-directory: ios
         run: xcodegen generate --spec project.yml
 
+      - name: Configure Telegram API for trusted runs
+        env:
+          TELEGRAM_API_ID: ${{ github.event_name != 'pull_request' && secrets.TELEGRAM_API_ID || '' }}
+          TELEGRAM_API_HASH: ${{ github.event_name != 'pull_request' && secrets.TELEGRAM_API_HASH || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            # PR builds always use placeholders; no credentials exposed to PR code.
+            printf 'TELEGRAM_API_ID = 0\nTELEGRAM_API_HASH = \n' > ios/TelegramCredentials.xcconfig
+          else
+            if ! [[ "$TELEGRAM_API_ID" =~ ^[1-9][0-9]*$ ]] || ! [[ "$TELEGRAM_API_HASH" =~ ^[0-9a-fA-F]{32}$ ]]; then
+              echo "::error::Configure TELEGRAM_API_ID and TELEGRAM_API_HASH repository secrets."
+              exit 1
+            fi
+            {
+              printf 'TELEGRAM_API_ID = %s\n' "$TELEGRAM_API_ID"
+              printf 'TELEGRAM_API_HASH = %s\n' "$TELEGRAM_API_HASH"
+            } > ios/TelegramCredentials.xcconfig
+          fi
+
+      - name: Resolve Swift dependencies
+        working-directory: ios
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project BeyGramIOS.xcodeproj \
+            -scheme BeyGramIOS
+
       - name: Build for physical iPhone (unsigned)
         working-directory: ios
         run: |
@@ -44,8 +74,33 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/BeyGramDerivedData" \
+            -xcconfig TelegramCredentials.xcconfig \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Verify packaged API configuration
+        env:
+          TELEGRAM_API_ID: ${{ github.event_name != 'pull_request' && secrets.TELEGRAM_API_ID || '' }}
+          TELEGRAM_API_HASH: ${{ github.event_name != 'pull_request' && secrets.TELEGRAM_API_HASH || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import plistlib
+          from pathlib import Path
+
+          plist_path = Path(os.environ["RUNNER_TEMP"]) / "BeyGramDerivedData/Build/Products/Release-iphoneos/BeyGramIOS.app/Info.plist"
+          with plist_path.open("rb") as stream:
+              info = plistlib.load(stream)
+          embedded_id = str(info.get("TelegramAPIID", ""))
+          embedded_hash = str(info.get("TelegramAPIHash", ""))
+          if os.environ["EVENT_NAME"] == "pull_request":
+              assert embedded_id in {"0", ""} and not embedded_hash, "PR must not embed production credentials"
+          else:
+              assert embedded_id == os.environ["TELEGRAM_API_ID"], "Telegram API ID not embedded"
+              assert embedded_hash == os.environ["TELEGRAM_API_HASH"], "Telegram API Hash not embedded"
+          print("Info.plist Telegram configuration verified (values not printed).")
+          PY
 
       - name: Package unsigned IPA
         run: |
@@ -66,6 +121,7 @@ jobs:
           name: BeyGram-iOS-unsigned
           path: BeyGram-iOS-unsigned.ipa
           if-no-files-found: error
+          retention-days: 14
 
   release:
     name: Publish unsigned prerelease
@@ -88,6 +144,6 @@ jobs:
           set -euo pipefail
           gh release create "$RELEASE_TAG" BeyGram-iOS-unsigned.ipa \
             --repo "$REPOSITORY" \
-            --title "$RELEASE_TAG — unsigned UI prototype" \
-            --notes "Unsigned IPA for development only. Requires appropriate Apple signing before installation. Telegram/TDLib functionality is not implemented yet." \
+            --title "$RELEASE_TAG — unsigned iOS build" \
+            --notes "Unsigned iOS build. Requires appropriate Apple signing before installation. Telegram login supports phone/code/password; chats and message sending are not implemented yet." \
             --prerelease

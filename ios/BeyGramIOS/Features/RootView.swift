@@ -1,23 +1,20 @@
 import SwiftUI
 
 struct RootView: View {
+    @StateObject private var telegram = TelegramService()
+
     var body: some View {
         TabView {
-            placeholder(
-                title: "Чаты",
-                symbol: "bubble.left.and.bubble.right",
-                heading: "BeyGram для iPhone",
-                detail: "Это первая iOS-сборка. Подключение к Telegram через TDLib ещё не реализовано."
-            )
-            .tabItem {
-                Label("Чаты", systemImage: "bubble.left.and.bubble.right")
-            }
+            TelegramLoginView(service: telegram)
+                .tabItem {
+                    Label("Чаты", systemImage: "bubble.left.and.bubble.right")
+                }
 
             placeholder(
                 title: "Контакты",
                 symbol: "person.crop.circle",
                 heading: "Контакты",
-                detail: "Раздел появится после подключения Telegram-сессии."
+                detail: "Раздел появится после реализации списка чатов и пользователей."
             )
             .tabItem {
                 Label("Контакты", systemImage: "person.crop.circle")
