@@ -137,10 +137,16 @@ private struct BeyGramMessageBubble: View {
             if message.outgoing { Spacer(minLength: 55) }
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(message.text)
-                    .font(.system(size: 15))
-                    .foregroundStyle(colors.primary)
-                    .textSelection(message.isText ? .enabled : .disabled)
+                if message.isText {
+                    Text(message.text)
+                        .font(.system(size: 15))
+                        .foregroundStyle(colors.primary)
+                        .textSelection(.enabled)
+                } else {
+                    Text(message.text)
+                        .font(.system(size: 15))
+                        .foregroundStyle(colors.primary)
+                }
 
                 HStack(spacing: 4) {
                     Spacer(minLength: 0)
