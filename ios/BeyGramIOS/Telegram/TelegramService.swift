@@ -47,7 +47,7 @@ final class TelegramService: ObservableObject {
             errorMessage = "Введите номер с кодом страны, например +79991234567."
             return
         }
-        perform(DTO(SetAuthenticationPhoneNumber(phoneNumber: value, settings: nil)))
+        perform(TelegramRequestFactory.make(SetAuthenticationPhoneNumber(phoneNumber: value, settings: nil)))
     }
 
     func submitCode(_ code: String) {
@@ -57,7 +57,7 @@ final class TelegramService: ObservableObject {
             errorMessage = "Введите код, полученный от Telegram."
             return
         }
-        perform(DTO(CheckAuthenticationCode(code: value)))
+        perform(TelegramRequestFactory.make(CheckAuthenticationCode(code: value)))
     }
 
     func submitPassword(_ password: String) {
@@ -66,7 +66,7 @@ final class TelegramService: ObservableObject {
             errorMessage = "Введите пароль двухэтапной аутентификации."
             return
         }
-        perform(DTO(CheckAuthenticationPassword(password: password)))
+        perform(TelegramRequestFactory.make(CheckAuthenticationPassword(password: password)))
     }
 
     private func handleUpdate(_ data: Data) {
@@ -150,7 +150,8 @@ final class TelegramService: ObservableObject {
                 useSecretChats: false,
                 useTestDc: false
             )
-            perform(DTO(parameters), displaySpinner: false)
+            let request = try TelegramRequestFactory.makeVerifiedParameters(parameters, expectedConfiguration: configuration)
+            perform(request, displaySpinner: false)
         } catch {
             phase = .failed(error.localizedDescription)
         }
