@@ -1,29 +1,30 @@
-# TDLib for BeyGram iOS — integration contract
+# TDLib integration — BeyGram iOS
 
-## Current status
+## Implemented in this iteration
 
-The Swift code added in this stage is **not a TDLib binding**. It provides a configuration validator, explicit unavailable state and a UI status screen. Do not report Telegram authorization as working.
+- TDLibKit pinned to git revision `3996b5f55bee434a2694d6384b8a7ff320f3efaf`, which depends on TDLibFramework `1.8.68-ab8d769f` (XCFramework distributed via SwiftPM).
+- An actual TDLibClientManager and client, with serial update dispatch in the upstream library.
+- `authorizationStateWaitTdlibParameters` initialization with database encryption key from Keychain (after-first-unlock, this-device-only).
+- `authorizationStateWaitPhoneNumber`, `authorizationStateWaitCode`, `authorizationStateWaitPassword`, `authorizationStateReady` handling.
+- SwiftUI login UI. Unsupported email/registration/QR/Premium states show an explicit non-success message.
+- Trusted GitHub runs inject Telegram API credentials via generated xcconfig. PR runs never inject credentials.
 
-## Required native integration
+## Remaining functional acceptance work
 
-1. Select a pinned TDLib source release/commit and build it for iOS arm64 and simulator architectures using Xcode/CMake; check licenses and required native dependencies.
-2. Package the resulting binaries/headers as an XCFramework or another reproducible Xcode-compatible artifact. Android `libtdjni.so` is not usable on iOS.
-3. Implement and test a Swift-compatible bridge for the exact TDLib C interface provided by that pinned build. Avoid guessing TDLib symbols and memory ownership rules.
-4. Build a serialized client/event dispatcher with correct cancellation, authorization-state handling and session storage. Protect database encryption key and authentication state.
-5. Handle `authorizationStateWaitTdlibParameters`, phone number, code, password, logout, error/retry flows using the actual TDLib schema of the pinned version.
-6. Add integration tests on an isolated Telegram test account, never a user's existing production session.
-7. Integrate background lifecycle and push notification design separately; Android foreground-service behavior cannot be carried over.
+- **CI must pass:** xcodebuild must resolve and link the pinned binary XCFramework for arm64 iPhone.
+- **Real device test:** actual login on an isolated Telegram test account; not claimed merely from CI compilation.
+- Chat list, chat history, send/edit/delete, media, image cache, call UI, notifications, proxies, performance.
+- Security: test preservation of encryption key and database across signed sideload updates, and ensure no session reset after entitlement/signature changes.
+- For email/QR/authentication-method changes, implement corresponding TDLib API methods and verify actual returned TDLib states.
 
-## Telegram credentials
+## Auth state model
 
-`TelegramConfiguration` reads `TelegramAPIID` and `TelegramAPIHash` from the built application's Info.plist. The build currently does not inject these keys. Never commit real credentials or print them in CI logs. API ID/hash embedded in a client are extractable, so do not present them as a security boundary.
+The TDLibKit wrapper receives JSON updates on one manager thread and serializes updates per client. BeyGram's main-actor service forwards only authorization updates into SwiftUI. Other message/chat updates are ignored for now, not misrepresented as implemented.
 
-Before shipping, wire explicit configuration injection through XcodeGen and CI with validation, and verify that no secret signing material is published.
+To protect local data, the service checks for an existing nonempty database directory before ever generating a new key. It will fail clearly rather than silently corrupt or reset sessions.
 
-## Acceptance criteria for functional Telegram milestone
+## Credentials
 
-- Real iOS TDLib build pinned and reproducible in macOS CI.
-- Swift bridge builds for device and simulator and passes smoke tests.
-- Authorization state machine handles login/code/2FA and persists sessions.
-- At least one real Telegram test chat loads and a message can be sent.
-- Signed IPA installation tested on an iPhone.
+API ID/hash are not secret after distributing an IPA; they are included in the Info.plist of trusted builds. The CI does not print their values deliberately. `TELEGRAM_API_ID` must be a positive decimal number; `TELEGRAM_API_HASH` must be 32 hex characters.
+
+Workflow output is an unsigned development IPA; Sideloadly can perform local signing. No paid Apple Developer account is required for this build method.

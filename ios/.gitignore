@@ -8,3 +8,6 @@ build/
 *.ipa
 *.xcarchive
 .DS_Store
+
+# Locally injected Telegram credentials
+TelegramCredentials.xcconfig
