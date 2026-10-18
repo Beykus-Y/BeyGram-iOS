@@ -78,6 +78,38 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      # Xcode's generated Info.plist may omit arbitrary INFOPLIST_KEY_* values.
+      # Embed only into the unsigned app bundle, before local sideload signing.
+      - name: Embed Telegram API configuration in unsigned app
+        env:
+          TELEGRAM_API_ID: ${{ github.event_name != 'pull_request' && secrets.TELEGRAM_API_ID || '' }}
+          TELEGRAM_API_HASH: ${{ github.event_name != 'pull_request' && secrets.TELEGRAM_API_HASH || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import plistlib
+          import re
+          from pathlib import Path
+
+          info_path = Path(os.environ["RUNNER_TEMP"]) / "BeyGramDerivedData/Build/Products/Release-iphoneos/BeyGramIOS.app/Info.plist"
+          if os.environ["EVENT_NAME"] == "pull_request":
+              api_id, api_hash = "0", ""
+          else:
+              api_id = os.environ.get("TELEGRAM_API_ID", "")
+              api_hash = os.environ.get("TELEGRAM_API_HASH", "")
+              if not re.fullmatch(r"[1-9][0-9]*", api_id) or not re.fullmatch(r"[0-9a-fA-F]{32}", api_hash):
+                  raise SystemExit("Missing/invalid Telegram API repository secrets")
+
+          with info_path.open("rb") as stream:
+              info = plistlib.load(stream)
+          info["TelegramAPIID"] = api_id
+          info["TelegramAPIHash"] = api_hash
+          with info_path.open("wb") as stream:
+              plistlib.dump(info, stream, fmt=plistlib.FMT_BINARY)
+          print("Telegram configuration embedded (values redacted).")
+          PY
+
       - name: Verify packaged API configuration
         env:
           TELEGRAM_API_ID: ${{ github.event_name != 'pull_request' && secrets.TELEGRAM_API_ID || '' }}
