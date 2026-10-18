@@ -6,6 +6,8 @@ import TDLibKit
 @MainActor
 final class TelegramConversations: ObservableObject {
     @Published private(set) var mainChats: [TelegramChatPreview] = []
+    @Published private(set) var contacts: [TelegramContact] = []
+    @Published private(set) var contactsLoading = false
     @Published private(set) var archivedChats: [TelegramChatPreview] = []
     @Published private(set) var histories: [Int64: [TelegramChatMessage]] = [:]
     @Published private(set) var loadingHistory: Set<Int64> = []
@@ -32,6 +34,60 @@ final class TelegramConversations: ObservableObject {
             self?.refreshChatList()
         }
         refreshChatList()
+        loadContacts()
+    }
+
+    func loadContacts() {
+        guard !contactsLoading else { return }
+        contactsLoading = true
+        request(TelegramRequestFactory.make(GetContacts())) { [weak self] result in
+            guard let self else { return }
+            self.contactsLoading = false
+            guard TelegramJSON.string(result["@type"]) == "users" else {
+                self.errorMessage = TelegramJSON.string(result["message"])
+                return
+            }
+            let ids = result["user_ids"] as? [Any] ?? []
+            if ids.isEmpty { self.contacts = [] }
+            for item in ids {
+                let id = TelegramJSON.int64(item)
+                if id != 0 { self.fetchContact(id) }
+            }
+        }
+    }
+
+    private func fetchContact(_ id: Int64) {
+        request(TelegramRequestFactory.make(GetUser(userId: id))) { [weak self] result in
+            guard TelegramJSON.string(result["@type"]) == "user",
+                  let contact = TelegramContact.from(result) else { return }
+            self?.upsertContact(contact)
+        }
+    }
+
+    private func upsertContact(_ contact: TelegramContact) {
+        var copy = contacts.filter { $0.id != contact.id }
+        copy.append(contact)
+        contacts = copy.sorted {
+            $0.fullName.localizedStandardCompare($1.fullName) == .orderedAscending
+        }
+    }
+
+    func openPrivateChat(_ userID: Int64, completion: @escaping (Int64?) -> Void) {
+        request(TelegramRequestFactory.make(CreatePrivateChat(force: false, userId: userID))) { [weak self] result in
+            guard TelegramJSON.string(result["@type"]) == "chat" else {
+                self?.errorMessage = TelegramJSON.string(result["message"])
+                completion(nil)
+                return
+            }
+            self?.mergeChat(result)
+            let id = TelegramJSON.int64(result["id"])
+            completion(id == 0 ? nil : id)
+        }
+    }
+
+    func chat(for id: Int64) -> TelegramChatPreview? {
+        guard let raw = rawChats[id] else { return nil }
+        return TelegramChatPreview.from(raw)
     }
 
     func loadMoreChats() {
@@ -94,6 +150,20 @@ final class TelegramConversations: ObservableObject {
         case "updateNewChat":
             let chat = TelegramJSON.object(update["chat"])
             if !chat.isEmpty { mergeChat(chat) }
+        case "updateUser":
+            if let contact = TelegramContact.from(TelegramJSON.object(update["user"])) {
+                // Only keep actual contacts returned by getContacts. TDLib emits
+                // updateUser for noncontacts as well; do not leak those into the list.
+                if contacts.contains(where: { $0.id == contact.id }) { upsertContact(contact) }
+            }
+        case "updateUserStatus":
+            let id = TelegramJSON.int64(update["user_id"])
+            if let current = contacts.first(where: { $0.id == id }) {
+                let online = TelegramJSON.string(
+                    TelegramJSON.object(update["status"])["@type"]
+                ) == "userStatusOnline"
+                upsertContact(current.withOnline(online))
+            }
         case "updateChatTitle":
             modifyChat(chatID) { $0["title"] = update["title"] }
         case "updateChatLastMessage":

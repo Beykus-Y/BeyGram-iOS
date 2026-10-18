@@ -16,12 +16,18 @@ struct RootView: View {
                     Label("Чаты", systemImage: "bubble.left.and.bubble.right")
                 }
 
-            placeholder(
-                title: "Контакты",
-                symbol: "person.crop.circle",
-                heading: "Контакты",
-                detail: "Контакты Telegram станут доступны после следующего этапа переноса."
-            )
+            Group {
+                if telegram.phase == .ready {
+                    BeyGramContactsView(conversations: telegram.conversations)
+                } else {
+                    placeholder(
+                        title: "Контакты",
+                        symbol: "person.crop.circle",
+                        heading: "Контакты",
+                        detail: "Контакты Telegram доступны после авторизации."
+                    )
+                }
+            }
             .tabItem {
                 Label("Контакты", systemImage: "person.crop.circle")
             }
