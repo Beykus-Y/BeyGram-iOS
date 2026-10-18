@@ -1,0 +1,270 @@
+import Foundation
+import TDLibKit
+
+/// Mirrors Android's repository pattern: TDLib updates are the source of truth.
+/// The UI never constructs native TDLib requests.
+@MainActor
+final class TelegramConversations: ObservableObject {
+    @Published private(set) var mainChats: [TelegramChatPreview] = []
+    @Published private(set) var archivedChats: [TelegramChatPreview] = []
+    @Published private(set) var histories: [Int64: [TelegramChatMessage]] = [:]
+    @Published private(set) var loadingHistory: Set<Int64> = []
+    @Published private(set) var exhaustedHistory: Set<Int64> = []
+    @Published private(set) var errorMessage: String?
+
+    private weak var client: TDLibClient?
+    private var rawChats: [Int64: [String: Any]] = [:]
+    private var activeChats: Set<Int64> = []
+    private var loaded = false
+
+    func bind(client: TDLibClient) {
+        self.client = client
+    }
+
+    func start() {
+        guard !loaded else { return }
+        loaded = true
+        request(TelegramRequestFactory.make(LoadChats(chatList: .chatListMain, limit: 100))) { [weak self] result in
+            // 404 means that TDLib has no further chats; it isn't an auth failure.
+            self?.refreshChatList()
+        }
+        request(TelegramRequestFactory.make(LoadChats(chatList: .chatListArchive, limit: 60))) { [weak self] _ in
+            self?.refreshChatList()
+        }
+        refreshChatList()
+    }
+
+    func refreshChatList() {
+        for list: ChatList in [.chatListMain, .chatListArchive] {
+            request(TelegramRequestFactory.make(GetChats(chatList: list, limit: 100))) { [weak self] result in
+                let ids = result["chat_ids"] as? [Any] ?? []
+                for value in ids {
+                    let id = TelegramJSON.int64(value)
+                    guard id != 0 else { continue }
+                    self?.fetchChat(id)
+                }
+            }
+        }
+    }
+
+    private func fetchChat(_ id: Int64) {
+        request(TelegramRequestFactory.make(GetChat(chatId: id))) { [weak self] result in
+            guard TelegramJSON.string(result["@type"]) == "chat" else { return }
+            self?.mergeChat(result)
+        }
+    }
+
+    private func mergeChat(_ chat: [String: Any]) {
+        let id = TelegramJSON.int64(chat["id"])
+        guard id != 0 else { return }
+        rawChats[id] = chat
+        publishChats()
+    }
+
+    private func modifyChat(_ id: Int64, mutate: (inout [String: Any]) -> Void) {
+        guard var chat = rawChats[id] else {
+            fetchChat(id)
+            return
+        }
+        mutate(&chat)
+        rawChats[id] = chat
+        publishChats()
+    }
+
+    private func publishChats() {
+        let values = rawChats.values.compactMap(TelegramChatPreview.from)
+        mainChats = values.filter { $0.mainOrder > 0 }
+            .sorted { ($0.mainOrder, $0.id) > ($1.mainOrder, $1.id) }
+        archivedChats = values.filter { $0.archiveOrder > 0 }
+            .sorted { ($0.archiveOrder, $0.id) > ($1.archiveOrder, $1.id) }
+    }
+
+    func handleUpdate(_ data: Data) {
+        let update = TelegramJSON.decode(data)
+        let type = TelegramJSON.string(update["@type"])
+        let chatID = TelegramJSON.int64(update["chat_id"])
+
+        switch type {
+        case "updateNewChat":
+            let chat = TelegramJSON.object(update["chat"])
+            if !chat.isEmpty { mergeChat(chat) }
+        case "updateChatTitle":
+            modifyChat(chatID) { $0["title"] = update["title"] }
+        case "updateChatLastMessage":
+            modifyChat(chatID) {
+                $0["last_message"] = update["last_message"] ?? NSNull()
+                if let positions = update["positions"] { $0["positions"] = positions }
+            }
+        case "updateChatPosition":
+            modifyChat(chatID) { chat in
+                let position = TelegramJSON.object(update["position"])
+                guard !position.isEmpty else { return }
+                let newList = TelegramJSON.string(TelegramJSON.object(position["list"])["@type"])
+                var all = chat["positions"] as? [[String: Any]] ?? []
+                all.removeAll { TelegramJSON.string(TelegramJSON.object($0["list"])["@type"]) == newList }
+                if TelegramJSON.int64(position["order"]) > 0 { all.append(position) }
+                chat["positions"] = all
+            }
+        case "updateChatReadInbox":
+            modifyChat(chatID) { $0["unread_count"] = update["unread_count"] }
+        case "updateChatNotificationSettings":
+            modifyChat(chatID) { $0["notification_settings"] = update["notification_settings"] }
+        case "updateNewMessage":
+            let message = TelegramJSON.object(update["message"])
+            if activeChats.contains(TelegramJSON.int64(message["chat_id"])) {
+                upsertMessage(message)
+            }
+        case "updateMessageContent":
+            let messageID = TelegramJSON.int64(update["message_id"])
+            if var messages = histories[chatID], let index = messages.firstIndex(where: { $0.id == messageID }) {
+                // TDLib updateMessageContent only contains the changed content.
+                var raw: [String: Any] = [
+                    "id": messageID, "chat_id": chatID,
+                    "date": messages[index].timestamp,
+                    "is_outgoing": messages[index].outgoing,
+                    "content": update["new_content"] ?? [:]
+                ]
+                if !messages[index].status.isEmpty {
+                    raw["sending_state"] = ["@type": messages[index].status]
+                }
+                if let replacement = TelegramChatMessage.from(raw) {
+                    messages[index] = replacement
+                    histories[chatID] = messages
+                }
+            }
+        case "updateMessageSendSucceeded":
+            let oldID = TelegramJSON.int64(update["old_message_id"])
+            let message = TelegramJSON.object(update["message"])
+            let id = TelegramJSON.int64(message["chat_id"])
+            histories[id]?.removeAll(where: { $0.id == oldID })
+            upsertMessage(message)
+        case "updateMessageSendFailed":
+            let oldID = TelegramJSON.int64(update["old_message_id"])
+            let message = TelegramJSON.object(update["message"])
+            let id = TelegramJSON.int64(message["chat_id"])
+            histories[id]?.removeAll(where: { $0.id == oldID })
+            upsertMessage(message)
+        case "updateDeleteMessages":
+            // Only delete those messages TDLib confirms were removed.
+            let ids = Set((update["message_ids"] as? [Any] ?? []).map(TelegramJSON.int64))
+            histories[chatID]?.removeAll(where: { ids.contains($0.id) })
+        default: break
+        }
+    }
+
+    func openChat(_ id: Int64) {
+        activeChats.insert(id)
+        request(TelegramRequestFactory.make(OpenChat(chatId: id))) { _ in }
+        loadLatest(id)
+    }
+
+    func closeChat(_ id: Int64) {
+        activeChats.remove(id)
+        request(TelegramRequestFactory.make(CloseChat(chatId: id))) { _ in }
+    }
+
+    func loadLatest(_ id: Int64) {
+        guard !loadingHistory.contains(id) else { return }
+        loadingHistory.insert(id)
+        exhaustedHistory.remove(id)
+        request(TelegramRequestFactory.make(GetChatHistory(
+            chatId: id, fromMessageId: 0, limit: 60, offset: 0, onlyLocal: false
+        ))) { [weak self] response in
+            guard let self else { return }
+            self.loadingHistory.remove(id)
+            guard TelegramJSON.string(response["@type"]) == "messages" else {
+                self.errorMessage = TelegramJSON.string(response["message"])
+                return
+            }
+            let raw = response["messages"] as? [Any] ?? []
+            self.mergeMessages(raw.compactMap { TelegramChatMessage.from(TelegramJSON.object($0)) }, for: id)
+            if raw.isEmpty { self.exhaustedHistory.insert(id) }
+        }
+    }
+
+    func loadOlder(_ id: Int64) {
+        guard !loadingHistory.contains(id), !exhaustedHistory.contains(id),
+              let first = histories[id]?.first else { return }
+        loadingHistory.insert(id)
+        request(TelegramRequestFactory.make(GetChatHistory(
+            chatId: id, fromMessageId: first.id, limit: 60, offset: 0, onlyLocal: false
+        ))) { [weak self] response in
+            guard let self else { return }
+            self.loadingHistory.remove(id)
+            guard TelegramJSON.string(response["@type"]) == "messages" else {
+                self.errorMessage = TelegramJSON.string(response["message"])
+                return
+            }
+            let raw = response["messages"] as? [Any] ?? []
+            let models = raw.compactMap { TelegramChatMessage.from(TelegramJSON.object($0)) }
+            let priorFirst = self.histories[id]?.first?.id
+            self.mergeMessages(models, for: id)
+            if models.isEmpty || self.histories[id]?.first?.id == priorFirst {
+                self.exhaustedHistory.insert(id)
+            }
+        }
+    }
+
+    func sendText(_ text: String, to chatID: Int64) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.utf16.count <= 4096 else {
+            errorMessage = "Длина сообщения должна быть от 1 до 4096 символов."
+            return false
+        }
+        guard client != nil else {
+            errorMessage = "TDLib недоступна."
+            return false
+        }
+        let body = InputMessageContent.inputMessageText(
+            InputMessageText(clearDraft: true, linkPreviewOptions: nil, text: FormattedText(entities: [], text: trimmed))
+        )
+        request(TelegramRequestFactory.make(SendMessage(
+            chatId: chatID, inputMessageContent: body, options: nil,
+            replyMarkup: nil, replyTo: nil, topicId: nil
+        ))) { [weak self] response in
+            if TelegramJSON.string(response["@type"]) == "error" {
+                self?.errorMessage = TelegramJSON.string(response["message"])
+            } else if TelegramJSON.string(response["@type"]) == "message" {
+                self?.upsertMessage(response)
+            }
+        }
+        return true
+    }
+
+    func clearError() { errorMessage = nil }
+
+    private func upsertMessage(_ raw: [String: Any]) {
+        guard let model = TelegramChatMessage.from(raw) else { return }
+        guard activeChats.contains(model.chatId) else { return }
+        var messages = histories[model.chatId] ?? []
+        messages.removeAll(where: { $0.id == model.id })
+        messages.append(model)
+        messages.sort { ($0.timestamp, $0.id) < ($1.timestamp, $1.id) }
+        histories[model.chatId] = messages
+    }
+
+    private func mergeMessages(_ added: [TelegramChatMessage], for id: Int64) {
+        var byID: [Int64: TelegramChatMessage] = [:]
+        for item in histories[id] ?? [] { byID[item.id] = item }
+        for item in added { byID[item.id] = item }
+        histories[id] = byID.values.sorted { ($0.timestamp, $0.id) < ($1.timestamp, $1.id) }
+    }
+
+    private func request(
+        _ query: TdQuery,
+        completion: @escaping ([String: Any]) -> Void
+    ) {
+        guard let client else {
+            errorMessage = "TDLib ещё не инициализирована."
+            return
+        }
+        do {
+            try client.send(query: query) { data in
+                let result = TelegramJSON.decode(data)
+                Task { @MainActor in completion(result) }
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
