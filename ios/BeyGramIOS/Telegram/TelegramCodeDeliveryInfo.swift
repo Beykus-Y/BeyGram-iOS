@@ -59,7 +59,7 @@ struct TelegramCodeDeliveryInfo {
         case "authenticationCodeTypeFirebaseIos", "authenticationCodeTypeFirebaseAndroid":
             return "Telegram ожидает Firebase-подтверждение в официальном приложении. BeyGram пока не поддерживает этот способ. Проверьте, доступна ли альтернатива после тайм-аута."
         default:
-            return "Telegram запрашивает код способом «\\(shortName(for: type))». Проверьте уведомления и активные сеансы."
+            return "Telegram запрашивает код способом «\(shortName(for: type))». Проверьте уведомления и активные сеансы."
         }
     }
 }
