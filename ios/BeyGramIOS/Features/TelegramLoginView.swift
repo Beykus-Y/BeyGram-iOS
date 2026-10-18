@@ -88,8 +88,8 @@ struct TelegramLoginView: View {
                         service.resendCode()
                     } label: {
                         Text(seconds > 0
-                             ? "Другой способ через \\(seconds) с"
-                             : "Запросить код повторно: \\(nextMethod)")
+                             ? "Другой способ через \(seconds) с"
+                             : "Запросить код повторно: \(nextMethod)")
                     }
                     .buttonStyle(.bordered)
                     .disabled(seconds > 0 || service.isSubmitting)
