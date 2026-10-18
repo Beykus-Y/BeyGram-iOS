@@ -27,6 +27,9 @@ class NotificationRuntime private constructor(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var repository: TelegramRepository? = null
     private val flushing = ConcurrentHashMap.newKeySet<Int>()
+    private val dismissRetryRounds = ConcurrentHashMap<Int, Int>()
+    private val dismissNotBefore = ConcurrentHashMap<Int, Long>()
+    private val dismissRetryScheduled = ConcurrentHashMap.newKeySet<Int>()
     private val replyOutbox by lazy { ReplyOutbox(File(context.noBackupFilesDir, REPLY_OUTBOX_DIRECTORY)) }
     private val replyInFlight = ConcurrentHashMap.newKeySet<String>()
     private val replyRetryScheduled = AtomicBoolean(false)
@@ -44,8 +47,12 @@ class NotificationRuntime private constructor(private val context: Context) {
         repository = source
         scope.launch {
             combine(source.notifications, source.notificationPresentation, source.authState, preferences.state, invalidations) { notices, presentation, auth, config, _ ->
-                runCatching { renderer.render(notices, config, presentation, auth == AuthState.Ready) }
-                    .onFailure { android.util.Log.w("BeyGramNotify", "Notification rendering failed: ${it.javaClass.simpleName}") }
+                // Turning off background notifications does not close the TDLib session used by an open UI,
+                // but it must stop posting from a still-alive process once every screen is closed.
+                if (config.background || presentation.foreground) {
+                    runCatching { renderer.render(notices, config, presentation, auth == AuthState.Ready) }
+                        .onFailure { android.util.Log.w("BeyGramNotify", "Notification rendering failed: ${it.javaClass.simpleName}") }
+                }
             }.collect()
         }
         scope.launch { source.authState.collect { auth ->
@@ -55,6 +62,8 @@ class NotificationRuntime private constructor(private val context: Context) {
                     // The sign-out replaces the session token before the outbox is cleared. A reply that the clear misses
                     // belongs to the old token, so it is never sent.
                     preferences.authorized = false
+                    dismissRetryRounds.clear()
+                    dismissNotBefore.clear()
                     val kept = outbox { clear() }
                     if (kept > 0) recordAppEvent(EventKind.NOTIFICATION, "reply_clear_failed", "Ответы из уведомлений не удалось убрать при выходе", Severity.WARNING, mapOf("count" to kept.toString()))
                 }
@@ -75,6 +84,9 @@ class NotificationRuntime private constructor(private val context: Context) {
     fun dismiss(groupId: Int, maxId: Int) {
         if (groupId <= 0 || maxId <= 0) return
         preferences.dismiss(groupId, maxId)
+        // A new explicit dismissal may retry even when an earlier group reached its budget.
+        dismissRetryRounds.remove(groupId)
+        dismissNotBefore.remove(groupId)
         renderer.cancelGroup(groupId)
         refresh(); flushDismissals()
     }
@@ -250,7 +262,10 @@ class NotificationRuntime private constructor(private val context: Context) {
     private fun flushDismissals() {
         val source = repository ?: return
         if (source.authState.value != AuthState.Ready) return
-        preferences.pendingDismissals().forEach { (group, max) -> if (flushing.add(group)) scope.launch {
+        preferences.pendingDismissals().forEach { (group, max) ->
+            if (System.currentTimeMillis() < (dismissNotBefore[group] ?: 0L)) return@forEach
+            if (!flushing.add(group)) return@forEach
+            scope.launch {
             var accepted = false
             var tries = 0
             try {
@@ -261,15 +276,50 @@ class NotificationRuntime private constructor(private val context: Context) {
                     tries++
                     accepted = source.dismissNotifications(group, max).isSuccess
                 }
-                if (accepted) preferences.acknowledge(group, max)
+                if (accepted) {
+                    preferences.acknowledge(group, max)
+                    dismissRetryRounds.remove(group)
+                    dismissNotBefore.remove(group)
+                } else {
+                    scheduleDismissRetry(group)
+                }
             } finally {
                 flushing.remove(group)
-                // A newer dismissal that arrived during the retries goes out next, even if this round failed.
+                // Newer dismissals will retry after the failure cooldown, never in a busy loop.
                 if ((preferences.pendingDismissals()[group] ?: 0) > max) flushDismissals()
             }
             recordDismiss(accepted, tries)
         } }
     }
+    /** Schedule a finite second-level retry window, deduplicated by group. */
+    private fun scheduleDismissRetry(group: Int) {
+        if (preferences.pendingDismissals()[group] == null) return
+        val round = dismissRetryRounds.merge(group, 1, Int::plus) ?: 1
+        if (round > MAX_DISMISS_RETRY_ROUNDS) {
+            dismissNotBefore[group] = Long.MAX_VALUE
+            return
+        }
+        val backoff = DISMISS_ROUND_BACKOFF_MILLIS * (1L shl (round - 1))
+        dismissNotBefore[group] = System.currentTimeMillis() + backoff
+        if (!dismissRetryScheduled.add(group)) return
+        scope.launch {
+            try {
+                while (true) {
+                    val due = dismissNotBefore[group] ?: break
+                    if (due == Long.MAX_VALUE) break
+                    delay((due - System.currentTimeMillis()).coerceAtLeast(0L))
+                    // A newer dismissal can extend the cooldown while this job sleeps.
+                    if (!dismissNotBefore.remove(group, due)) continue
+                    dismissRetryScheduled.remove(group)
+                    flushDismissals()
+                    return@launch
+                }
+            } finally {
+                dismissRetryScheduled.remove(group)
+            }
+        }
+    }
+
     private fun recordDismiss(accepted: Boolean, tries: Int) = when {
         !accepted -> recordAppEvent(EventKind.NOTIFICATION, "dismiss_failed", "Смахивание не отправлено, попыток: $tries", Severity.WARNING, mapOf("tries" to tries.toString()))
         tries > 1 -> recordAppEvent(EventKind.NOTIFICATION, "dismiss_retried", "Смахивание отправлено с попытки $tries", attrs = mapOf("tries" to tries.toString()))
@@ -290,6 +340,8 @@ class NotificationRuntime private constructor(private val context: Context) {
     companion object {
         private const val DISMISS_ATTEMPTS = 4
         private const val DISMISS_RETRY_MILLIS = 2_000L
+        private const val DISMISS_ROUND_BACKOFF_MILLIS = 30_000L
+        private const val MAX_DISMISS_RETRY_ROUNDS = 3
         // Bounds the write and the send of a reply broadcast inside the receiver's time limit; a slower one still completes.
         private const val REPLY_BROADCAST_MILLIS = 8_000L
         // Longest wait for TDLib's authorization after the broadcast has ended; the send itself is not bound to the broadcast.

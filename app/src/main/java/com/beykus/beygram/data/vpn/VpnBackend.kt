@@ -22,12 +22,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The VPN/proxy controller of the process. It is created once with the application scope, so the proxy
@@ -53,7 +55,10 @@ internal class VpnBackend private constructor(
         settings = settingsStore.settings,
         runtimeState = MihomoProxyService.runtimeState,
         mihomo = mihomo,
-        report = { _autoSelectEvents.value = it }
+        report = { event ->
+            _autoSelectEvents.value = event
+            if (event is AutoSelectEvent.Switched) checkSelectedRoute()
+        }
     )
 
     val settings: StateFlow<VpnSettings> = settingsStore.settings
@@ -65,6 +70,7 @@ internal class VpnBackend private constructor(
     val probes: StateFlow<Map<String, MihomoProbeResult>> = _probes.asStateFlow()
     private val _autoSelectEvents = MutableStateFlow<AutoSelectEvent?>(null)
     val autoSelectEvents: StateFlow<AutoSelectEvent?> = _autoSelectEvents.asStateFlow()
+    private val routeProbeGeneration = AtomicInteger()
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
     private val _probeProgress = MutableStateFlow<ProbeProgress?>(null)
@@ -81,6 +87,30 @@ internal class VpnBackend private constructor(
     init {
         networkMonitor.start()
         selector.start()
+        // TDLib connectivity belongs to its own metric, not to listener or testDelay health.
+        scope.launch {
+            var previouslyConnected = false
+            connectionState.collect { state ->
+                val connected = state == TelegramConnectionState.Connected
+                MihomoProxyService.reportTelegramConnection(connected)
+                // Only the enum is logged; never include endpoints, subscription keys or messages.
+                MihomoRuntimeDiagnostics.event("tdlib", "connection_state=${state.name}")
+                // Re-check only on a meaningful connectivity loss, never with periodic polling.
+                if (previouslyConnected && !connected && runtimeState.value.status == ProxyRuntimeStatus.RUNNING) {
+                    checkSelectedRoute()
+                }
+                previouslyConnected = connected
+            }
+        }
+        scope.launch {
+            // The connection flow may already be Connected before the listener reaches RUNNING.
+            // Reconcile its current value on start/restart, even if TDLib emits no new state.
+            runtimeState.collect { proxy ->
+                if (proxy.status == ProxyRuntimeStatus.RUNNING) {
+                    MihomoProxyService.reportTelegramConnection(connectionState.value == TelegramConnectionState.Connected)
+                }
+            }
+        }
         scope.launch(Dispatchers.IO) { restore() }
     }
 
@@ -199,6 +229,16 @@ internal class VpnBackend private constructor(
                 appContext.startService(Intent(appContext, MihomoProxyService::class.java).setAction(MihomoProxyService.ACTION_STOP))
                 throw tdlib.exceptionOrNull() ?: UserMessageException(UiText.Res(R.string.err_vpn_telegram_connect_failed))
             }
+            // Confirm TDLib selected this local proxy rather than treating EnableProxy's OK as connectivity.
+            val route = isTdLibProxyEnabled().getOrNull()
+            MihomoRuntimeDiagnostics.event(
+                "tdlib", "EnableProxy accepted currentRoute=${when (route) {
+                    true -> "subscription"
+                    false -> "other"
+                    null -> "unknown"
+                }}; actual connectivity is reported separately"
+            )
+            checkSelectedRoute()
             Result.success(Unit)
         } catch (error: TimeoutCancellationException) {
             MihomoRuntimeDiagnostics.event("backend", "start timed out")
@@ -210,10 +250,32 @@ internal class VpnBackend private constructor(
         catch (error: Exception) { MihomoRuntimeDiagnostics.failure("backend start", error); Result.failure(error) }
     }
 
+    /** Probe the selected route once after enabling/changing it; do not block TDLib setup on upstream health. */
+    private fun checkSelectedRoute() {
+        val generation = routeProbeGeneration.incrementAndGet()
+        MihomoProxyService.resetUpstream()
+        scope.launch(Dispatchers.IO) {
+            val result = MihomoProxyClient.probeUpstream()
+            // Ignore a route that was replaced or disabled while its HTTPS check was in flight.
+            if (generation != routeProbeGeneration.get()) return@launch
+            MihomoProxyService.reportUpstream(result.reachable)
+            MihomoRuntimeDiagnostics.outcome(
+                "proxy_upstream",
+                if (result.reachable) "Прокси: HTTPS-маршрут доступен" else "Прокси: HTTPS-проверка маршрута не прошла",
+                if (result.reachable) com.beykus.beygram.diagnostics.report.Severity.INFO else com.beykus.beygram.diagnostics.report.Severity.WARNING,
+                mapOf("result" to if (result.reachable) "reachable" else "unreachable",
+                    "http_code" to (result.httpCode?.toString() ?: "none"),
+                    "elapsed_ms" to result.elapsedMillis.toString(),
+                    "error_type" to (result.errorType ?: "none"))
+            )
+        }
+    }
+
     /** Turns the subscription proxy off: TDLib returns to the proxy it used before, then the listener stops. */
     suspend fun stopProxy(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             MihomoRuntimeDiagnostics.event("backend", "proxy stop requested")
+            routeProbeGeneration.incrementAndGet()
             val tdlib = setTdLibProxy(false)
             if (tdlib.isFailure) throw tdlib.exceptionOrNull() ?: UserMessageException(UiText.Res(R.string.err_vpn_stop_failed))
             // TDLib no longer uses the proxy, so the restore question and hint are settled even if the listener stop fails below.
@@ -244,6 +306,7 @@ internal class VpnBackend private constructor(
     }
 
     private suspend fun stopListenerNow() {
+        routeProbeGeneration.incrementAndGet()
         if (runtimeState.value.status == ProxyRuntimeStatus.STOPPED) return
         appContext.startService(Intent(appContext, MihomoProxyService::class.java).setAction(MihomoProxyService.ACTION_STOP))
         withTimeout(10_000) { MihomoProxyService.runtimeState.first { it.status == ProxyRuntimeStatus.STOPPED } }
@@ -324,6 +387,7 @@ internal class VpnBackend private constructor(
 
     suspend fun probeAllConnections(): Result<List<MihomoProbeResult>> = withContext(Dispatchers.IO) {
         try {
+            MihomoProbeCoordinator.sweep {
             val current = mihomo.listConnections(settings.value.connectionGroup)
             val results = mutableListOf<MihomoProbeResult>()
             _probeProgress.value = ProbeProgress(0, current.size)
@@ -339,6 +403,7 @@ internal class VpnBackend private constructor(
                 _probeProgress.value = ProbeProgress(results.size, current.size)
             }
             Result.success(results.toList())
+            }
         } catch (error: Exception) {
             if (error is CancellationException) throw error
             Result.failure(error)
@@ -350,6 +415,7 @@ internal class VpnBackend private constructor(
     suspend fun selectConnection(name: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             mihomo.selectConnection(settings.value.connectionGroup, name)
+            if (runtimeState.value.status == ProxyRuntimeStatus.RUNNING) checkSelectedRoute()
             _connections.value = mihomo.listConnections(settings.value.connectionGroup)
             Result.success(Unit)
         } catch (error: Exception) {

@@ -30,8 +30,8 @@ internal class TdNotifications(
         conversationResult {
             request(TdApi.SetOption("notification_group_size_max", TdApi.OptionValueInteger(10)))
             request(TdApi.SetOption("notification_group_count_max", TdApi.OptionValueInteger(25)))
-            // On first opt-in TDLib can enable groups after its startup snapshot phase.
-            synchronized(lock) { _state.value = _state.value.copy(initialized = true) }
+            // Configuring group limits does not confirm TDLib delivered an initial snapshot.
+            // Keep the existing Android tray until the real UpdateActiveNotifications arrives.
         }
     } }
     suspend fun dismiss(groupId: Int, maxId: Int): Result<Unit> = conversationResult {
@@ -65,7 +65,8 @@ internal class TdNotifications(
                 recordAppEvent(EventKind.NOTIFICATION, "snapshot", "Снимок уведомлений: групп ${groups.size}", attrs = mapOf("groups" to groups.size.toString()))
             }
             is TdApi.UpdateNotificationGroup -> {
-                _state.value = _state.value.copy(initialized = true, snapshot = true)
+                // Incremental groups can render immediately but cannot prove other groups are absent.
+                _state.value = _state.value.copy(initialized = true)
                 if (update.type is TdApi.NotificationGroupTypeCalls) { groups.remove(update.notificationGroupId); publish(); return@synchronized }
                 val old = groups[update.notificationGroupId]?.takeIf { it.chatId == update.chatId }
                 val removed = (update.removedNotificationIds ?: intArrayOf()).toSet()

@@ -79,9 +79,13 @@ class TdNotificationsTest {
         assertEquals(0, feed.state.value.groups.single().alertId)
     }
 
-    @Test fun firstGroupUpdateMarksStateReceivedWithoutStartupSnapshot() {
+    @Test fun firstGroupUpdateDoesNotClaimFullStartupSnapshot() {
         val feed = newFeed()
         feed.handle(groupUpdate(listOf(notice(7))))
+        assertTrue(feed.state.value.initialized)
+        assertFalse(feed.state.value.snapshot)
+        // Old Android tray groups remain until TDLib confirms the full set.
+        feed.handle(TdApi.UpdateActiveNotifications().apply { groups = arrayOf(activeGroup(listOf(notice(7)))) })
         assertTrue(feed.state.value.snapshot)
     }
 

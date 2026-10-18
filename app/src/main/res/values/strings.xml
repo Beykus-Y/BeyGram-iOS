@@ -540,6 +540,10 @@
     <string name="proxy_list_title">Прокси</string>
     <string name="proxy_no_connection">нет связи</string>
     <string name="proxy_notification_starting">Запуск прокси…</string>
+    <string name="proxy_notification_upstream_unreachable">Прокси запущен, HTTPS-проверка не прошла</string>
+    <string name="proxy_notification_telegram_only">Telegram на связи, HTTPS-проверка не прошла</string>
+    <string name="proxy_notification_connected">Прокси и Telegram подключены</string>
+    <string name="proxy_notification_telegram_connecting">HTTPS доступен, Telegram подключается</string>
     <string name="proxy_notification_text">Прокси работает</string>
     <string name="proxy_notification_title">Прокси BeyGram</string>
     <string name="proxy_restore_failed_question">Telegram не смог подключиться через Proxy, повторить ещё раз?</string>

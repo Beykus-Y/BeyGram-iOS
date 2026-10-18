@@ -19,6 +19,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,7 +32,14 @@ import kotlin.coroutines.coroutineContext
 
 enum class ProxyRuntimeStatus { STOPPED, STARTING, RUNNING, STOPPING, FAILED }
 
-data class ProxyRuntimeState(val status: ProxyRuntimeStatus, val message: UiText? = null)
+data class ProxyRuntimeState(
+    val status: ProxyRuntimeStatus,
+    val message: UiText? = null,
+    /** null means the current selected upstream has not yet been verified. */
+    val upstreamReachable: Boolean? = null,
+    /** null means TDLib connectivity has not yet been observed for this listener. */
+    val telegramConnected: Boolean? = null
+)
 
 /**
  * Keeps Mihomo's localhost SOCKS listener alive; it does not create an Android VPN.
@@ -44,10 +53,20 @@ class MihomoProxyService : Service() {
     private var lastStartId = 0
     // When the newest start request arrived, so the problem report can say how long the listener took to become ready.
     private var startRequestedAt = 0L
+    private val notificationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onCreate() {
         super.onCreate()
         AndroidNotificationRenderer.channels(this)
+        // State-driven updates: no polling, and RUNNING never implies Telegram is connected.
+        notificationScope.launch {
+            runtimeState.collect { state ->
+                if (state.status == ProxyRuntimeStatus.RUNNING) {
+                    getSystemService(NotificationManager::class.java)
+                        .notify(NOTIFICATION_ID, buildNotification(textFor(state)))
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -66,13 +85,14 @@ class MihomoProxyService : Service() {
         // The system can destroy the service while the process, and the native listener, keep running.
         stopForeground(STOP_FOREGROUND_REMOVE)
         enqueueStop(startId = null)
+        notificationScope.cancel()
         super.onDestroy()
     }
 
     private fun startProxy() {
         val status = _runtimeState.value.status
         // Every start intent gets startForeground, including one that finds the listener already on its way.
-        startForeground(NOTIFICATION_ID, buildNotification(textFor(status)))
+        startForeground(NOTIFICATION_ID, buildNotification(textFor(_runtimeState.value)))
         if (status == ProxyRuntimeStatus.RUNNING || status == ProxyRuntimeStatus.STARTING) return
         startRequestedAt = SystemClock.elapsedRealtime()
         _runtimeState.value = ProxyRuntimeState(ProxyRuntimeStatus.STARTING)
@@ -97,7 +117,7 @@ class MihomoProxyService : Service() {
                     _runtimeState.value = ProxyRuntimeState(ProxyRuntimeStatus.RUNNING)
                     MihomoRuntimeDiagnostics.event("service", "state=RUNNING")
                     // "Working" is shown only after the local listener has been checked; it says nothing about upstream reachability.
-                    getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(textFor(ProxyRuntimeStatus.RUNNING)))
+                    getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(textFor(_runtimeState.value)))
                     MihomoRuntimeDiagnostics.outcome("proxy_ready", "Прокси: локальный слушатель готов", attrs = mapOf("elapsed_ms" to (SystemClock.elapsedRealtime() - startRequestedAt).toString()))
                 }
             }
@@ -177,8 +197,14 @@ class MihomoProxyService : Service() {
         .build()
 
     @StringRes
-    private fun textFor(status: ProxyRuntimeStatus): Int =
-        if (status == ProxyRuntimeStatus.RUNNING) R.string.proxy_notification_text else R.string.proxy_notification_starting
+    private fun textFor(state: ProxyRuntimeState): Int = when {
+        state.status != ProxyRuntimeStatus.RUNNING -> R.string.proxy_notification_starting
+        state.telegramConnected == true && state.upstreamReachable == false -> R.string.proxy_notification_telegram_only
+        state.upstreamReachable == false -> R.string.proxy_notification_upstream_unreachable
+        state.upstreamReachable == true && state.telegramConnected == true -> R.string.proxy_notification_connected
+        state.upstreamReachable == true -> R.string.proxy_notification_telegram_connecting
+        else -> R.string.proxy_notification_text
+    }
 
     companion object {
         const val ACTION_START = "com.beykus.beygram.mihomo_proxy.START"
@@ -186,6 +212,19 @@ class MihomoProxyService : Service() {
         private const val NOTIFICATION_ID = 7012
         private val _runtimeState = MutableStateFlow(ProxyRuntimeState(ProxyRuntimeStatus.STOPPED))
         val runtimeState: StateFlow<ProxyRuntimeState> = _runtimeState.asStateFlow()
+
+        /** Only an active listener owns these metrics; stale probes cannot resurrect a stopped service. */
+        internal fun reportUpstream(reachable: Boolean) {
+            _runtimeState.update { if (it.status == ProxyRuntimeStatus.RUNNING) it.copy(upstreamReachable = reachable) else it }
+        }
+
+        internal fun reportTelegramConnection(connected: Boolean) {
+            _runtimeState.update { if (it.status == ProxyRuntimeStatus.RUNNING) it.copy(telegramConnected = connected) else it }
+        }
+
+        internal fun resetUpstream() {
+            _runtimeState.update { if (it.status == ProxyRuntimeStatus.RUNNING) it.copy(upstreamReachable = null) else it }
+        }
 
         /**
          * Forgets the failure of an earlier start. A start caller waits for RUNNING or FAILED, so an old FAILED would answer

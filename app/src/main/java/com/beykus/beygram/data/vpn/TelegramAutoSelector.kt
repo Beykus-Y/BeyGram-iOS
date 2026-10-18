@@ -56,7 +56,7 @@ internal class TelegramAutoSelector(
                 ) {
                     if (checking.compareAndSet(false, true)) {
                         try {
-                            evaluateAndSelect(settings.connectionGroup)
+                            MihomoProbeCoordinator.sweep { evaluateAndSelect(settings.connectionGroup) }
                         } finally {
                             checking.set(false)
                         }

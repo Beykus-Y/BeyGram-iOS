@@ -4,6 +4,7 @@ import android.content.Context
 import com.beykus.beygram.BuildConfig
 import com.beykus.beygram.R
 import com.beykus.beygram.domain.UiText
+import com.beykus.beygram.domain.model.VpnSettings
 import java.net.Authenticator
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
@@ -11,6 +12,14 @@ import java.net.PasswordAuthentication
 import java.net.Proxy
 import java.net.Socket
 import java.net.URL
+
+/** Result of the selected path, not an individual node's testDelay result. */
+internal data class UpstreamProbeResult(
+    val reachable: Boolean,
+    val httpCode: Int?,
+    val elapsedMillis: Long,
+    val errorType: String? = null
+)
 
 /** Shared loopback SOCKS entry point for BeyGram-owned Java network clients. */
 internal object MihomoProxyClient {
@@ -46,6 +55,34 @@ internal object MihomoProxyClient {
     }
 
     fun newSocket(): Socket = Socket(socksProxy)
+
+    /**
+     * End-to-end HTTPS check through the very same authenticated SOCKS listener TDLib uses.
+     * Unlike Mihomo testDelay (which tests an individual node), this verifies the currently
+     * selected upstream route: SOCKS5 authentication, CONNECT, TLS and a short HTTP request.
+     * A non-2xx HTTP response still proves the network path is working.
+     */
+    fun probeUpstream(): UpstreamProbeResult {
+        val started = System.nanoTime()
+        return try {
+            val connection = openConnection(URL(VpnSettings.TELEGRAM_HEALTH_CHECK_URL), socksProxy)
+            try {
+                connection.connectTimeout = 5_000
+                connection.readTimeout = 5_000
+                connection.requestMethod = "HEAD"
+                connection.instanceFollowRedirects = false
+                val code = connection.responseCode
+                UpstreamProbeResult(code in 100..599, code.takeIf { it in 100..599 },
+                    (System.nanoTime() - started) / 1_000_000L)
+            } finally {
+                connection.disconnect()
+            }
+        } catch (error: Exception) {
+            // Never include URL, credentials or response bodies in the shareable report.
+            UpstreamProbeResult(false, null, (System.nanoTime() - started) / 1_000_000L,
+                error.javaClass.simpleName)
+        }
+    }
 
     /**
      * Waits until BeyGram's own listener answers with this installation's credentials. An open port is not enough:
