@@ -62,8 +62,14 @@ struct TelegramLoginView: View {
                 service.submitPhone(phoneNumber)
             }
         case .code:
-            Text("Введите код из Telegram")
+            Text("Введите код подтверждения")
                 .font(.headline)
+
+            if let details = service.codeDeliveryInfo {
+                description(details.instructions)
+            } else {
+                description("Telegram запрашивает код. Проверьте активные сеансы Telegram и SMS.")
+            }
 
             TextField("Код подтверждения", text: $code)
                 .keyboardType(.numberPad)
@@ -73,6 +79,23 @@ struct TelegramLoginView: View {
 
             actionButton("Подтвердить") {
                 service.submitCode(code)
+            }
+
+            if let details = service.codeDeliveryInfo, let nextMethod = details.nextMethod {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let seconds = max(0, Int(ceil(details.resendAvailableAt.timeIntervalSince(context.date))))
+                    Button {
+                        service.resendCode()
+                    } label: {
+                        Text(seconds > 0
+                             ? "Другой способ через \\(seconds) с"
+                             : "Запросить код повторно: \\(nextMethod)")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(seconds > 0 || service.isSubmitting)
+                }
+            } else {
+                description("Telegram пока не предложил повторную отправку кода.")
             }
         case .password:
             Text("Двухэтапная аутентификация")
