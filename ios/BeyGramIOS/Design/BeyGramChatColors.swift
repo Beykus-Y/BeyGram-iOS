@@ -15,6 +15,42 @@ struct BeyGramChatColors {
     let outgoingBubble: Color
     let onAccent: Color
 
+    static func selected(_ scheme: ColorScheme, preset: String) -> Self {
+        return preset == "graphite" ? graphite(scheme) : warm(scheme)
+    }
+
+    /// Mirrors Android GraphiteLightTokens and GraphiteDarkTokens.
+    static func graphite(_ scheme: ColorScheme) -> Self {
+        if scheme == .dark {
+            return Self(
+                screen: Color(red: 22/255, green: 24/255, blue: 28/255),
+                surface: Color(red: 31/255, green: 34/255, blue: 39/255),
+                surface2: Color(red: 42/255, green: 46/255, blue: 53/255),
+                divider: Color(red: 44/255, green: 48/255, blue: 56/255),
+                primary: Color(red: 238/255, green: 240/255, blue: 243/255),
+                secondary: Color(red: 154/255, green: 161/255, blue: 172/255),
+                accent: Color(red: 143/255, green: 166/255, blue: 255/255),
+                accentSoft: Color(red: 38/255, green: 48/255, blue: 90/255),
+                accentInk: Color(red: 197/255, green: 209/255, blue: 255/255),
+                outgoingBubble: Color(red: 42/255, green: 51/255, blue: 96/255),
+                onAccent: Color(red: 17/255, green: 21/255, blue: 39/255)
+            )
+        }
+        return Self(
+            screen: Color(red: 245/255, green: 246/255, blue: 248/255),
+            surface: .white,
+            surface2: Color(red: 236/255, green: 238/255, blue: 242/255),
+            divider: Color(red: 223/255, green: 226/255, blue: 232/255),
+            primary: Color(red: 27/255, green: 29/255, blue: 34/255),
+            secondary: Color(red: 89/255, green: 97/255, blue: 112/255),
+            accent: Color(red: 59/255, green: 91/255, blue: 219/255),
+            accentSoft: Color(red: 227/255, green: 233/255, blue: 251/255),
+            accentInk: Color(red: 43/255, green: 69/255, blue: 168/255),
+            outgoingBubble: Color(red: 220/255, green: 228/255, blue: 248/255),
+            onAccent: .white
+        )
+    }
+
     static func warm(_ scheme: ColorScheme) -> Self {
         if scheme == .dark {
             return Self(

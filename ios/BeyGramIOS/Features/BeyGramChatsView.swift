@@ -21,11 +21,12 @@ private enum BeyGramChatFilter: String, CaseIterable, Identifiable {
 struct BeyGramChatsView: View {
     @ObservedObject var conversations: TelegramConversations
     @Environment(\.colorScheme) private var scheme
+    @AppStorage("beygram.appearance.preset") private var appearancePreset = "warm"
     @State private var search = ""
     @State private var filter = BeyGramChatFilter.all
     @State private var showingArchive = false
 
-    private var colors: BeyGramChatColors { .warm(scheme) }
+    private var colors: BeyGramChatColors { .selected(scheme, preset: appearancePreset) }
 
     private var filtered: [TelegramChatPreview] {
         conversations.mainChats.filter { chat in

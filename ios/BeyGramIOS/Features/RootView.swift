@@ -2,6 +2,16 @@ import SwiftUI
 
 struct RootView: View {
     @StateObject private var telegram = TelegramService()
+    @AppStorage("beygram.appearance.mode") private var appearanceMode = "system"
+    @AppStorage("beygram.appearance.preset") private var appearancePreset = "warm"
+
+    private var chosenScheme: ColorScheme? {
+        switch appearanceMode {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
+    }
 
     var body: some View {
         TabView {
@@ -42,17 +52,13 @@ struct RootView: View {
                 Label("Звонки", systemImage: "phone")
             }
 
-            placeholder(
-                title: "Настройки",
-                symbol: "gearshape",
-                heading: "Настройки BeyGram",
-                detail: "В следующих этапах здесь появятся темы, приватность и управление прокси."
-            )
-            .tabItem {
+            BeyGramSettingsView()
+                .tabItem {
                 Label("Настройки", systemImage: "gearshape")
             }
         }
-        .tint(BeyGramPalette.accent)
+        .preferredColorScheme(chosenScheme)
+        .tint(appearancePreset == "graphite" ? Color(red: 59/255, green: 91/255, blue: 219/255) : BeyGramPalette.accent)
     }
 
     private func placeholder(

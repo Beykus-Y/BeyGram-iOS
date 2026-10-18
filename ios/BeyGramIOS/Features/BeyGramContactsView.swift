@@ -4,10 +4,11 @@ import SwiftUI
 struct BeyGramContactsView: View {
     @ObservedObject var conversations: TelegramConversations
     @Environment(\.colorScheme) private var scheme
+    @AppStorage("beygram.appearance.preset") private var appearancePreset = "warm"
     @State private var query = ""
     @State private var path: [Int64] = []
 
-    private var colors: BeyGramChatColors { .warm(scheme) }
+    private var colors: BeyGramChatColors { .selected(scheme, preset: appearancePreset) }
 
     private var results: [TelegramContact] {
         conversations.contacts.filter {
