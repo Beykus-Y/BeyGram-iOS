@@ -7,6 +7,7 @@ enum TelegramAuthPhase: Equatable {
     case initializing
     case phoneNumber
     case code
+    case qrCode(String)
     case password
     case ready
     case actionRequired(String)
@@ -66,6 +67,17 @@ final class TelegramService: ObservableObject {
         perform(TelegramRequestFactory.make(CheckAuthenticationCode(code: value)))
     }
 
+    func requestQRLogin() {
+        // Supported by TDLib from phone-number and code-waiting states
+        // provided no other authorization request is pending.
+        guard !isSubmitting else { return }
+        switch phase {
+        case .phoneNumber, .code, .password, .actionRequired:
+            perform(TelegramRequestFactory.make(RequestQrCodeAuthentication(otherUserIds: [])))
+        default: return
+        }
+    }
+
     func resendCode() {
         guard phase == .code, !isSubmitting,
               let info = codeDeliveryInfo, info.nextMethod != nil else { return }
@@ -121,7 +133,14 @@ final class TelegramService: ObservableObject {
         case "authorizationStateWaitEmailCode":
             phase = .actionRequired("Telegram требует код с электронной почты. Этот шаг входа ещё не реализован.")
         case "authorizationStateWaitOtherDeviceConfirmation":
-            phase = .actionRequired("Telegram ожидает подтверждение через другое устройство. QR-вход пока не реализован.")
+            codeDeliveryInfo = nil
+            guard let link = state["link"] as? String,
+                  link.hasPrefix("tg://login?token="), !link.isEmpty else {
+                phase = .failed("TDLib не предоставила корректную ссылку для QR-входа.")
+                return
+            }
+            // QR is a short-lived bearer token: do not log or persist it.
+            phase = .qrCode(link)
         case "authorizationStateWaitRegistration":
             phase = .actionRequired("Аккаунт требует регистрацию и принятие условий Telegram. Этот шаг ещё не реализован.")
         case "authorizationStateWaitPremiumPurchase":
