@@ -125,7 +125,8 @@ struct BeyGramMediaAttachmentView: View {
                 .multilineTextAlignment(.center)
         }
         .foregroundStyle(colors.secondary)
-        .frame(width: 245, minHeight: 135)
+        .frame(width: 245)
+        .frame(minHeight: 135)
         .padding(12)
         .background(colors.surface2, in: RoundedRectangle(cornerRadius: 16))
     }
