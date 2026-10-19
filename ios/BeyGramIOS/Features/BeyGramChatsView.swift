@@ -29,6 +29,8 @@ struct BeyGramChatsView: View {
     @State private var showingGlobalSearch = false
     @State private var chatToDelete: TelegramChatPreview?
     @State private var chatActionError: String?
+    @State private var openSwipeChatID: Int64?
+    @State private var navigationPath: [Int64] = []
 
     private var colors: BeyGramChatColors { .selected(scheme, preset: appearancePreset) }
 
@@ -57,7 +59,7 @@ struct BeyGramChatsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
                 header
 
@@ -340,13 +342,37 @@ struct BeyGramChatsView: View {
 
     private func chatRows(_ rows: [TelegramChatPreview]) -> some View {
         ForEach(rows) { chat in
-            NavigationLink(value: chat.id) {
-                BeyGramChatRow(
-                    chat: chat, conversations: conversations, colors: colors,
-                    verticalPadding: rowPadding
-                )
+            let listed = chat.mainOrder > 0 || chat.archiveOrder > 0
+            BeyGramSwipeChatRow(
+                chat: chat, colors: colors, canSwipe: listed,
+                openChatID: $openSwipeChatID,
+                onRead: {
+                    conversations.setChatUnread(
+                        chat, unread: !chat.hasUnread
+                    ) { chatActionError = $0 }
+                },
+                onArchive: {
+                    conversations.moveChat(
+                        chat, toArchive: chat.archiveOrder == 0
+                    ) { chatActionError = $0 }
+                }
+            ) {
+                Button {
+                    if openSwipeChatID == chat.id {
+                        withAnimation(.easeOut(duration: 0.19)) {
+                            openSwipeChatID = nil
+                        }
+                    } else {
+                        navigationPath.append(chat.id)
+                    }
+                } label: {
+                    BeyGramChatRow(
+                        chat: chat, conversations: conversations, colors: colors,
+                        verticalPadding: rowPadding
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             .contextMenu {
                 // Context actions operate only on actual main/archive rows,
                 // never on unlisted matches from Telegram server search.
