@@ -4,6 +4,7 @@ import SwiftUI
 struct BeyGramSettingsView: View {
     @AppStorage("beygram.appearance.mode") private var appearanceMode = "system"
     @AppStorage("beygram.appearance.preset") private var appearancePreset = "warm"
+    @AppStorage("beygram.chatList.density") private var chatListDensity = "comfortable"
     @Environment(\.colorScheme) private var scheme
 
     private var colors: BeyGramChatColors {
@@ -49,6 +50,25 @@ struct BeyGramSettingsView: View {
                                 Text("Тёмная").tag("dark")
                             }
                             .pickerStyle(.segmented)
+                        }
+                    }
+
+                    section("СПИСОК ЧАТОВ") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Плотность строк")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(colors.primary)
+
+                            Picker("Плотность строк", selection: $chatListDensity) {
+                                Text("Компактно").tag("compact")
+                                Text("Обычно").tag("comfortable")
+                                Text("Просторно").tag("spacious")
+                            }
+                            .pickerStyle(.segmented)
+
+                            Text("Те же три варианта, что в Android BeyGram. Изменение применяется сразу.")
+                                .font(.caption)
+                                .foregroundStyle(colors.secondary)
                         }
                     }
 
