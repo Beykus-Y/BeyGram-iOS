@@ -6,7 +6,7 @@ On iOS 26, TDLib accepted the phone number and returned `authorizationStateWaitC
 
 ## Implementation
 
-Pinned TDLib 1.8.68 supports `requestQrCodeAuthentication(otherUserIds: nil)` from `authorizationStateWaitPhoneNumber` or, when no pending authorization query exists, from `authorizationStateWaitCode` and certain other authorization states.
+Pinned TDLib 1.8.68 supports `requestQrCodeAuthentication(otherUserIds: [])` from `authorizationStateWaitPhoneNumber` or, when no pending authorization query exists, from `authorizationStateWaitCode` and certain other authorization states.
 
 - The user can select **Войти через QR-код** from phone, code or password screens.
 - TDLib sends `authorizationStateWaitOtherDeviceConfirmation` with a temporary `tg://login?token=...` URL.

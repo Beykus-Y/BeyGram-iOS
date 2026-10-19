@@ -21,6 +21,8 @@ final class TelegramService: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var codeDeliveryInfo: TelegramCodeDeliveryInfo?
 
+    let conversations = TelegramConversations()
+
     private let configuration: TelegramConfiguration?
     private var manager: TDLibClientManager?
     private var client: TDLibClient?
@@ -40,6 +42,9 @@ final class TelegramService: ObservableObject {
                 self?.handleUpdate(data)
             }
         })
+        if let client = self.client {
+            conversations.bind(client: client)
+        }
     }
 
     func submitPhone(_ phone: String) {
@@ -63,14 +68,13 @@ final class TelegramService: ObservableObject {
     }
 
     func requestQRLogin() {
-        // TDLib supports switching to QR from phone/code/password states
-        // when no other authorization query is pending.
+        // Supported by TDLib from phone-number and code-waiting states
+        // provided no other authorization request is pending.
         guard !isSubmitting else { return }
         switch phase {
         case .phoneNumber, .code, .password, .actionRequired:
             perform(TelegramRequestFactory.make(RequestQrCodeAuthentication(otherUserIds: [])))
-        default:
-            return
+        default: return
         }
     }
 
@@ -94,6 +98,7 @@ final class TelegramService: ObservableObject {
     }
 
     private func handleUpdate(_ data: Data) {
+        conversations.handleUpdate(data)
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               object["@type"] as? String == "updateAuthorizationState",
               let state = object["authorization_state"] as? [String: Any],
@@ -122,6 +127,7 @@ final class TelegramService: ObservableObject {
         case "authorizationStateReady":
             codeDeliveryInfo = nil
             phase = .ready
+            conversations.start()
         case "authorizationStateWaitEmailAddress":
             phase = .actionRequired("Telegram требует адрес электронной почты. Этот шаг входа ещё не реализован.")
         case "authorizationStateWaitEmailCode":
@@ -129,13 +135,11 @@ final class TelegramService: ObservableObject {
         case "authorizationStateWaitOtherDeviceConfirmation":
             codeDeliveryInfo = nil
             guard let link = state["link"] as? String,
-                  link.hasPrefix("tg://login?token="),
-                  !link.isEmpty else {
+                  link.hasPrefix("tg://login?token="), !link.isEmpty else {
                 phase = .failed("TDLib не предоставила корректную ссылку для QR-входа.")
                 return
             }
-            // TDLib periodically updates this sensitive login token.
-            // Only render it locally; never log, persist or share the link.
+            // QR is a short-lived bearer token: do not log or persist it.
             phase = .qrCode(link)
         case "authorizationStateWaitRegistration":
             phase = .actionRequired("Аккаунт требует регистрацию и принятие условий Telegram. Этот шаг ещё не реализован.")
