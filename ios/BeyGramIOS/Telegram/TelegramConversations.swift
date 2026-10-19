@@ -495,7 +495,9 @@ final class TelegramConversations: ObservableObject {
         completion: @escaping ([String: Any]) -> Void
     ) {
         guard let client else {
-            errorMessage = "TDLib ещё не инициализирована."
+            let reason = "TDLib ещё не инициализирована."
+            errorMessage = reason
+            completion(["@type": "error", "message": reason])
             return
         }
         do {
@@ -505,6 +507,7 @@ final class TelegramConversations: ObservableObject {
             }
         } catch {
             errorMessage = error.localizedDescription
+            completion(["@type": "error", "message": error.localizedDescription])
         }
     }
 }
