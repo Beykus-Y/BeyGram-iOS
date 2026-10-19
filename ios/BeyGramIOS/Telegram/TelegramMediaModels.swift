@@ -181,7 +181,12 @@ struct TelegramMessageMedia: Equatable {
         guard let file = TelegramMediaFile.from(fileObject) else { return nil }
         let caption = TelegramJSON.string(TelegramJSON.object(content["caption"])["text"])
         let preview = TelegramMediaFile.from(previewObject)
-        let isSecret = TelegramJSON.flag(content["is_secret"]) ||
+        // can_be_saved=false indicates protected channel/group content.
+        // Do not accidentally expose it through QuickLook, system sharing
+        // or a regular screen-capturable media viewer.
+        let protectedByChat = (message["can_be_saved"] as? Bool) == false
+        let isSecret = protectedByChat ||
+            TelegramJSON.flag(content["is_secret"]) ||
             (message["self_destruct_type"] != nil && !(message["self_destruct_type"] is NSNull))
 
         return Self(
