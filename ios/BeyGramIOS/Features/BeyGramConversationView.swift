@@ -9,6 +9,9 @@ struct BeyGramConversationView: View {
     @Environment(\.colorScheme) private var scheme
     @AppStorage("beygram.appearance.preset") private var appearancePreset = "warm"
     @State private var draft = ""
+    @State private var replyTarget: TelegramChatMessage?
+    @State private var editTarget: TelegramChatMessage?
+    @State private var actionTarget: TelegramChatMessage?
     @FocusState private var composerFocused: Bool
 
     private var colors: BeyGramChatColors { .selected(scheme, preset: appearancePreset) }
@@ -48,8 +51,19 @@ struct BeyGramConversationView: View {
                         }
 
                         ForEach(messages) { message in
-                            BeyGramMessageBubble(message: message, conversations: conversations, colors: colors)
-                                .id(message.id)
+                            BeyGramMessageBubble(
+                                message: message,
+                                conversations: conversations,
+                                colors: colors,
+                                onActions: { actionTarget = message }
+                            )
+                            .id(message.id)
+                            .onAppear {
+                                conversations.messageBecameVisible(chatID: chat.id, messageID: message.id)
+                            }
+                            .onDisappear {
+                                conversations.messageBecameHidden(chatID: chat.id, messageID: message.id)
+                            }
                         }
                     }
                     .padding(.horizontal, 14)
@@ -88,6 +102,23 @@ struct BeyGramConversationView: View {
             }
         }
         .background(colors.screen.ignoresSafeArea())
+        .sheet(item: $actionTarget) { message in
+            BeyGramMessageActionsSheet(
+                message: message,
+                conversations: conversations,
+                onReply: {
+                    editTarget = nil
+                    replyTarget = message
+                    composerFocused = true
+                },
+                onEdit: {
+                    replyTarget = nil
+                    editTarget = message
+                    draft = message.text
+                    composerFocused = true
+                }
+            )
+        }
         .navigationTitle(chat.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
@@ -97,7 +128,39 @@ struct BeyGramConversationView: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
+        VStack(spacing: 0) {
+            if let target = editTarget ?? replyTarget {
+                HStack(spacing: 10) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(colors.accent)
+                        .frame(width: 3)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(editTarget != nil ? "Редактирование" : "Ответ")
+                            .font(.caption.bold())
+                            .foregroundStyle(colors.accent)
+                        Text(target.text)
+                            .font(.caption)
+                            .foregroundStyle(colors.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Button {
+                        editTarget = nil
+                        replyTarget = nil
+                        draft = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(colors.secondary)
+                    }
+                    .accessibilityLabel("Отменить действие")
+                }
+                .frame(height: 36)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+            }
+
+            HStack(alignment: .bottom, spacing: 10) {
             TextField("Сообщение", text: $draft, axis: .vertical)
                 .focused($composerFocused)
                 .lineLimit(1...5)
@@ -108,8 +171,14 @@ struct BeyGramConversationView: View {
                 .submitLabel(.return)
 
             Button {
-                if conversations.sendText(draft, to: chat.id) {
+                if let editTarget {
+                    if conversations.editText(draft, in: editTarget) {
+                        draft = ""
+                        self.editTarget = nil
+                    }
+                } else if conversations.sendText(draft, to: chat.id, replyTo: replyTarget?.id) {
                     draft = ""
+                    replyTarget = nil
                 }
             } label: {
                 Image(systemName: "arrow.up")
@@ -122,8 +191,9 @@ struct BeyGramConversationView: View {
             .opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.4 : 1)
             .accessibilityLabel("Отправить сообщение")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+        }
         .background(colors.surface)
     }
 }
@@ -132,6 +202,7 @@ private struct BeyGramMessageBubble: View {
     let message: TelegramChatMessage
     @ObservedObject var conversations: TelegramConversations
     let colors: BeyGramChatColors
+    let onActions: () -> Void
 
     var body: some View {
         HStack {
@@ -176,12 +247,10 @@ private struct BeyGramMessageBubble: View {
             .background(message.outgoing ? colors.outgoingBubble : colors.surface,
                         in: BeyGramTailBubble(outgoing: message.outgoing))
             .contextMenu {
-                if message.isText {
-                    Button {
-                        UIPasteboard.general.string = message.text
-                    } label: {
-                        Label("Копировать", systemImage: "doc.on.doc")
-                    }
+                Button {
+                    onActions()
+                } label: {
+                    Label("Действия с сообщением", systemImage: "ellipsis.circle")
                 }
             }
 
