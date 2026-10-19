@@ -65,6 +65,8 @@ struct TelegramChatPreview: Identifiable, Equatable {
     let lastMessageSendingState: String
     let lastReadOutboxMessageID: Int64
     let unreadCount: Int
+    let isMarkedAsUnread: Bool
+    let canDeleteForSelf: Bool
     let isPinned: Bool
     let isMuted: Bool
     let isGroup: Bool
@@ -73,6 +75,8 @@ struct TelegramChatPreview: Identifiable, Equatable {
     let avatarFile: TelegramMediaFile?
 
     /// Parity with Android ChatsScreen.previewLine and SendStatusIcon.
+    var hasUnread: Bool { unreadCount > 0 || isMarkedAsUnread }
+
     var previewLine: String {
         if lastMessage.isEmpty {
             return isGroup ? "Пока нет сообщений в группе" : "Начните переписку"
@@ -118,6 +122,7 @@ struct TelegramChatPreview: Identifiable, Equatable {
                 pinned = TelegramJSON.flag(position["is_pinned"])
             case "chatListArchive":
                 archive = order
+                pinned = TelegramJSON.flag(position["is_pinned"])
             default: break
             }
         }
@@ -136,6 +141,8 @@ struct TelegramChatPreview: Identifiable, Equatable {
             ),
             lastReadOutboxMessageID: TelegramJSON.int64(raw["last_read_outbox_message_id"]),
             unreadCount: max(0, TelegramJSON.integer(raw["unread_count"])),
+            isMarkedAsUnread: TelegramJSON.flag(raw["is_marked_as_unread"]),
+            canDeleteForSelf: TelegramJSON.flag(raw["can_be_deleted_only_for_self"]),
             isPinned: pinned,
             isMuted: muted,
             isGroup: typeName == "chatTypeBasicGroup" || typeName == "chatTypeSupergroup",
