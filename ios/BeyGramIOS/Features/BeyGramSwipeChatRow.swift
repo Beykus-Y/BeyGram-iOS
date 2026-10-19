@@ -9,7 +9,25 @@ struct BeyGramSwipeChatRow<Content: View>: View {
     @Binding var openChatID: Int64?
     let onRead: () -> Void
     let onArchive: () -> Void
-    @ViewBuilder let content: Content
+    let content: Content
+
+    init(
+        chat: TelegramChatPreview,
+        colors: BeyGramChatColors,
+        canSwipe: Bool,
+        openChatID: Binding<Int64?>,
+        onRead: @escaping () -> Void,
+        onArchive: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.chat = chat
+        self.colors = colors
+        self.canSwipe = canSwipe
+        self._openChatID = openChatID
+        self.onRead = onRead
+        self.onArchive = onArchive
+        self.content = content()
+    }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var draggingOffset: CGFloat?
