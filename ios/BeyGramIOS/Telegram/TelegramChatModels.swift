@@ -112,6 +112,33 @@ struct TelegramChatPreview: Identifiable, Equatable {
     }
 }
 
+struct TelegramMessageReaction: Identifiable, Equatable {
+    let emoji: String
+    let count: Int
+    let isChosen: Bool
+    var id: String { emoji }
+
+    static func from(_ raw: [String: Any]) -> Self? {
+        let type = TelegramJSON.object(raw["type"])
+        guard TelegramJSON.string(type["@type"]) == "reactionTypeEmoji" else {
+            return nil
+        }
+        let emoji = TelegramJSON.string(type["emoji"])
+        guard !emoji.isEmpty else { return nil }
+        return Self(
+            emoji: emoji,
+            count: TelegramJSON.integer(raw["total_count"]),
+            isChosen: TelegramJSON.flag(raw["is_chosen"])
+        )
+    }
+
+    static func fromInteraction(_ interaction: [String: Any]) -> [Self] {
+        let summary = TelegramJSON.object(interaction["reactions"])
+        let items = summary["reactions"] as? [[String: Any]] ?? []
+        return items.compactMap(from)
+    }
+}
+
 struct TelegramChatMessage: Identifiable, Equatable {
     let id: Int64
     let chatId: Int64
@@ -121,8 +148,17 @@ struct TelegramChatMessage: Identifiable, Equatable {
     let status: String
     let isText: Bool
     let media: TelegramMessageMedia?
+    let reactions: [TelegramMessageReaction]
 
     var time: String { TelegramJSON.shortTime(timestamp) }
+
+    func withReactions(_ updated: [TelegramMessageReaction]) -> Self {
+        Self(
+            id: id, chatId: chatId, text: text, outgoing: outgoing,
+            timestamp: timestamp, status: status, isText: isText,
+            media: media, reactions: updated
+        )
+    }
 
     static func from(_ raw: [String: Any]) -> TelegramChatMessage? {
         let id = TelegramJSON.int64(raw["id"])
@@ -138,7 +174,10 @@ struct TelegramChatMessage: Identifiable, Equatable {
             timestamp: TelegramJSON.integer(raw["date"]),
             status: sendState,
             isText: TelegramJSON.string(content["@type"]) == "messageText",
-            media: TelegramMessageMedia.from(raw)
+            media: TelegramMessageMedia.from(raw),
+            reactions: TelegramMessageReaction.fromInteraction(
+                TelegramJSON.object(raw["interaction_info"])
+            )
         )
     }
 }
