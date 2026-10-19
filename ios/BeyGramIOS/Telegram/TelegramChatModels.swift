@@ -60,6 +60,10 @@ struct TelegramChatPreview: Identifiable, Equatable {
     let title: String
     let lastMessage: String
     let lastMessageTime: String
+    let lastMessageID: Int64
+    let lastMessageOutgoing: Bool
+    let lastMessageSendingState: String
+    let lastReadOutboxMessageID: Int64
     let unreadCount: Int
     let isPinned: Bool
     let isMuted: Bool
@@ -67,6 +71,28 @@ struct TelegramChatPreview: Identifiable, Equatable {
     let mainOrder: Int64
     let archiveOrder: Int64
     let avatarFile: TelegramMediaFile?
+
+    /// Parity with Android ChatsScreen.previewLine and SendStatusIcon.
+    var previewLine: String {
+        if lastMessage.isEmpty {
+            return isGroup ? "Пока нет сообщений в группе" : "Начните переписку"
+        }
+        return lastMessageOutgoing ? "Вы: " + lastMessage : lastMessage
+    }
+
+    var lastMessageRead: Bool {
+        lastMessageOutgoing && lastMessageID > 0 &&
+        lastReadOutboxMessageID >= lastMessageID
+    }
+
+    var lastMessageState: String {
+        guard lastMessageOutgoing else { return "incoming" }
+        switch lastMessageSendingState {
+        case "messageSendingStatePending": return "sending"
+        case "messageSendingStateFailed": return "failed"
+        default: return lastMessageRead ? "read" : "sent"
+        }
+    }
 
     var initials: String {
         let pieces = title.split(separator: " ").prefix(2)
@@ -103,6 +129,12 @@ struct TelegramChatPreview: Identifiable, Equatable {
             title: TelegramJSON.string(raw["title"]),
             lastMessage: message.isEmpty ? "" : TelegramJSON.messageText(message),
             lastMessageTime: TelegramJSON.shortTime(TelegramJSON.integer(message["date"])),
+            lastMessageID: TelegramJSON.int64(message["id"]),
+            lastMessageOutgoing: TelegramJSON.flag(message["is_outgoing"]),
+            lastMessageSendingState: TelegramJSON.string(
+                TelegramJSON.object(message["sending_state"])["@type"]
+            ),
+            lastReadOutboxMessageID: TelegramJSON.int64(raw["last_read_outbox_message_id"]),
             unreadCount: max(0, TelegramJSON.integer(raw["unread_count"])),
             isPinned: pinned,
             isMuted: muted,
