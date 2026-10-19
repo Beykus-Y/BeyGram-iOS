@@ -219,6 +219,11 @@ final class TelegramConversations: ObservableObject {
                 if !messages[index].status.isEmpty {
                     raw["sending_state"] = ["@type": messages[index].status]
                 }
+                if messages[index].media?.isSecret == true {
+                    // updateMessageContent omits the surrounding message's self-destruct
+                    // metadata. Never accidentally turn an ephemeral attachment public.
+                    raw["self_destruct_type"] = ["@type": "messageSelfDestructTypeTimer"]
+                }
                 if let replacement = TelegramChatMessage.from(raw) {
                     registerMedia(replacement.media)
                     messages[index] = replacement
