@@ -22,12 +22,21 @@ struct BeyGramChatsView: View {
     @ObservedObject var conversations: TelegramConversations
     @Environment(\.colorScheme) private var scheme
     @AppStorage("beygram.appearance.preset") private var appearancePreset = "warm"
+    @AppStorage("beygram.chatList.density") private var listDensity = "comfortable"
     @State private var search = ""
     @State private var filter = BeyGramChatFilter.all
     @State private var showingArchive = false
     @State private var showingGlobalSearch = false
 
     private var colors: BeyGramChatColors { .selected(scheme, preset: appearancePreset) }
+
+    private var rowPadding: CGFloat {
+        switch listDensity {
+        case "compact": return 6
+        case "spacious": return 14
+        default: return 10
+        }
+    }
 
     private var remoteOnly: [TelegramChatPreview] {
         guard !search.isEmpty else { return [] }
@@ -67,32 +76,14 @@ struct BeyGramChatsView: View {
                         } else {
                             if !conversations.archivedChats.isEmpty,
                                filter == .all, search.isEmpty {
-                                Button {
-                                    showingArchive = true
-                                } label: {
-                                    HStack(spacing: 14) {
-                                        Image(systemName: "archivebox.fill")
-                                            .font(.title3)
-                                            .foregroundStyle(colors.accent)
-                                            .frame(width: 48, height: 48)
-                                            .background(colors.accentSoft, in: Circle())
-                                        Text("Архив")
-                                            .font(.headline)
-                                            .foregroundStyle(colors.primary)
-                                        Spacer()
-                                        Text("\(conversations.archivedChats.count)")
-                                            .foregroundStyle(colors.secondary)
-                                        Image(systemName: "chevron.right")
-                                            .foregroundStyle(colors.secondary)
-                                    }
-                                    .padding(.horizontal, 20)
-                                    .padding(.vertical, 10)
-                                }
-                                .buttonStyle(.plain)
+                                archiveCard
                             }
 
-                            let pinned = filtered.filter(\.isPinned)
-                            let regular = filtered.filter { !$0.isPinned }
+                            // Android only separates pinned chats in the
+                            // unfiltered main list.
+                            let showPinned = filter == .all && search.isEmpty
+                            let pinned = showPinned ? filtered.filter(\.isPinned) : []
+                            let regular = showPinned ? filtered.filter { !$0.isPinned } : filtered
 
                             if !pinned.isEmpty {
                                 sectionHeader("ЗАКРЕПЛЁННЫЕ")
@@ -101,6 +92,26 @@ struct BeyGramChatsView: View {
                             if !regular.isEmpty {
                                 sectionHeader("ВСЕ ЧАТЫ")
                                 chatRows(regular)
+                            }
+
+                            if !search.isEmpty {
+                                Button {
+                                    showingGlobalSearch = true
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "text.magnifyingglass")
+                                        Text("Искать «\(search)» во всех сообщениях")
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                    }
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(colors.accentInk)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 14)
+                                }
+                                .buttonStyle(.plain)
                             }
 
                             if !remoteOnly.isEmpty {
@@ -163,6 +174,7 @@ struct BeyGramChatsView: View {
                 HStack(spacing: 12) {
                     Text(showingArchive ? "Архив" : "Чаты")
                         .font(.system(size: 30, weight: .bold))
+                        .tracking(-0.3)
                         .foregroundStyle(colors.primary)
 
                     Spacer()
@@ -198,22 +210,29 @@ struct BeyGramChatsView: View {
                 .background(colors.surface2, in: RoundedRectangle(cornerRadius: 14))
 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 7) {
+                    HStack(spacing: 8) {
                         ForEach(BeyGramChatFilter.allCases) { item in
                             Button {
                                 filter = item
                             } label: {
                                 HStack(spacing: 6) {
                                     Text(item.rawValue)
+                                        .fontWeight(filter == item ? .semibold : .medium)
                                     if item == .unread {
                                         let count = conversations.mainChats.reduce(0) { $0 + $1.unreadCount }
-                                        if count > 0 { Text("\(count)") }
+                                        if count > 0 {
+                                            Text("\(count)")
+                                                .fontWeight(.bold)
+                                                .foregroundStyle(
+                                                    filter == item ? colors.onAccent : colors.accent
+                                                )
+                                        }
                                     }
                                 }
-                                .font(.system(size: 13, weight: .medium))
-                                .padding(.horizontal, 13)
-                                .padding(.vertical, 9)
-                                .foregroundStyle(filter == item ? colors.onAccent : colors.secondary)
+                                .font(.system(size: 14))
+                                .padding(.horizontal, 14)
+                                .frame(height: 34)
+                                .foregroundStyle(filter == item ? colors.onAccent : colors.primary)
                                 .background(filter == item ? colors.accent : colors.surface2,
                                             in: Capsule())
                             }
@@ -225,6 +244,56 @@ struct BeyGramChatsView: View {
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
+    }
+
+    private var archiveCard: some View {
+        let count = conversations.archivedChats.count
+        let unread = conversations.archivedChats.reduce(0) { $0 + $1.unreadCount }
+        return Button {
+            showingArchive = true
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "archivebox.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(colors.accentInk)
+                    .frame(width: 44, height: 44)
+                    .background(colors.surface2, in: Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Архив")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(colors.primary)
+                    Text(unread > 0
+                        ? "\(count) \(plural(count, one: "чат", few: "чата", many: "чатов")) · \(unread) непрочитанных"
+                        : "\(count) \(plural(count, one: "чат", few: "чата", many: "чатов"))")
+                        .font(.system(size: 13))
+                        .foregroundStyle(colors.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 18))
+                    .foregroundStyle(colors.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(colors.surface, in: RoundedRectangle(cornerRadius: 20))
+            .padding(.horizontal, 20)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func plural(
+        _ count: Int, one: String, few: String, many: String
+    ) -> String {
+        let mod100 = count % 100
+        let mod10 = count % 10
+        if (11...14).contains(mod100) { return many }
+        if mod10 == 1 { return one }
+        if (2...4).contains(mod10) { return few }
+        return many
     }
 
     private func sectionHeader(_ label: String) -> some View {
@@ -242,7 +311,8 @@ struct BeyGramChatsView: View {
         ForEach(rows) { chat in
             NavigationLink(value: chat.id) {
                 BeyGramChatRow(
-                    chat: chat, conversations: conversations, colors: colors
+                    chat: chat, conversations: conversations, colors: colors,
+                    verticalPadding: rowPadding
                 )
             }
             .buttonStyle(.plain)
@@ -275,58 +345,77 @@ private struct BeyGramChatRow: View {
     let chat: TelegramChatPreview
     @ObservedObject var conversations: TelegramConversations
     let colors: BeyGramChatColors
+    let verticalPadding: CGFloat
 
     var body: some View {
-        HStack(spacing: 13) {
+        HStack(spacing: 14) {
             BeyGramTelegramAvatarView(
                 conversations: conversations, file: chat.avatarFile,
-                initials: chat.initials, entityID: chat.id, size: 52
+                initials: chat.initials, entityID: chat.id, size: 54
             )
 
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 5) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
                     Text(chat.title)
-                        .font(.system(size: 16, weight: chat.unreadCount > 0 ? .bold : .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(colors.primary)
                         .lineLimit(1)
 
-                    if chat.isMuted {
-                        Image(systemName: "bell.slash.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(colors.secondary)
-                    }
                     Spacer(minLength: 6)
+
                     Text(chat.lastMessageTime)
-                        .font(.system(size: 11))
-                        .foregroundStyle(colors.secondary)
+                        .font(.system(size: 12,
+                                      weight: chat.unreadCount > 0 ? .semibold : .regular))
+                        .foregroundStyle(chat.unreadCount > 0 ? colors.accent : colors.secondary)
                 }
 
-                HStack(spacing: 7) {
-                    Text(chat.lastMessage.isEmpty ? "Нет сообщений" : chat.lastMessage)
-                        .font(.system(size: 13))
+                HStack(spacing: 6) {
+                    if chat.isMuted {
+                        Image(systemName: "bell.slash")
+                            .font(.system(size: 15))
+                            .foregroundStyle(colors.secondary)
+                    }
+
+                    Text(chat.previewLine)
+                        .font(.system(size: 14))
                         .foregroundStyle(colors.secondary)
                         .lineLimit(1)
 
                     Spacer(minLength: 4)
-                    if chat.isPinned {
-                        Image(systemName: "pin.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(colors.secondary)
+
+                    if chat.lastMessageOutgoing {
+                        switch chat.lastMessageState {
+                        case "sending":
+                            Image(systemName: "clock")
+                                .foregroundStyle(colors.secondary)
+                        case "failed":
+                            Image(systemName: "exclamationmark.circle")
+                                .foregroundStyle(.red)
+                        case "read":
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(colors.accent)
+                        default:
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(colors.secondary)
+                        }
                     }
 
                     if chat.unreadCount > 0 {
                         Text(chat.unreadCount > 99 ? "99+" : String(chat.unreadCount))
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(chat.isMuted ? colors.secondary : colors.onAccent)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(chat.isMuted ? colors.surface : colors.onAccent)
                             .padding(.horizontal, 7)
                             .frame(minWidth: 22, minHeight: 22)
-                            .background(chat.isMuted ? colors.surface2 : colors.accent, in: Capsule())
+                            .background(
+                                chat.isMuted ? colors.secondary : colors.accent,
+                                in: Capsule()
+                            )
                     }
                 }
             }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 10)
+        .padding(.vertical, verticalPadding)
         .contentShape(Rectangle())
     }
 }
