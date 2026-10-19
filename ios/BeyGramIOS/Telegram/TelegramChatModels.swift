@@ -66,6 +66,7 @@ struct TelegramChatPreview: Identifiable, Equatable {
     let isGroup: Bool
     let mainOrder: Int64
     let archiveOrder: Int64
+    let avatarFile: TelegramMediaFile?
 
     var initials: String {
         let pieces = title.split(separator: " ").prefix(2)
@@ -107,7 +108,10 @@ struct TelegramChatPreview: Identifiable, Equatable {
             isMuted: muted,
             isGroup: typeName == "chatTypeBasicGroup" || typeName == "chatTypeSupergroup",
             mainOrder: main,
-            archiveOrder: archive
+            archiveOrder: archive,
+            avatarFile: TelegramMediaFile.from(
+                TelegramJSON.object(TelegramJSON.object(raw["photo"])["small"])
+            )
         )
     }
 }
