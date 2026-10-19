@@ -283,6 +283,93 @@ final class TelegramConversations: ObservableObject {
             .sorted { ($0.archiveOrder, $0.id) > ($1.archiveOrder, $1.id) }
     }
 
+    /// TDLib remains the source of truth: no optimistic changes to rawChats.
+    /// Completion carries an error message only when Telegram rejected the action.
+    private func performChatAction(
+        _ query: TdQuery,
+        completion: @escaping (String?) -> Void
+    ) {
+        request(query) { result in
+            let kind = TelegramJSON.string(result["@type"])
+            if kind == "error" {
+                let detail = TelegramJSON.string(result["message"])
+                completion(detail.isEmpty ? "Telegram отклонил действие." : detail)
+            } else {
+                completion(nil)
+            }
+        }
+    }
+
+    func moveChat(
+        _ chat: TelegramChatPreview,
+        toArchive: Bool,
+        completion: @escaping (String?) -> Void
+    ) {
+        guard chat.mainOrder > 0 || chat.archiveOrder > 0 else {
+            completion("Этот чат ещё не находится в основном списке или архиве.")
+            return
+        }
+        let target: ChatList = toArchive ? .chatListArchive : .chatListMain
+        performChatAction(TelegramRequestFactory.make(AddChatToList(
+            chatId: chat.id, chatList: target
+        )), completion: completion)
+    }
+
+    func setChatPinned(
+        _ chat: TelegramChatPreview,
+        pinned: Bool,
+        completion: @escaping (String?) -> Void
+    ) {
+        guard chat.mainOrder > 0 || chat.archiveOrder > 0 else {
+            completion("Нельзя закрепить чат вне основного списка или архива.")
+            return
+        }
+        let list: ChatList = chat.archiveOrder > 0 ? .chatListArchive : .chatListMain
+        performChatAction(TelegramRequestFactory.make(ToggleChatIsPinned(
+            chatId: chat.id, chatList: list, isPinned: pinned
+        )), completion: completion)
+    }
+
+    func setChatUnread(
+        _ chat: TelegramChatPreview,
+        unread: Bool,
+        completion: @escaping (String?) -> Void
+    ) {
+        let toggle = TelegramRequestFactory.make(ToggleChatIsMarkedAsUnread(
+            chatId: chat.id, isMarkedAsUnread: unread
+        ))
+        if unread || chat.lastMessageID <= 0 {
+            performChatAction(toggle, completion: completion)
+            return
+        }
+        // forceRead is supported for closed chats; only a real successful
+        // viewMessages call may clear the server-side unread counter.
+        performChatAction(TelegramRequestFactory.make(ViewMessages(
+            chatId: chat.id, forceRead: true,
+            messageIds: [chat.lastMessageID], source: .messageSourceChatList
+        ))) { [weak self] error in
+            if let error {
+                completion(error)
+            } else {
+                self?.performChatAction(toggle, completion: completion)
+            }
+        }
+    }
+
+    func deleteChatForSelf(
+        _ chat: TelegramChatPreview,
+        completion: @escaping (String?) -> Void
+    ) {
+        guard chat.canDeleteForSelf else {
+            completion("Telegram не разрешает удалить этот чат.")
+            return
+        }
+        // No revoke: never remove history for other participants.
+        performChatAction(TelegramRequestFactory.make(DeleteChatHistory(
+            chatId: chat.id, removeFromChatList: true, revoke: false
+        )), completion: completion)
+    }
+
     func handleUpdate(_ data: Data) {
         let update = TelegramJSON.decode(data)
         let type = TelegramJSON.string(update["@type"])
@@ -338,6 +425,8 @@ final class TelegramConversations: ObservableObject {
             }
         case "updateChatReadInbox":
             modifyChat(chatID) { $0["unread_count"] = update["unread_count"] }
+        case "updateChatIsMarkedAsUnread":
+            modifyChat(chatID) { $0["is_marked_as_unread"] = update["is_marked_as_unread"] }
         case "updateChatReadOutbox":
             // Used for the same single/double checkmark distinction as Android.
             modifyChat(chatID) {
