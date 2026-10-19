@@ -8,6 +8,11 @@ final class TelegramConversations: ObservableObject {
     @Published private(set) var mainChats: [TelegramChatPreview] = []
     @Published private(set) var matchingChats: [TelegramChatPreview] = []
     @Published private(set) var isSearchingChats = false
+    @Published private(set) var globalMessageResults: [TelegramGlobalSearchHit] = []
+    @Published private(set) var globalMessageSearchBusy = false
+    @Published private(set) var globalMessageSearchError: String?
+    @Published private(set) var globalMessageTotalCount = 0
+    @Published private(set) var globalMessageHasMore = false
     @Published private(set) var contacts: [TelegramContact] = []
     @Published private(set) var contactsLoading = false
     @Published private(set) var archivedChats: [TelegramChatPreview] = []
@@ -22,6 +27,10 @@ final class TelegramConversations: ObservableObject {
     private weak var client: TDLibClient?
     private var rawChats: [Int64: [String: Any]] = [:]
     private var searchRevision = 0
+    private var messageSearchRevision = 0
+    private var globalMessageQuery = ""
+    private var globalMessageNextOffset = ""
+    private var requestedSearchChatIDs: Set<Int64> = []
     private var searchedIDs: [Int64] = []
     private var activeChats: Set<Int64> = []
     private var visibleMessages: [Int64: Set<Int64>] = [:]
@@ -177,6 +186,69 @@ final class TelegramConversations: ObservableObject {
         }
     }
 
+    /// Server-backed global message search. TDLib deliberately excludes
+    /// secret chats and returns at most a bounded page of results.
+    func beginGlobalMessageSearch(_ text: String) {
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        clearGlobalMessageSearch()
+        guard query.count >= 2 else { return }
+        globalMessageQuery = query
+        loadMoreGlobalMessageResults()
+    }
+
+    func clearGlobalMessageSearch() {
+        messageSearchRevision += 1
+        globalMessageQuery = ""
+        globalMessageNextOffset = ""
+        globalMessageResults = []
+        globalMessageTotalCount = 0
+        globalMessageHasMore = false
+        globalMessageSearchBusy = false
+        globalMessageSearchError = nil
+        requestedSearchChatIDs.removeAll()
+    }
+
+    func loadMoreGlobalMessageResults() {
+        guard !globalMessageQuery.isEmpty, !globalMessageSearchBusy else { return }
+        if !globalMessageResults.isEmpty && !globalMessageHasMore { return }
+        globalMessageSearchBusy = true
+        globalMessageSearchError = nil
+        let revision = messageSearchRevision
+        let requestedOffset = globalMessageNextOffset
+        request(TelegramRequestFactory.make(SearchMessages(
+            chatList: nil, chatTypeFilter: nil, filter: nil, limit: 40,
+            maxDate: 0, minDate: 0, offset: requestedOffset,
+            query: globalMessageQuery
+        ))) { [weak self] response in
+            guard let self, revision == self.messageSearchRevision else { return }
+            self.globalMessageSearchBusy = false
+            guard TelegramJSON.string(response["@type"]) == "foundMessages" else {
+                self.globalMessageSearchError =
+                    TelegramJSON.string(response["message"]).isEmpty
+                    ? "Telegram не вернул результаты поиска."
+                    : TelegramJSON.string(response["message"])
+                return
+            }
+            let raw = response["messages"] as? [[String: Any]] ?? []
+            let hits = raw.compactMap(TelegramGlobalSearchHit.from)
+            var existing = Set(self.globalMessageResults.map(\.id))
+            for hit in hits where existing.insert(hit.id).inserted {
+                self.globalMessageResults.append(hit)
+                if self.chat(for: hit.chatID) == nil,
+                   self.requestedSearchChatIDs.insert(hit.chatID).inserted {
+                    self.fetchChat(hit.chatID)
+                }
+            }
+            self.globalMessageTotalCount =
+                max(0, TelegramJSON.integer(response["total_count"]))
+            let next = TelegramJSON.string(response["next_offset"])
+            // Guard against a server returning the same cursor forever.
+            self.globalMessageHasMore = !next.isEmpty &&
+                next != requestedOffset
+            self.globalMessageNextOffset = self.globalMessageHasMore ? next : ""
+        }
+    }
+
     private func fetchChat(_ id: Int64) {
         request(TelegramRequestFactory.make(GetChat(chatId: id))) { [weak self] result in
             guard TelegramJSON.string(result["@type"]) == "chat" else { return }
@@ -327,10 +399,37 @@ final class TelegramConversations: ObservableObject {
         }
     }
 
-    func openChat(_ id: Int64) {
+    func openChat(_ id: Int64, around messageID: Int64? = nil) {
         activeChats.insert(id)
         request(TelegramRequestFactory.make(OpenChat(chatId: id))) { _ in }
-        loadLatest(id)
+        if let messageID, messageID > 0 {
+            loadHistoryAround(id, messageID: messageID)
+        } else {
+            loadLatest(id)
+        }
+    }
+
+    private func loadHistoryAround(_ id: Int64, messageID: Int64) {
+        guard !loadingHistory.contains(id) else { return }
+        loadingHistory.insert(id)
+        request(TelegramRequestFactory.make(GetChatHistory(
+            chatId: id, fromMessageId: messageID, limit: 60,
+            offset: -28, onlyLocal: false
+        ))) { [weak self] response in
+            guard let self else { return }
+            self.loadingHistory.remove(id)
+            guard TelegramJSON.string(response["@type"]) == "messages" else {
+                self.errorMessage = TelegramJSON.string(response["message"])
+                return
+            }
+            let items = response["messages"] as? [[String: Any]] ?? []
+            let mapped = items.compactMap(TelegramChatMessage.from)
+            mapped.forEach { self.registerMedia($0.media) }
+            self.mergeMessages(mapped, for: id)
+            // Searching an older message does not mean the very end of the
+            // conversation or earlier history has been loaded.
+            self.exhaustedHistory.remove(id)
+        }
     }
 
     func closeChat(_ id: Int64) {
