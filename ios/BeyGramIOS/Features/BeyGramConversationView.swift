@@ -7,10 +7,12 @@ import UniformTypeIdentifiers
 struct BeyGramConversationView: View {
     @ObservedObject var conversations: TelegramConversations
     let chat: TelegramChatPreview
+    var initialMessageID: Int64? = nil
 
     @Environment(\.colorScheme) private var scheme
     @AppStorage("beygram.appearance.preset") private var appearancePreset = "warm"
     @State private var draft = ""
+    @State private var didReachSearchResult = false
     @State private var replyTarget: TelegramChatMessage?
     @State private var editTarget: TelegramChatMessage?
     @State private var actionTarget: TelegramChatMessage?
@@ -78,14 +80,21 @@ struct BeyGramConversationView: View {
                     .padding(.vertical, 16)
                 }
                 .onChange(of: messages.count) { _ in
-                    if let id = messages.last?.id {
+                    if let target = initialMessageID, !didReachSearchResult {
+                        if messages.contains(where: { $0.id == target }) {
+                            withAnimation(.easeOut(duration: 0.22)) {
+                                reader.scrollTo(target, anchor: .center)
+                            }
+                            didReachSearchResult = true
+                        }
+                    } else if initialMessageID == nil, let id = messages.last?.id {
                         withAnimation(.easeOut(duration: 0.22)) {
                             reader.scrollTo(id, anchor: .bottom)
                         }
                     }
                 }
                 .onAppear {
-                    conversations.openChat(chat.id)
+                    conversations.openChat(chat.id, around: initialMessageID)
                 }
                 .onDisappear {
                     conversations.closeChat(chat.id)
