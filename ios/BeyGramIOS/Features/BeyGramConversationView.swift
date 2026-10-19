@@ -402,6 +402,42 @@ private struct BeyGramMessageBubble: View {
                         .foregroundStyle(colors.primary)
                 }
 
+                if !message.reactions.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 5) {
+                            ForEach(message.reactions) { reaction in
+                                Button {
+                                    if reaction.isChosen {
+                                        conversations.setEmojiReaction(
+                                            reaction.emoji, for: message, removing: true
+                                        )
+                                    } else {
+                                        onActions()
+                                    }
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Text(reaction.emoji)
+                                        Text("\(reaction.count)")
+                                            .font(.caption2.monospacedDigit())
+                                    }
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(colors.primary)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 5)
+                                    .background(
+                                        reaction.isChosen ? colors.accentSoft : colors.surface2,
+                                        in: Capsule()
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(
+                                    reaction.isChosen ? "Убрать реакцию" : "Открыть реакции"
+                                )
+                            }
+                        }
+                    }
+                }
+
                 HStack(spacing: 4) {
                     Spacer(minLength: 0)
                     Text(message.time)

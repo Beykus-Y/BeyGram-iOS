@@ -226,9 +226,21 @@ final class TelegramConversations: ObservableObject {
                 }
                 if let replacement = TelegramChatMessage.from(raw) {
                     registerMedia(replacement.media)
-                    messages[index] = replacement
+                    // TDLib's updateMessageContent omits interaction_info.
+                    // Do not erase reactions when media/text is edited.
+                    messages[index] = replacement.withReactions(messages[index].reactions)
                     histories[chatID] = messages
                 }
+            }
+        case "updateMessageInteractionInfo":
+            let messageID = TelegramJSON.int64(update["message_id"])
+            if var messages = histories[chatID],
+               let index = messages.firstIndex(where: { $0.id == messageID }) {
+                let interaction = TelegramJSON.object(update["interaction_info"])
+                messages[index] = messages[index].withReactions(
+                    TelegramMessageReaction.fromInteraction(interaction)
+                )
+                histories[chatID] = messages
             }
         case "updateMessageSendSucceeded":
             let oldID = TelegramJSON.int64(update["old_message_id"])
@@ -336,6 +348,74 @@ final class TelegramConversations: ObservableObject {
             self.mergeMessages(models, for: id)
             if models.isEmpty || self.histories[id]?.first?.id == priorFirst {
                 self.exhaustedHistory.insert(id)
+            }
+        }
+    }
+
+    func availableEmojiReactions(
+        for message: TelegramChatMessage,
+        completion: @escaping ([String]) -> Void
+    ) {
+        request(TelegramRequestFactory.make(GetMessageAvailableReactions(
+            chatId: message.chatId, messageId: message.id, rowSize: 6
+        ))) { [weak self] response in
+            guard TelegramJSON.string(response["@type"]) == "availableReactions" else {
+                if TelegramJSON.string(response["@type"]) == "error" {
+                    self?.errorMessage = TelegramJSON.string(response["message"])
+                }
+                completion([])
+                return
+            }
+            if response["unavailability_reason"] != nil &&
+               !(response["unavailability_reason"] is NSNull) {
+                completion([])
+                return
+            }
+            let keys = ["top_reactions", "recent_reactions", "popular_reactions"]
+            var seen = Set<String>()
+            var emoji: [String] = []
+            for key in keys {
+                for item in response[key] as? [[String: Any]] ?? [] {
+                    // Don't offer Premium-only or custom/paid reactions until
+                    // the app implements eligibility and custom emoji rendering.
+                    if TelegramJSON.flag(item["needs_premium"]) { continue }
+                    let type = TelegramJSON.object(item["type"])
+                    guard TelegramJSON.string(type["@type"]) == "reactionTypeEmoji" else {
+                        continue
+                    }
+                    let name = TelegramJSON.string(type["emoji"])
+                    if !name.isEmpty && seen.insert(name).inserted {
+                        emoji.append(name)
+                    }
+                }
+            }
+            completion(Array(emoji.prefix(24)))
+        }
+    }
+
+    func setEmojiReaction(
+        _ emoji: String,
+        for message: TelegramChatMessage,
+        removing: Bool
+    ) {
+        guard !emoji.isEmpty else { return }
+        let type = ReactionType.reactionTypeEmoji(ReactionTypeEmoji(emoji: emoji))
+        if removing {
+            request(TelegramRequestFactory.make(RemoveMessageReaction(
+                chatId: message.chatId, messageId: message.id, reactionType: type
+            ))) { [weak self] result in
+                if TelegramJSON.string(result["@type"]) == "error" {
+                    self?.errorMessage = TelegramJSON.string(result["message"])
+                }
+            }
+        } else {
+            request(TelegramRequestFactory.make(AddMessageReaction(
+                chatId: message.chatId, isBig: false, messageId: message.id,
+                reactionType: type, updateRecentReactions: true
+            ))) { [weak self] result in
+                if TelegramJSON.string(result["@type"]) == "error" {
+                    self?.errorMessage = TelegramJSON.string(result["message"])
+                }
             }
         }
     }

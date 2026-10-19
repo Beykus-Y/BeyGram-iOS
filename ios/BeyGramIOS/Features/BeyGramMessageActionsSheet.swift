@@ -12,6 +12,8 @@ struct BeyGramMessageActionsSheet: View {
     @State private var rights: TelegramMessagePermissions?
     @State private var loading = true
     @State private var showingDeleteConfirm = false
+    @State private var allowedEmojis: [String] = []
+    @State private var loadingReactions = true
 
     var body: some View {
         NavigationStack {
@@ -26,6 +28,38 @@ struct BeyGramMessageActionsSheet: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let rights {
                     List {
+                        if !allowedEmojis.isEmpty {
+                            Section("Реакции") {
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 12) {
+                                        ForEach(allowedEmojis, id: \.self) { emoji in
+                                            let chosen = message.reactions.contains {
+                                                $0.emoji == emoji && $0.isChosen
+                                            }
+                                            Button {
+                                                conversations.setEmojiReaction(
+                                                    emoji,
+                                                    for: message,
+                                                    removing: chosen
+                                                )
+                                                dismiss()
+                                            } label: {
+                                                Text(emoji)
+                                                    .font(.system(size: 28))
+                                                    .padding(8)
+                                                    .background(
+                                                        chosen ? Color.accentColor.opacity(0.2)
+                                                               : Color.secondary.opacity(0.10),
+                                                        in: RoundedRectangle(cornerRadius: 12)
+                                                    )
+                                            }
+                                            .accessibilityLabel(chosen ? "Убрать реакцию" : "Поставить реакцию")
+                                        }
+                                    }
+                                    .padding(.vertical, 5)
+                                }
+                            }
+                        }
                         Section {
                             if rights.canCopy && message.isText {
                                 Button {
@@ -93,6 +127,10 @@ struct BeyGramMessageActionsSheet: View {
             conversations.messagePermissions(message) { result in
                 rights = result
                 loading = false
+            }
+            conversations.availableEmojiReactions(for: message) { emoji in
+                allowedEmojis = emoji
+                loadingReactions = false
             }
         }
         .confirmationDialog(
