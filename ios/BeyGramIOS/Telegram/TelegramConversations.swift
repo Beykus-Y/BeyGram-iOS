@@ -6,6 +6,8 @@ import TDLibKit
 @MainActor
 final class TelegramConversations: ObservableObject {
     @Published private(set) var mainChats: [TelegramChatPreview] = []
+    @Published private(set) var matchingChats: [TelegramChatPreview] = []
+    @Published private(set) var isSearchingChats = false
     @Published private(set) var contacts: [TelegramContact] = []
     @Published private(set) var contactsLoading = false
     @Published private(set) var archivedChats: [TelegramChatPreview] = []
@@ -19,6 +21,8 @@ final class TelegramConversations: ObservableObject {
 
     private weak var client: TDLibClient?
     private var rawChats: [Int64: [String: Any]] = [:]
+    private var searchRevision = 0
+    private var searchedIDs: [Int64] = []
     private var activeChats: Set<Int64> = []
     private var visibleMessages: [Int64: Set<Int64>] = [:]
     private var readFlushTasks: [Int64: Task<Void, Never>] = [:]
@@ -114,6 +118,65 @@ final class TelegramConversations: ObservableObject {
         }
     }
 
+    /// Combine TDLib's offline index with its known-chat server search.
+    /// A revision token prevents old responses replacing a newer query.
+    func searchKnownChats(_ query: String) {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        searchRevision += 1
+        let revision = searchRevision
+        searchedIDs = []
+        matchingChats = []
+        isSearchingChats = !normalized.isEmpty
+        guard !normalized.isEmpty else { return }
+
+        request(TelegramRequestFactory.make(SearchChats(
+            limit: 35, query: normalized, typeFilter: nil
+        ))) { [weak self] response in
+            self?.appendSearchMatches(response, revision: revision)
+        }
+
+        if normalized.count >= 2 {
+            request(TelegramRequestFactory.make(SearchChatsOnServer(
+                limit: 35, query: normalized, typeFilter: nil
+            ))) { [weak self] response in
+                self?.appendSearchMatches(response, revision: revision)
+                if self?.searchRevision == revision {
+                    self?.isSearchingChats = false
+                }
+            }
+        } else {
+            isSearchingChats = false
+        }
+    }
+
+    func clearChatSearch() {
+        searchRevision += 1
+        searchedIDs = []
+        matchingChats = []
+        isSearchingChats = false
+    }
+
+    private func appendSearchMatches(_ response: [String: Any], revision: Int) {
+        guard revision == searchRevision else { return }
+        let items = response["chat_ids"] as? [Any] ?? []
+        var seen = Set(searchedIDs)
+        for item in items.prefix(35) {
+            let id = TelegramJSON.int64(item)
+            if id != 0 && seen.insert(id).inserted {
+                searchedIDs.append(id)
+                if rawChats[id] == nil { fetchChat(id) }
+            }
+        }
+        publishSearchResults()
+    }
+
+    private func publishSearchResults() {
+        matchingChats = searchedIDs.compactMap { id in
+            guard let value = rawChats[id] else { return nil }
+            return TelegramChatPreview.from(value)
+        }
+    }
+
     private func fetchChat(_ id: Int64) {
         request(TelegramRequestFactory.make(GetChat(chatId: id))) { [weak self] result in
             guard TelegramJSON.string(result["@type"]) == "chat" else { return }
@@ -126,6 +189,7 @@ final class TelegramConversations: ObservableObject {
         guard id != 0 else { return }
         rawChats[id] = chat
         publishChats()
+        publishSearchResults()
     }
 
     private func modifyChat(_ id: Int64, mutate: (inout [String: Any]) -> Void) {
@@ -136,6 +200,7 @@ final class TelegramConversations: ObservableObject {
         mutate(&chat)
         rawChats[id] = chat
         publishChats()
+        publishSearchResults()
     }
 
     private func publishChats() {
