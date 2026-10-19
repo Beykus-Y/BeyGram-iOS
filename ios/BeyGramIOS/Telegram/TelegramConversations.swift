@@ -422,6 +422,88 @@ final class TelegramConversations: ObservableObject {
         return true
     }
 
+    /// Uses typed InputFileLocal objects, matching Android's OutgoingMediaContent.
+    /// Acceptance by sendMessage means TDLib queued the upload, not that the
+    /// Telegram server has delivered it. Retain the staged file on disk.
+    func sendAttachment(
+        _ attachment: BeyGramOutgoingAttachment,
+        to chatID: Int64,
+        caption: String,
+        replyTo messageID: Int64? = nil,
+        completion: @escaping (Bool) -> Void
+    ) {
+        let trimmed = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count <= 1024 else {
+            errorMessage = "Подпись должна содержать не более 1024 символов."
+            completion(false)
+            return
+        }
+        guard client != nil, FileManager.default.fileExists(atPath: attachment.localURL.path) else {
+            errorMessage = "Подготовленный файл недоступен."
+            completion(false)
+            return
+        }
+
+        let file = InputFile.inputFileLocal(InputFileLocal(path: attachment.localURL.path))
+        let formatted = trimmed.isEmpty
+            ? nil : FormattedText(entities: [], text: trimmed)
+        let content: InputMessageContent
+
+        switch attachment.kind {
+        case .photo:
+            content = .inputMessagePhoto(InputMessagePhoto(
+                caption: formatted,
+                hasSpoiler: false,
+                photo: InputPhoto(
+                    addedStickerFileIds: [],
+                    height: attachment.height,
+                    photo: file,
+                    thumbnail: nil,
+                    video: nil,
+                    width: attachment.width
+                ),
+                selfDestructType: nil,
+                showCaptionAboveMedia: false
+            ))
+        case .document:
+            content = .inputMessageDocument(InputMessageDocument(
+                caption: formatted,
+                document: InputDocument(
+                    disableContentTypeDetection: true,
+                    document: file,
+                    thumbnail: nil
+                )
+            ))
+        }
+
+        let reply: InputMessageReplyTo? = messageID.map {
+            .inputMessageReplyToMessage(InputMessageReplyToMessage(
+                checklistTaskId: 0, messageId: $0,
+                pollOptionId: "", quote: nil
+            ))
+        }
+        request(TelegramRequestFactory.make(SendMessage(
+            chatId: chatID,
+            inputMessageContent: content,
+            options: nil,
+            replyMarkup: nil,
+            replyTo: reply,
+            topicId: nil
+        ))) { [weak self] response in
+            switch TelegramJSON.string(response["@type"]) {
+            case "message":
+                self?.upsertMessage(response)
+                completion(true)
+            case "error":
+                self?.errorMessage = TelegramJSON.string(response["message"])
+                completion(false)
+            default:
+                self?.errorMessage = "Неожиданный ответ TDLib при отправке вложения."
+                completion(false)
+            }
+        }
+    }
+
     func clearError() { errorMessage = nil }
 
     func mediaFileState(_ file: TelegramMediaFile) -> TelegramMediaFile {
