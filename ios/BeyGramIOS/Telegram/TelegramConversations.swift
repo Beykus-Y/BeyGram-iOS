@@ -438,7 +438,7 @@ final class TelegramConversations: ObservableObject {
             completion(false)
             return
         }
-        guard client != nil, FileManager.default.fileExists(atPath: attachment.localURL.path) else {
+        guard let client, FileManager.default.fileExists(atPath: attachment.localURL.path) else {
             errorMessage = "Подготовленный файл недоступен."
             completion(false)
             return
@@ -482,25 +482,33 @@ final class TelegramConversations: ObservableObject {
                 pollOptionId: "", quote: nil
             ))
         }
-        request(TelegramRequestFactory.make(SendMessage(
-            chatId: chatID,
-            inputMessageContent: content,
-            options: nil,
-            replyMarkup: nil,
-            replyTo: reply,
-            topicId: nil
-        ))) { [weak self] response in
-            switch TelegramJSON.string(response["@type"]) {
-            case "message":
-                self?.upsertMessage(response)
-                completion(true)
-            case "error":
-                self?.errorMessage = TelegramJSON.string(response["message"])
-                completion(false)
-            default:
-                self?.errorMessage = "Неожиданный ответ TDLib при отправке вложения."
-                completion(false)
+        do {
+            try client.send(query: TelegramRequestFactory.make(SendMessage(
+                chatId: chatID,
+                inputMessageContent: content,
+                options: nil,
+                replyMarkup: nil,
+                replyTo: reply,
+                topicId: nil
+            ))) { [weak self] data in
+                let response = TelegramJSON.decode(data)
+                Task { @MainActor in
+                    switch TelegramJSON.string(response["@type"]) {
+                    case "message":
+                        self?.upsertMessage(response)
+                        completion(true)
+                    case "error":
+                        self?.errorMessage = TelegramJSON.string(response["message"])
+                        completion(false)
+                    default:
+                        self?.errorMessage = "Неожиданный ответ TDLib при отправке вложения."
+                        completion(false)
+                    }
+                }
             }
+        } catch {
+            errorMessage = error.localizedDescription
+            completion(false)
         }
     }
 
