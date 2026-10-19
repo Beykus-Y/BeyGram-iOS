@@ -410,6 +410,25 @@ struct BeyGramChatsView: View {
                         )
                     }
 
+                    Menu {
+                        Button {
+                            conversations.setChatMuted(chat, muted: true) {
+                                chatActionError = $0
+                            }
+                        } label: {
+                            Label("Выключить звук", systemImage: "bell.slash")
+                        }
+                        Button {
+                            conversations.setChatMuted(chat, muted: false) {
+                                chatActionError = $0
+                            }
+                        } label: {
+                            Label("Включить звук", systemImage: "bell")
+                        }
+                    } label: {
+                        Label("Звук уведомлений", systemImage: "bell")
+                    }
+
                     if chat.canDeleteForSelf {
                         Divider()
                         Button(role: .destructive) {
