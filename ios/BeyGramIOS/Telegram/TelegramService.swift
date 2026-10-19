@@ -20,6 +20,8 @@ final class TelegramService: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var codeDeliveryInfo: TelegramCodeDeliveryInfo?
 
+    let conversations = TelegramConversations()
+
     private let configuration: TelegramConfiguration?
     private var manager: TDLibClientManager?
     private var client: TDLibClient?
@@ -39,6 +41,9 @@ final class TelegramService: ObservableObject {
                 self?.handleUpdate(data)
             }
         })
+        if let client = self.client {
+            conversations.bind(client: client)
+        }
     }
 
     func submitPhone(_ phone: String) {
@@ -81,6 +86,7 @@ final class TelegramService: ObservableObject {
     }
 
     private func handleUpdate(_ data: Data) {
+        conversations.handleUpdate(data)
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               object["@type"] as? String == "updateAuthorizationState",
               let state = object["authorization_state"] as? [String: Any],
@@ -109,6 +115,7 @@ final class TelegramService: ObservableObject {
         case "authorizationStateReady":
             codeDeliveryInfo = nil
             phase = .ready
+            conversations.start()
         case "authorizationStateWaitEmailAddress":
             phase = .actionRequired("Telegram требует адрес электронной почты. Этот шаг входа ещё не реализован.")
         case "authorizationStateWaitEmailCode":
