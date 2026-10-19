@@ -129,11 +129,10 @@ struct BeyGramChatsView: View {
             .background(colors.screen.ignoresSafeArea())
             .navigationBarHidden(true)
             .task(id: search) {
+                // Immediately hide stale results while waiting for debounce.
+                conversations.clearChatSearch()
                 let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !query.isEmpty else {
-                    conversations.clearChatSearch()
-                    return
-                }
+                guard !query.isEmpty else { return }
                 try? await Task.sleep(nanoseconds: 350_000_000)
                 guard !Task.isCancelled else { return }
                 conversations.searchKnownChats(query)
