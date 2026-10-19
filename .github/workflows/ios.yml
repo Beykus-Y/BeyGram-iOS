@@ -1,5 +1,11 @@
 name: BeyGram iOS
 
+# New commits to the same PR supersede obsolete macOS/iPhone builds.
+# Pushes to DEV/main and release tags keep their own immutable runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [main, DEV]
