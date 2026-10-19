@@ -13,6 +13,9 @@ final class TelegramConversations: ObservableObject {
     @Published private(set) var loadingHistory: Set<Int64> = []
     @Published private(set) var exhaustedHistory: Set<Int64> = []
     @Published private(set) var errorMessage: String?
+    @Published private(set) var fileStates: [Int: TelegramMediaFile] = [:]
+    @Published private(set) var pendingDownloads: Set<Int> = []
+    @Published private(set) var mediaErrors: [Int: String] = [:]
 
     private weak var client: TDLibClient?
     private var rawChats: [Int64: [String: Any]] = [:]
@@ -147,6 +150,17 @@ final class TelegramConversations: ObservableObject {
         let chatID = TelegramJSON.int64(update["chat_id"])
 
         switch type {
+        case "updateFile":
+            // A TDLib update is newer than the message's original file snapshot.
+            if let file = TelegramMediaFile.from(TelegramJSON.object(update["file"])) {
+                fileStates[file.id] = file
+                if file.isOnDisk || !file.isDownloading {
+                    pendingDownloads.remove(file.id)
+                }
+                if file.isOnDisk {
+                    mediaErrors.removeValue(forKey: file.id)
+                }
+            }
         case "updateNewChat":
             let chat = TelegramJSON.object(update["chat"])
             if !chat.isEmpty { mergeChat(chat) }
@@ -204,6 +218,7 @@ final class TelegramConversations: ObservableObject {
                     raw["sending_state"] = ["@type": messages[index].status]
                 }
                 if let replacement = TelegramChatMessage.from(raw) {
+                    registerMedia(replacement.media)
                     messages[index] = replacement
                     histories[chatID] = messages
                 }
@@ -253,7 +268,9 @@ final class TelegramConversations: ObservableObject {
                 return
             }
             let raw = response["messages"] as? [Any] ?? []
-            self.mergeMessages(raw.compactMap { TelegramChatMessage.from(TelegramJSON.object($0)) }, for: id)
+            let mapped = raw.compactMap { TelegramChatMessage.from(TelegramJSON.object($0)) }
+            mapped.forEach { self.registerMedia($0.media) }
+            self.mergeMessages(mapped, for: id)
             if raw.isEmpty { self.exhaustedHistory.insert(id) }
         }
     }
@@ -273,6 +290,7 @@ final class TelegramConversations: ObservableObject {
             }
             let raw = response["messages"] as? [Any] ?? []
             let models = raw.compactMap { TelegramChatMessage.from(TelegramJSON.object($0)) }
+            models.forEach { self.registerMedia($0.media) }
             let priorFirst = self.histories[id]?.first?.id
             self.mergeMessages(models, for: id)
             if models.isEmpty || self.histories[id]?.first?.id == priorFirst {
@@ -309,9 +327,58 @@ final class TelegramConversations: ObservableObject {
 
     func clearError() { errorMessage = nil }
 
+    func mediaFileState(_ file: TelegramMediaFile) -> TelegramMediaFile {
+        fileStates[file.id] ?? file
+    }
+
+    func mediaError(for id: Int) -> String? { mediaErrors[id] }
+
+    /// Thumbnail download is opt-in from a *visible* media bubble.
+    /// Full-size downloads always require a user's button press.
+    func downloadMedia(_ media: TelegramMessageMedia, preview: Bool = false) {
+        guard !media.isSecret else { return }
+        guard let selected = preview ? media.preview : media.file else { return }
+        let state = mediaFileState(selected)
+        guard !state.isOnDisk, state.canDownload,
+              !pendingDownloads.contains(state.id) else { return }
+
+        pendingDownloads.insert(state.id)
+        mediaErrors.removeValue(forKey: state.id)
+        request(TelegramRequestFactory.make(DownloadFile(
+            fileId: state.id,
+            limit: 0,
+            offset: 0,
+            priority: preview ? 4 : 16,
+            synchronous: false
+        ))) { [weak self] result in
+            guard let self else { return }
+            if TelegramJSON.string(result["@type"]) == "error" {
+                self.pendingDownloads.remove(state.id)
+                self.mediaErrors[state.id] = TelegramJSON.string(result["message"])
+            } else if let file = TelegramMediaFile.from(result) {
+                self.fileStates[file.id] = file
+                if file.isOnDisk { self.pendingDownloads.remove(file.id) }
+            }
+        }
+    }
+
+    private func registerMedia(_ media: TelegramMessageMedia?) {
+        guard let media, !media.isSecret else { return }
+        for file in [media.file, media.preview].compactMap({ $0 }) {
+            // Do not roll an updateFile state back with an older history snapshot.
+            if let old = fileStates[file.id], !file.isOnDisk && old.isOnDisk {
+                continue
+            }
+            if fileStates[file.id] == nil || file.isOnDisk {
+                fileStates[file.id] = file
+            }
+        }
+    }
+
     private func upsertMessage(_ raw: [String: Any]) {
         guard let model = TelegramChatMessage.from(raw) else { return }
         guard activeChats.contains(model.chatId) else { return }
+        registerMedia(model.media)
         var messages = histories[model.chatId] ?? []
         messages.removeAll(where: { $0.id == model.id })
         messages.append(model)
