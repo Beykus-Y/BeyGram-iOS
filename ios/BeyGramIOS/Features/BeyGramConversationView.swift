@@ -156,14 +156,22 @@ struct BeyGramConversationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 9) {
+                HStack(spacing: 12) {
                     BeyGramTelegramAvatarView(
                         conversations: conversations, file: chat.avatarFile,
-                        initials: chat.initials, entityID: chat.id, size: 30
+                        initials: chat.initials, entityID: chat.id, size: 40
                     )
-                    Text(chat.title)
-                        .font(.headline)
-                        .lineLimit(1)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(chat.title)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(colors.primary)
+                            .lineLimit(1)
+                        Text(chat.isGroup ? "Группа или канал" : "Личный чат")
+                            .font(.system(size: 13))
+                            .foregroundStyle(colors.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
         }
@@ -446,94 +454,156 @@ private struct BeyGramMessageBubble: View {
     let colors: BeyGramChatColors
     let onActions: () -> Void
 
-    var body: some View {
-        HStack {
-            if message.outgoing { Spacer(minLength: 55) }
+    // Android's BubbleLayout uses 292dp max width and keeps reaction chips
+    // outside the bubble itself.
+    private let maximumWidth: CGFloat = 292
 
-            VStack(alignment: .leading, spacing: 5) {
-                if let media = message.media {
-                    BeyGramMediaAttachmentView(
-                        media: media,
-                        conversations: conversations,
-                        colors: colors
-                    )
-                } else if message.isText {
-                    Text(message.text)
-                        .font(.system(size: 15))
-                        .foregroundStyle(colors.primary)
-                        .textSelection(.enabled)
-                } else {
-                    Text(message.text)
-                        .font(.system(size: 15))
-                        .foregroundStyle(colors.primary)
+    private var mediaOnlyOverlay: Bool {
+        guard let media = message.media, !media.isSecret,
+              media.caption.isEmpty, !media.hasSpoiler else { return false }
+        return media.kind == .photo || media.kind == .video ||
+            media.kind == .animation
+    }
+
+    private var noBubbleBackground: Bool {
+        guard let media = message.media else { return false }
+        return media.kind == .sticker || media.kind == .videoNote
+    }
+
+    private var isRead: Bool {
+        guard message.outgoing, message.id > 0 else { return false }
+        let watermark = conversations.chat(for: message.chatId)?
+            .lastReadOutboxMessageID ?? 0
+        return watermark >= message.id
+    }
+
+    var body: some View {
+        VStack(alignment: message.outgoing ? .trailing : .leading, spacing: 2) {
+            HStack {
+                if message.outgoing { Spacer(minLength: 55) }
+
+                VStack(alignment: .leading, spacing: 0) {
+                    if let media = message.media {
+                        BeyGramMediaAttachmentView(
+                            media: media, conversations: conversations,
+                            colors: colors
+                        )
+                    } else if message.isText {
+                        Text(message.text)
+                            .font(.system(size: 15))
+                            .foregroundStyle(colors.primary)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 8)
+                    } else {
+                        Text(message.text)
+                            .font(.system(size: 15))
+                            .foregroundStyle(colors.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 8)
+                    }
+
+                    if !mediaOnlyOverlay {
+                        metadata(overlay: false)
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 6)
+                            .padding(.top, 4)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }
+                .frame(maxWidth: maximumWidth, alignment: .leading)
+                .background(
+                    noBubbleBackground
+                        ? Color.clear
+                        : (message.outgoing ? colors.outgoingBubble : colors.surface),
+                    in: BeyGramTailBubble(outgoing: message.outgoing)
+                )
+                .clipShape(BeyGramTailBubble(outgoing: message.outgoing))
+                .overlay(alignment: .bottomTrailing) {
+                    if mediaOnlyOverlay {
+                        metadata(overlay: true)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(.black.opacity(0.55), in: Capsule())
+                            .padding(8)
+                    }
+                }
+                .contextMenu {
+                    Button {
+                        onActions()
+                    } label: {
+                        Label("Действия с сообщением", systemImage: "ellipsis.circle")
+                    }
                 }
 
-                if !message.reactions.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 5) {
-                            ForEach(message.reactions) { reaction in
-                                Button {
-                                    if reaction.isChosen {
-                                        conversations.setEmojiReaction(
-                                            reaction.emoji, for: message, removing: true
-                                        )
-                                    } else {
-                                        onActions()
-                                    }
-                                } label: {
-                                    HStack(spacing: 3) {
-                                        Text(reaction.emoji)
-                                        Text("\(reaction.count)")
-                                            .font(.caption2.monospacedDigit())
-                                    }
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(colors.primary)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 5)
-                                    .background(
-                                        reaction.isChosen ? colors.accentSoft : colors.surface2,
-                                        in: Capsule()
+                if !message.outgoing { Spacer(minLength: 55) }
+            }
+
+            if !message.reactions.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 5) {
+                        ForEach(message.reactions) { reaction in
+                            Button {
+                                if reaction.isChosen {
+                                    conversations.setEmojiReaction(
+                                        reaction.emoji, for: message, removing: true
                                     )
+                                } else {
+                                    onActions()
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(
-                                    reaction.isChosen ? "Убрать реакцию" : "Открыть реакции"
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(reaction.emoji)
+                                    Text("\(reaction.count)")
+                                        .font(.caption2.monospacedDigit())
+                                }
+                                .font(.system(size: 13))
+                                .foregroundStyle(colors.primary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(
+                                    reaction.isChosen ? colors.accentSoft : colors.surface2,
+                                    in: Capsule()
                                 )
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
-
-                HStack(spacing: 4) {
-                    Spacer(minLength: 0)
-                    Text(message.time)
-                        .font(.system(size: 11))
-                        .foregroundStyle(colors.secondary)
-
-                    if message.outgoing {
-                        Image(systemName: message.status == "messageSendingStatePending"
-                            ? "clock" : message.status == "messageSendingStateFailed"
-                            ? "exclamationmark.circle" : "checkmark")
-                            .font(.system(size: 10))
-                            .foregroundStyle(colors.accent)
-                    }
-                }
+                .frame(maxWidth: maximumWidth)
+                .padding(.horizontal, 12)
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, 6)
-            .background(message.outgoing ? colors.outgoingBubble : colors.surface,
-                        in: BeyGramTailBubble(outgoing: message.outgoing))
-            .contextMenu {
-                Button {
-                    onActions()
-                } label: {
-                    Label("Действия с сообщением", systemImage: "ellipsis.circle")
-                }
-            }
-
-            if !message.outgoing { Spacer(minLength: 55) }
         }
+    }
+
+    private func metadata(overlay: Bool) -> some View {
+        HStack(spacing: 4) {
+            Text(message.time)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(overlay ? Color.white : colors.secondary)
+            if message.outgoing {
+                if message.status == "messageSendingStatePending" {
+                    Image(systemName: "clock")
+                        .foregroundStyle(overlay ? Color.white : colors.secondary)
+                } else if message.status == "messageSendingStateFailed" {
+                    Image(systemName: "exclamationmark.circle")
+                        .foregroundStyle(overlay ? Color.white : Color.red)
+                } else if isRead {
+                    // Two close checkmarks like Android's DoneAll rather than
+                    // the native iOS circled-check symbol.
+                    HStack(spacing: -5) {
+                        Image(systemName: "checkmark")
+                        Image(systemName: "checkmark")
+                    }
+                    .foregroundStyle(overlay ? Color.white : colors.accent)
+                } else {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(overlay ? Color.white : colors.secondary)
+                }
+            }
+        }
+        .font(.system(size: 12))
+        .accessibilityElement(children: .combine)
     }
 }
 
