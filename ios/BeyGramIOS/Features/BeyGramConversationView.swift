@@ -12,7 +12,6 @@ struct BeyGramConversationView: View {
     @Environment(\.colorScheme) private var scheme
     @AppStorage("beygram.appearance.preset") private var appearancePreset = "warm"
     @State private var draft = ""
-    @State private var didReachSearchResult = false
     @State private var positionedInitialHistory = false
     @State private var paginationAnchorID: Int64?
     @State private var latestMessageWasVisible = true
@@ -111,7 +110,6 @@ struct BeyGramConversationView: View {
                         if let target = initialMessageID {
                             guard messages.contains(where: { $0.id == target }) else { return }
                             reader.scrollTo(target, anchor: .center)
-                            didReachSearchResult = true
                         } else {
                             guard let newest else { return }
                             reader.scrollTo(newest, anchor: .bottom)
