@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 
 /// Android-inspired conversation layout: custom warm palette, asymmetric
 /// bubbles (20pt / 6pt tail), footer time aligned independently of text.
@@ -12,6 +14,12 @@ struct BeyGramConversationView: View {
     @State private var replyTarget: TelegramChatMessage?
     @State private var editTarget: TelegramChatMessage?
     @State private var actionTarget: TelegramChatMessage?
+    @State private var selectedPhotos: [PhotosPickerItem] = []
+    @State private var attachments: [BeyGramOutgoingAttachment] = []
+    @State private var showFileImporter = false
+    @State private var preparingAttachments = false
+    @State private var sendingAttachments = false
+    @State private var attachmentError: String?
     @FocusState private var composerFocused: Bool
 
     private var colors: BeyGramChatColors { .selected(scheme, preset: appearancePreset) }
@@ -119,6 +127,22 @@ struct BeyGramConversationView: View {
                 }
             )
         }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls):
+                Task { await importDocuments(urls) }
+            case .failure(let error):
+                attachmentError = error.localizedDescription
+            }
+        }
+        .onChange(of: selectedPhotos) { items in
+            guard !items.isEmpty else { return }
+            Task { await importPhotos(items) }
+        }
         .navigationTitle(chat.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
@@ -160,8 +184,86 @@ struct BeyGramConversationView: View {
                 .padding(.vertical, 7)
             }
 
+            if !attachments.isEmpty || preparingAttachments {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(attachments) { item in
+                            HStack(spacing: 7) {
+                                Image(systemName: item.kind == .photo ? "photo" : "doc")
+                                    .foregroundStyle(colors.accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.displayName)
+                                        .lineLimit(1)
+                                        .font(.caption.weight(.semibold))
+                                    Text(item.sizeText)
+                                        .font(.caption2)
+                                        .foregroundStyle(colors.secondary)
+                                }
+                                Button {
+                                    BeyGramOutgoingMediaImporter.discardUnsent(item)
+                                    attachments.removeAll { $0.id == item.id }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(colors.secondary)
+                                }
+                                .disabled(sendingAttachments)
+                                .accessibilityLabel("Убрать вложение")
+                            }
+                            .padding(9)
+                            .background(colors.surface2, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        if preparingAttachments { ProgressView().tint(colors.accent) }
+                    }
+                    .padding(.horizontal, 12)
+                }
+                .padding(.vertical, 6)
+            }
+
+            if let attachmentError {
+                HStack {
+                    Text(attachmentError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    Spacer()
+                    Button {
+                        self.attachmentError = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .accessibilityLabel("Скрыть ошибку")
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
+            }
+
             HStack(alignment: .bottom, spacing: 10) {
-            TextField("Сообщение", text: $draft, axis: .vertical)
+            PhotosPicker(
+                selection: $selectedPhotos,
+                maxSelectionCount: max(1, 10 - attachments.count),
+                matching: .images
+            ) {
+                Image(systemName: "photo")
+                    .font(.system(size: 20))
+                    .foregroundStyle(colors.accent)
+                    .frame(width: 30, height: 42)
+            }
+            .disabled(sendingAttachments || preparingAttachments || editTarget != nil ||
+                      attachments.count >= 10)
+            .accessibilityLabel("Добавить фотографии")
+
+            Button {
+                showFileImporter = true
+            } label: {
+                Image(systemName: "paperclip")
+                    .font(.system(size: 20))
+                    .foregroundStyle(colors.accent)
+                    .frame(width: 30, height: 42)
+            }
+            .disabled(sendingAttachments || preparingAttachments || editTarget != nil ||
+                      attachments.count >= 10)
+            .accessibilityLabel("Добавить документ")
+
+            TextField(attachments.isEmpty ? "Сообщение" : "Подпись к файлам", text: $draft, axis: .vertical)
                 .focused($composerFocused)
                 .lineLimit(1...5)
                 .padding(.horizontal, 14)
@@ -171,7 +273,9 @@ struct BeyGramConversationView: View {
                 .submitLabel(.return)
 
             Button {
-                if let editTarget {
+                if !attachments.isEmpty {
+                    Task { await sendPreparedAttachments() }
+                } else if let editTarget {
                     if conversations.editText(draft, in: editTarget) {
                         draft = ""
                         self.editTarget = nil
@@ -187,14 +291,86 @@ struct BeyGramConversationView: View {
                     .frame(width: 42, height: 42)
                     .background(colors.accent, in: Circle())
             }
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.4 : 1)
-            .accessibilityLabel("Отправить сообщение")
+            .disabled(
+                sendingAttachments || preparingAttachments ||
+                (attachments.isEmpty && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ||
+                (!attachments.isEmpty && draft.count > 1024)
+            )
+            .opacity(sendingAttachments || preparingAttachments ? 0.5 : 1)
+            .accessibilityLabel(attachments.isEmpty ? "Отправить сообщение" : "Отправить вложения")
         }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
         }
         .background(colors.surface)
+    }
+
+    private func importPhotos(_ items: [PhotosPickerItem]) async {
+        guard !preparingAttachments, !sendingAttachments else { return }
+        preparingAttachments = true
+        attachmentError = nil
+        defer {
+            preparingAttachments = false
+            selectedPhotos = []
+        }
+        for photo in items.prefix(max(0, 10 - attachments.count)) {
+            do {
+                guard let data = try await photo.loadTransferable(type: Data.self) else {
+                    throw BeyGramAttachmentPreparationError.unreadable
+                }
+                attachments.append(try await BeyGramOutgoingMediaImporter.preparePhoto(data))
+            } catch {
+                attachmentError = error.localizedDescription
+                break
+            }
+        }
+    }
+
+    private func importDocuments(_ urls: [URL]) async {
+        guard !preparingAttachments, !sendingAttachments else { return }
+        guard attachments.count + urls.count <= 10 else {
+            attachmentError = "Можно прикрепить не более 10 файлов."
+            return
+        }
+        preparingAttachments = true
+        attachmentError = nil
+        defer { preparingAttachments = false }
+        for url in urls {
+            do {
+                attachments.append(try await BeyGramOutgoingMediaImporter.prepareDocument(url))
+            } catch {
+                attachmentError = error.localizedDescription
+                break
+            }
+        }
+    }
+
+    private func sendPreparedAttachments() async {
+        guard !attachments.isEmpty, !preparingAttachments, !sendingAttachments else { return }
+        sendingAttachments = true
+        attachmentError = nil
+        defer { sendingAttachments = false }
+        var caption = draft
+        let replyID = replyTarget?.id
+
+        for item in attachments {
+            let accepted = await withCheckedContinuation { continuation in
+                conversations.sendAttachment(
+                    item, to: chat.id, caption: caption, replyTo: replyID
+                ) { success in
+                    continuation.resume(returning: success)
+                }
+            }
+            guard accepted else {
+                attachmentError = conversations.errorMessage ?? "Не удалось отправить вложение."
+                return
+            }
+            attachments.removeAll { $0.id == item.id }
+            // Staged file remains until TDLib finishes upload; prune after 7 days.
+            caption = ""
+            draft = ""
+        }
+        replyTarget = nil
     }
 }
 
