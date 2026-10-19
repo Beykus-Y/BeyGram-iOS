@@ -168,11 +168,10 @@ struct BeyGramGlobalMessageSearchView: View {
         chat: TelegramChatPreview
     ) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Text(chat.initials)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 40, height: 40)
-                .background(BeyGramAvatarStyle.color(for: chat.id), in: Circle())
+            BeyGramTelegramAvatarView(
+                conversations: conversations, file: chat.avatarFile,
+                initials: chat.initials, entityID: chat.id, size: 40
+            )
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack {

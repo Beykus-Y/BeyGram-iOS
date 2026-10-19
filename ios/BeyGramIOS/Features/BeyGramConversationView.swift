@@ -154,6 +154,19 @@ struct BeyGramConversationView: View {
         }
         .navigationTitle(chat.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 9) {
+                    BeyGramTelegramAvatarView(
+                        conversations: conversations, file: chat.avatarFile,
+                        initials: chat.initials, entityID: chat.id, size: 30
+                    )
+                    Text(chat.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                }
+            }
+        }
         .toolbar(.hidden, for: .tabBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composer

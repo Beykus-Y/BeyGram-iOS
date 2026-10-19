@@ -241,7 +241,9 @@ struct BeyGramChatsView: View {
     private func chatRows(_ rows: [TelegramChatPreview]) -> some View {
         ForEach(rows) { chat in
             NavigationLink(value: chat.id) {
-                BeyGramChatRow(chat: chat, colors: colors)
+                BeyGramChatRow(
+                    chat: chat, conversations: conversations, colors: colors
+                )
             }
             .buttonStyle(.plain)
         }
@@ -271,15 +273,15 @@ struct BeyGramChatsView: View {
 
 private struct BeyGramChatRow: View {
     let chat: TelegramChatPreview
+    @ObservedObject var conversations: TelegramConversations
     let colors: BeyGramChatColors
 
     var body: some View {
         HStack(spacing: 13) {
-            Text(chat.initials)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 52, height: 52)
-                .background(BeyGramAvatarStyle.color(for: chat.id), in: Circle())
+            BeyGramTelegramAvatarView(
+                conversations: conversations, file: chat.avatarFile,
+                initials: chat.initials, entityID: chat.id, size: 52
+            )
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 5) {

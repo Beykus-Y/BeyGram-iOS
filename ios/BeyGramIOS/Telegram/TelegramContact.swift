@@ -7,6 +7,7 @@ struct TelegramContact: Identifiable, Equatable {
     let lastName: String
     let username: String
     let online: Bool
+    let avatarFile: TelegramMediaFile?
 
     var fullName: String {
         let name = [firstName, lastName].filter { !$0.isEmpty }.joined(separator: " ")
@@ -20,7 +21,7 @@ struct TelegramContact: Identifiable, Equatable {
 
     func withOnline(_ status: Bool) -> Self {
         Self(id: id, firstName: firstName, lastName: lastName,
-             username: username, online: status)
+             username: username, online: status, avatarFile: avatarFile)
     }
 
     static func from(_ raw: [String: Any]) -> Self? {
@@ -35,7 +36,10 @@ struct TelegramContact: Identifiable, Equatable {
             firstName: TelegramJSON.string(raw["first_name"]),
             lastName: TelegramJSON.string(raw["last_name"]),
             username: username,
-            online: TelegramJSON.string(status["@type"]) == "userStatusOnline"
+            online: TelegramJSON.string(status["@type"]) == "userStatusOnline",
+            avatarFile: TelegramMediaFile.from(
+                TelegramJSON.object(TelegramJSON.object(raw["profile_photo"])["small"])
+            )
         )
     }
 }

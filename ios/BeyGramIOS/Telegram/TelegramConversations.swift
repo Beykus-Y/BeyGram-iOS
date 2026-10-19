@@ -319,6 +319,8 @@ final class TelegramConversations: ObservableObject {
             }
         case "updateChatTitle":
             modifyChat(chatID) { $0["title"] = update["title"] }
+        case "updateChatPhoto":
+            modifyChat(chatID) { $0["photo"] = update["photo"] ?? NSNull() }
         case "updateChatLastMessage":
             modifyChat(chatID) {
                 $0["last_message"] = update["last_message"] ?? NSNull()
@@ -845,6 +847,30 @@ final class TelegramConversations: ObservableObject {
 
     func mediaFileState(_ file: TelegramMediaFile) -> TelegramMediaFile {
         fileStates[file.id] ?? file
+    }
+
+    /// Only the 160x160 small JPEG photo is downloaded for chat list rows.
+    /// The TDLib file cache and updateFile events own progress and completion.
+    func ensureAvatarAvailable(_ original: TelegramMediaFile?) {
+        guard let original else { return }
+        let file = mediaFileState(original)
+        guard !file.isOnDisk, file.canDownload,
+              !pendingDownloads.contains(file.id) else { return }
+
+        fileStates[file.id] = file
+        pendingDownloads.insert(file.id)
+        request(TelegramRequestFactory.make(DownloadFile(
+            fileId: file.id, limit: 0, offset: 0, priority: 2,
+            synchronous: false
+        ))) { [weak self] result in
+            guard let self else { return }
+            if TelegramJSON.string(result["@type"]) == "error" {
+                self.pendingDownloads.remove(file.id)
+            } else if let updated = TelegramMediaFile.from(result) {
+                self.fileStates[updated.id] = updated
+                if updated.isOnDisk { self.pendingDownloads.remove(updated.id) }
+            }
+        }
     }
 
     func mediaError(for id: Int) -> String? { mediaErrors[id] }
