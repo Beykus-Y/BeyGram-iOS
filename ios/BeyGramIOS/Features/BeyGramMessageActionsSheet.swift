@@ -66,17 +66,24 @@ struct BeyGramMessageActionsSheet: View {
                         }
                     }
                 } else {
-                    ContentUnavailableView(
-                        "Действия недоступны",
-                        systemImage: "exclamationmark.triangle",
-                        description: Text("Не удалось получить права на сообщение через TDLib.")
-                    )
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.title2)
+                        Text("Действия недоступны")
+                            .font(.headline)
+                        Text("Не удалось получить права на сообщение через TDLib.")
+                            .font(.subheadline)
+                            .multilineTextAlignment(.center)
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(24)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .navigationTitle("Сообщение")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Готово") { dismiss() }
                 }
             }
