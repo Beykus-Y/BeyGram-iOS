@@ -25,6 +25,7 @@ struct BeyGramChatsView: View {
     @State private var search = ""
     @State private var filter = BeyGramChatFilter.all
     @State private var showingArchive = false
+    @State private var showingGlobalSearch = false
 
     private var colors: BeyGramChatColors { .selected(scheme, preset: appearancePreset) }
 
@@ -128,6 +129,9 @@ struct BeyGramChatsView: View {
             }
             .background(colors.screen.ignoresSafeArea())
             .navigationBarHidden(true)
+            .sheet(isPresented: $showingGlobalSearch) {
+                BeyGramGlobalMessageSearchView(conversations: conversations)
+            }
             .task(id: search) {
                 // Immediately hide stale results while waiting for debounce.
                 conversations.clearChatSearch()
@@ -156,9 +160,27 @@ struct BeyGramChatsView: View {
                     .tracking(1.3)
                     .foregroundStyle(colors.accent)
 
-                Text(showingArchive ? "Архив" : "Чаты")
-                    .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(colors.primary)
+                HStack(spacing: 12) {
+                    Text(showingArchive ? "Архив" : "Чаты")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(colors.primary)
+
+                    Spacer()
+
+                    if !showingArchive {
+                        Button {
+                            showingGlobalSearch = true
+                        } label: {
+                            Image(systemName: "text.magnifyingglass")
+                                .font(.system(size: 21))
+                                .foregroundStyle(colors.accent)
+                                .frame(width: 40, height: 40)
+                                .background(colors.accentSoft, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Поиск по всем сообщениям")
+                    }
+                }
             }
             .padding(.top, 10)
 
