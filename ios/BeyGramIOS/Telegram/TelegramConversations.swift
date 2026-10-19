@@ -20,6 +20,8 @@ final class TelegramConversations: ObservableObject {
     private weak var client: TDLibClient?
     private var rawChats: [Int64: [String: Any]] = [:]
     private var activeChats: Set<Int64> = []
+    private var visibleMessages: [Int64: Set<Int64>] = [:]
+    private var readFlushTasks: [Int64: Task<Void, Never>] = [:]
     private var loaded = false
 
     func bind(client: TDLibClient) {
@@ -251,7 +253,41 @@ final class TelegramConversations: ObservableObject {
 
     func closeChat(_ id: Int64) {
         activeChats.remove(id)
+        readFlushTasks.removeValue(forKey: id)?.cancel()
+        visibleMessages.removeValue(forKey: id)
         request(TelegramRequestFactory.make(CloseChat(chatId: id))) { _ in }
+    }
+
+    /// Only messages actually visible in the LazyVStack are reported as viewed.
+    /// Coalesce quick scroll events to avoid one TDLib call for every cell.
+    func messageBecameVisible(chatID: Int64, messageID: Int64) {
+        guard activeChats.contains(chatID), messageID > 0 else { return }
+        visibleMessages[chatID, default: []].insert(messageID)
+        scheduleViewReport(for: chatID)
+    }
+
+    func messageBecameHidden(chatID: Int64, messageID: Int64) {
+        visibleMessages[chatID]?.remove(messageID)
+    }
+
+    private func scheduleViewReport(for chatID: Int64) {
+        guard readFlushTasks[chatID] == nil else { return }
+        readFlushTasks[chatID] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard let self else { return }
+            self.readFlushTasks.removeValue(forKey: chatID)
+            guard !Task.isCancelled, self.activeChats.contains(chatID),
+                  let visible = self.visibleMessages[chatID], !visible.isEmpty else { return }
+            // TDLib handles duplicate view reports and server-side read receipts.
+            self.request(TelegramRequestFactory.make(ViewMessages(
+                chatId: chatID, forceRead: false, messageIds: Array(visible),
+                source: .messageSourceChatHistory
+            ))) { [weak self] result in
+                if TelegramJSON.string(result["@type"]) == "error" {
+                    self?.errorMessage = TelegramJSON.string(result["message"])
+                }
+            }
+        }
     }
 
     func loadLatest(_ id: Int64) {
@@ -299,7 +335,58 @@ final class TelegramConversations: ObservableObject {
         }
     }
 
-    func sendText(_ text: String, to chatID: Int64) -> Bool {
+    func messagePermissions(
+        _ message: TelegramChatMessage,
+        completion: @escaping (TelegramMessagePermissions?) -> Void
+    ) {
+        request(TelegramRequestFactory.make(GetMessageProperties(
+            chatId: message.chatId, messageId: message.id
+        ))) { [weak self] result in
+            if let properties = TelegramMessagePermissions.from(result) {
+                completion(properties)
+            } else {
+                self?.errorMessage = TelegramJSON.string(result["message"])
+                completion(nil)
+            }
+        }
+    }
+
+    func editText(_ text: String, in message: TelegramChatMessage) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard message.isText, !trimmed.isEmpty, trimmed.utf16.count <= 4096 else {
+            errorMessage = "Редактировать можно только текст до 4096 символов."
+            return false
+        }
+        let content = InputMessageContent.inputMessageText(
+            InputMessageText(
+                clearDraft: false, linkPreviewOptions: nil,
+                text: FormattedText(entities: [], text: trimmed)
+            )
+        )
+        request(TelegramRequestFactory.make(EditMessageText(
+            chatId: message.chatId, inputMessageContent: content,
+            messageId: message.id, replyMarkup: nil
+        ))) { [weak self] response in
+            if TelegramJSON.string(response["@type"]) == "error" {
+                self?.errorMessage = TelegramJSON.string(response["message"])
+            }
+        }
+        return true
+    }
+
+    func deleteMessage(_ message: TelegramChatMessage, forEveryone: Bool) {
+        // Permissions must be obtained for THIS message immediately before
+        // exposing the action; the server remains the final authority.
+        request(TelegramRequestFactory.make(DeleteMessages(
+            chatId: message.chatId, messageIds: [message.id], revoke: forEveryone
+        ))) { [weak self] result in
+            if TelegramJSON.string(result["@type"]) == "error" {
+                self?.errorMessage = TelegramJSON.string(result["message"])
+            }
+        }
+    }
+
+    func sendText(_ text: String, to chatID: Int64, replyTo messageID: Int64? = nil) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.utf16.count <= 4096 else {
             errorMessage = "Длина сообщения должна быть от 1 до 4096 символов."
@@ -312,9 +399,14 @@ final class TelegramConversations: ObservableObject {
         let body = InputMessageContent.inputMessageText(
             InputMessageText(clearDraft: true, linkPreviewOptions: nil, text: FormattedText(entities: [], text: trimmed))
         )
+        let reply: InputMessageReplyTo? = messageID.map {
+            .inputMessageReplyToMessage(InputMessageReplyToMessage(
+                checklistTaskId: 0, messageId: $0, pollOptionId: "", quote: nil
+            ))
+        }
         request(TelegramRequestFactory.make(SendMessage(
             chatId: chatID, inputMessageContent: body, options: nil,
-            replyMarkup: nil, replyTo: nil, topicId: nil
+            replyMarkup: nil, replyTo: reply, topicId: nil
         ))) { [weak self] response in
             if TelegramJSON.string(response["@type"]) == "error" {
                 self?.errorMessage = TelegramJSON.string(response["message"])
