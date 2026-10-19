@@ -134,12 +134,16 @@ struct BeyGramConversationView: View {
                     previouslyNewestID = newest
                 }
                 .onChange(of: isLoading) { loading in
-                    // A failed or exhausted page may contain no new IDs.
-                    // Release the anchor to allow another attempt on a
-                    // subsequent scroll away and back to the top.
-                    if !loading, let anchor = paginationAnchorID,
-                       messages.first?.id == anchor {
-                        paginationAnchorID = nil
+                    guard !loading else { return }
+                    // TDLib removes its loading flag before publishing the
+                    // merged page. Defer the no-progress check so it cannot
+                    // clear the anchor ahead of the new messages.
+                    Task { @MainActor in
+                        await Task.yield()
+                        if let anchor = paginationAnchorID,
+                           messages.first?.id == anchor {
+                            paginationAnchorID = nil
+                        }
                     }
                 }
                 .onAppear {
