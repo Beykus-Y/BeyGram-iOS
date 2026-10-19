@@ -74,14 +74,10 @@ struct BeyGramContactsView: View {
                                 }
                             } label: {
                                 HStack(spacing: 13) {
-                                    Text(user.initials)
-                                        .font(.system(size: 16, weight: .bold))
-                                        .foregroundStyle(.white)
-                                        .frame(width: 50, height: 50)
-                                        .background(
-                                            BeyGramAvatarStyle.color(for: user.id),
-                                            in: Circle()
-                                        )
+                                    BeyGramTelegramAvatarView(
+                                        conversations: conversations, file: user.avatarFile,
+                                        initials: user.initials, entityID: user.id, size: 50
+                                    )
 
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(user.fullName)
