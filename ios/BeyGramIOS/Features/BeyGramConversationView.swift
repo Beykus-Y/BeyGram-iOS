@@ -7,10 +7,11 @@ struct BeyGramConversationView: View {
     let chat: TelegramChatPreview
 
     @Environment(\.colorScheme) private var scheme
+    @AppStorage("beygram.appearance.preset") private var appearancePreset = "warm"
     @State private var draft = ""
     @FocusState private var composerFocused: Bool
 
-    private var colors: BeyGramChatColors { .warm(scheme) }
+    private var colors: BeyGramChatColors { .selected(scheme, preset: appearancePreset) }
     private var messages: [TelegramChatMessage] { conversations.histories[chat.id] ?? [] }
     private var isLoading: Bool { conversations.loadingHistory.contains(chat.id) }
 
