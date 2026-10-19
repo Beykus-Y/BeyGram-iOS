@@ -189,7 +189,7 @@ struct BeyGramConversationView: View {
                     HStack(spacing: 8) {
                         ForEach(attachments) { item in
                             HStack(spacing: 7) {
-                                Image(systemName: item.kind == .photo ? "photo" : "doc")
+                                Image(systemName: item.kind == .photo ? "photo" : item.kind == .video ? "video" : "doc")
                                     .foregroundStyle(colors.accent)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(item.displayName)
@@ -240,7 +240,8 @@ struct BeyGramConversationView: View {
             PhotosPicker(
                 selection: $selectedPhotos,
                 maxSelectionCount: max(1, 10 - attachments.count),
-                matching: .images
+                matching: .any(of: [.images, .videos]),
+                preferredItemEncoding: .current
             ) {
                 Image(systemName: "photo")
                     .font(.system(size: 20))
@@ -249,7 +250,7 @@ struct BeyGramConversationView: View {
             }
             .disabled(sendingAttachments || preparingAttachments || editTarget != nil ||
                       attachments.count >= 10)
-            .accessibilityLabel("Добавить фотографии")
+            .accessibilityLabel("Добавить фото или видео")
 
             Button {
                 showFileImporter = true
@@ -313,12 +314,32 @@ struct BeyGramConversationView: View {
             preparingAttachments = false
             selectedPhotos = []
         }
-        for photo in items.prefix(max(0, 10 - attachments.count)) {
+        for item in items.prefix(max(0, 10 - attachments.count)) {
             do {
-                guard let data = try await photo.loadTransferable(type: Data.self) else {
-                    throw BeyGramAttachmentPreparationError.unreadable
+                if item.supportedContentTypes.contains(where: {
+                    $0.conforms(to: .movie) || $0.conforms(to: .video)
+                }) {
+                    guard let picked = try await item.loadTransferable(
+                        type: BeyGramPickedMovie.self
+                    ) else {
+                        throw BeyGramAttachmentPreparationError.unreadable
+                    }
+                    // The Transferable already copied PhotosPicker's temporary
+                    // provider URL to a file we own. Clean this intermediate
+                    // copy; the exported MP4 lives in its own staging folder.
+                    let source = picked.localURL
+                    defer { try? FileManager.default.removeItem(at: source) }
+                    attachments.append(
+                        try await BeyGramOutgoingMediaImporter.prepareVideo(source)
+                    )
+                } else {
+                    guard let data = try await item.loadTransferable(type: Data.self) else {
+                        throw BeyGramAttachmentPreparationError.unreadable
+                    }
+                    attachments.append(
+                        try await BeyGramOutgoingMediaImporter.preparePhoto(data)
+                    )
                 }
-                attachments.append(try await BeyGramOutgoingMediaImporter.preparePhoto(data))
             } catch {
                 attachmentError = error.localizedDescription
                 break
@@ -352,6 +373,29 @@ struct BeyGramConversationView: View {
         defer { sendingAttachments = false }
         var caption = draft
         let replyID = replyTarget?.id
+
+        // Photos/videos from the gallery are sent as a real Telegram album,
+        // not as disconnected messages. Documents retain the sequential flow.
+        if (2...10).contains(attachments.count),
+           attachments.allSatisfy({ $0.kind == .photo || $0.kind == .video }) {
+            let batch = attachments
+            let accepted = await withCheckedContinuation { continuation in
+                conversations.sendMediaAlbum(
+                    batch, to: chat.id, caption: caption, replyTo: replyID
+                ) { success in
+                    continuation.resume(returning: success)
+                }
+            }
+            guard accepted else {
+                attachmentError = conversations.errorMessage ??
+                    "Не удалось отправить альбом."
+                return
+            }
+            attachments.removeAll { item in batch.contains(where: { $0.id == item.id }) }
+            draft = ""
+            replyTarget = nil
+            return
+        }
 
         for item in attachments {
             let accepted = await withCheckedContinuation { continuation in

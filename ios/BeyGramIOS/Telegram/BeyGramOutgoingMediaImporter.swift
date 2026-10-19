@@ -1,9 +1,11 @@
 import Foundation
 import ImageIO
+import AVFoundation
 import UIKit
 
 enum BeyGramOutgoingKind: String, Equatable {
     case photo
+    case video
     case document
 }
 
@@ -15,6 +17,7 @@ struct BeyGramOutgoingAttachment: Identifiable, Equatable {
     let sizeBytes: Int64
     let width: Int
     let height: Int
+    let durationSeconds: Int
 
     var sizeText: String {
         ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)
@@ -24,6 +27,7 @@ struct BeyGramOutgoingAttachment: Identifiable, Equatable {
 enum BeyGramAttachmentPreparationError: LocalizedError {
     case unreadable
     case unsupportedPhoto
+    case unsupportedVideo
     case tooLarge
     case emptyFile
     case invalidFile
@@ -32,6 +36,7 @@ enum BeyGramAttachmentPreparationError: LocalizedError {
         switch self {
         case .unreadable: return "Не удалось прочитать выбранный файл."
         case .unsupportedPhoto: return "Не удалось подготовить фотографию."
+        case .unsupportedVideo: return "Не удалось преобразовать видео в MP4 (H.264)."
         case .tooLarge: return "Для этого тестового этапа файл должен быть меньше 200 МБ."
         case .emptyFile: return "Пустые файлы пока не поддерживаются."
         case .invalidFile: return "Это не обычный файл."
@@ -82,7 +87,8 @@ enum BeyGramOutgoingMediaImporter {
             return BeyGramOutgoingAttachment(
                 id: id, kind: .photo, localURL: file,
                 displayName: "Фото.jpg",
-                sizeBytes: Int64(compressed.count), width: cg.width, height: cg.height
+                sizeBytes: Int64(compressed.count), width: cg.width, height: cg.height,
+                durationSeconds: 0
             )
         }.value
     }
@@ -121,9 +127,78 @@ enum BeyGramOutgoingMediaImporter {
             return BeyGramOutgoingAttachment(
                 id: id, kind: .document, localURL: local,
                 displayName: providerURL.lastPathComponent,
-                sizeBytes: Int64(actual), width: 0, height: 0
+                sizeBytes: Int64(actual), width: 0, height: 0,
+                durationSeconds: 0
             )
         }.value
+    }
+
+    /// Convert a video handed over by PhotosPicker into an upload-safe MP4.
+    /// Input comes from a FileRepresentation copy, not in-memory Data.
+    static func prepareVideo(_ pickedURL: URL) async throws -> BeyGramOutgoingAttachment {
+        let resource = try pickedURL.resourceValues(forKeys: [.fileSizeKey])
+        guard let sourceSize = resource.fileSize, sourceSize > 0 else {
+            throw BeyGramAttachmentPreparationError.emptyFile
+        }
+        guard sourceSize <= 350 * 1024 * 1024 else {
+            throw BeyGramAttachmentPreparationError.tooLarge
+        }
+
+        let asset = AVURLAsset(url: pickedURL)
+        let duration = try await asset.load(.duration)
+        let seconds = CMTimeGetSeconds(duration)
+        guard seconds.isFinite, seconds > 0 else {
+            throw BeyGramAttachmentPreparationError.unsupportedVideo
+        }
+
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        guard let track = tracks.first else {
+            throw BeyGramAttachmentPreparationError.unsupportedVideo
+        }
+        let naturalSize = try await track.load(.naturalSize)
+        let transform = try await track.load(.preferredTransform)
+        let bounds = CGRect(origin: .zero, size: naturalSize).applying(transform)
+        let width = Int(abs(bounds.width))
+        let height = Int(abs(bounds.height))
+        guard width > 0, height > 0 else {
+            throw BeyGramAttachmentPreparationError.unsupportedVideo
+        }
+
+        let id = UUID()
+        let folder = try stagedDirectory(for: id)
+        let destination = folder.appendingPathComponent("video.mp4")
+        do {
+            guard let session = AVAssetExportSession(
+                asset: asset, presetName: AVAssetExportPresetMediumQuality
+            ), session.supportedFileTypes.contains(.mp4) else {
+                throw BeyGramAttachmentPreparationError.unsupportedVideo
+            }
+            session.outputFileType = .mp4
+            session.outputURL = destination
+            session.shouldOptimizeForNetworkUse = true
+
+            let status: AVAssetExportSession.Status = await withCheckedContinuation { continuation in
+                session.exportAsynchronously {
+                    continuation.resume(returning: session.status)
+                }
+            }
+            guard status == .completed else {
+                throw session.error ?? BeyGramAttachmentPreparationError.unsupportedVideo
+            }
+            let meta = try destination.resourceValues(forKeys: [.fileSizeKey])
+            guard let bytes = meta.fileSize, bytes > 0, bytes <= 200 * 1024 * 1024 else {
+                throw BeyGramAttachmentPreparationError.tooLarge
+            }
+            return BeyGramOutgoingAttachment(
+                id: id, kind: .video, localURL: destination,
+                displayName: "Видео.mp4", sizeBytes: Int64(bytes),
+                width: width, height: height,
+                durationSeconds: Int(ceil(seconds))
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
     }
 
     /// Don't remove staged files immediately on sendMessage's pending response:

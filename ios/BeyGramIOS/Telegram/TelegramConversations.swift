@@ -589,38 +589,7 @@ final class TelegramConversations: ObservableObject {
             return
         }
 
-        let file = InputFile.inputFileLocal(InputFileLocal(path: attachment.localURL.path))
-        let formatted = trimmed.isEmpty
-            ? nil : FormattedText(entities: [], text: trimmed)
-        let content: InputMessageContent
-
-        switch attachment.kind {
-        case .photo:
-            content = .inputMessagePhoto(InputMessagePhoto(
-                caption: formatted,
-                hasSpoiler: false,
-                photo: InputPhoto(
-                    addedStickerFileIds: [],
-                    height: attachment.height,
-                    photo: file,
-                    thumbnail: nil,
-                    video: nil,
-                    width: attachment.width
-                ),
-                selfDestructType: nil,
-                showCaptionAboveMedia: false
-            ))
-        case .document:
-            content = .inputMessageDocument(InputMessageDocument(
-                caption: formatted,
-                document: InputDocument(
-                    disableContentTypeDetection: true,
-                    document: file,
-                    thumbnail: nil
-                )
-            ))
-        }
-
+        let content = makeOutgoingContent(attachment, caption: trimmed)
         let reply: InputMessageReplyTo? = messageID.map {
             .inputMessageReplyToMessage(InputMessageReplyToMessage(
                 checklistTaskId: 0, messageId: $0,
@@ -654,6 +623,122 @@ final class TelegramConversations: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             completion(false)
+        }
+    }
+
+    /// Builds exactly the same TDLib input content for single sends and albums.
+    private func makeOutgoingContent(
+        _ attachment: BeyGramOutgoingAttachment, caption: String
+    ) -> InputMessageContent {
+        let input = InputFile.inputFileLocal(
+            InputFileLocal(path: attachment.localURL.path)
+        )
+        let formatted: FormattedText? = caption.isEmpty
+            ? nil : FormattedText(entities: [], text: caption)
+
+        switch attachment.kind {
+        case .photo:
+            return .inputMessagePhoto(InputMessagePhoto(
+                caption: formatted,
+                hasSpoiler: false,
+                photo: InputPhoto(
+                    addedStickerFileIds: [],
+                    height: attachment.height,
+                    photo: input,
+                    thumbnail: nil,
+                    video: nil,
+                    width: attachment.width
+                ),
+                selfDestructType: nil,
+                showCaptionAboveMedia: false
+            ))
+        case .video:
+            return .inputMessageVideo(InputMessageVideo(
+                caption: formatted,
+                hasSpoiler: false,
+                selfDestructType: nil,
+                showCaptionAboveMedia: false,
+                video: InputVideo(
+                    addedStickerFileIds: [],
+                    cover: nil,
+                    duration: attachment.durationSeconds,
+                    height: attachment.height,
+                    startTimestamp: 0,
+                    supportsStreaming: true,
+                    thumbnail: nil,
+                    video: input,
+                    width: attachment.width
+                )
+            ))
+        case .document:
+            return .inputMessageDocument(InputMessageDocument(
+                caption: formatted,
+                document: InputDocument(
+                    disableContentTypeDetection: true,
+                    document: input,
+                    thumbnail: nil
+                )
+            ))
+        }
+    }
+
+    /// TDLib supports 2–10 photos/videos as one album. Unlike sequential
+    /// sendMessage calls, Telegram displays these as a grouped attachment.
+    func sendMediaAlbum(
+        _ attachments: [BeyGramOutgoingAttachment],
+        to chatID: Int64,
+        caption: String,
+        replyTo replyID: Int64? = nil,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard (2...10).contains(attachments.count),
+              attachments.allSatisfy({ $0.kind == .photo || $0.kind == .video }),
+              caption.count <= 1024 else {
+            errorMessage = "В одном альбоме допускается от 2 до 10 фото или видео."
+            completion(false)
+            return
+        }
+
+        guard attachments.allSatisfy({
+            FileManager.default.fileExists(atPath: $0.localURL.path)
+        }) else {
+            errorMessage = "Одно из вложений больше недоступно."
+            completion(false)
+            return
+        }
+
+        let contents = attachments.enumerated().map { index, attachment in
+            makeOutgoingContent(
+                attachment, caption: index == 0 ? caption : ""
+            )
+        }
+        let reply: InputMessageReplyTo? = replyID.map {
+            .inputMessageReplyToMessage(InputMessageReplyToMessage(
+                checklistTaskId: 0, messageId: $0, pollOptionId: "", quote: nil
+            ))
+        }
+        request(TelegramRequestFactory.make(SendMessageAlbum(
+            chatId: chatID,
+            inputMessageContents: contents,
+            options: nil,
+            replyTo: reply,
+            topicId: nil
+        ))) { [weak self] response in
+            guard TelegramJSON.string(response["@type"]) == "messages" else {
+                self?.errorMessage = TelegramJSON.string(response["message"])
+                completion(false)
+                return
+            }
+            let messages = response["messages"] as? [[String: Any]] ?? []
+            guard messages.count == attachments.count else {
+                self?.errorMessage = "TDLib вернула неполный ответ на отправку альбома."
+                completion(false)
+                return
+            }
+            for message in messages {
+                self?.upsertMessage(message)
+            }
+            completion(true)
         }
     }
 
