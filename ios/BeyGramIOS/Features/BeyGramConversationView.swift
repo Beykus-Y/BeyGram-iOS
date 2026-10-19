@@ -13,6 +13,10 @@ struct BeyGramConversationView: View {
     @AppStorage("beygram.appearance.preset") private var appearancePreset = "warm"
     @State private var draft = ""
     @State private var didReachSearchResult = false
+    @State private var positionedInitialHistory = false
+    @State private var paginationAnchorID: Int64?
+    @State private var latestMessageWasVisible = true
+    @State private var previouslyNewestID: Int64?
     @State private var replyTarget: TelegramChatMessage?
     @State private var editTarget: TelegramChatMessage?
     @State private var actionTarget: TelegramChatMessage?
@@ -35,20 +39,14 @@ struct BeyGramConversationView: View {
             ScrollViewReader { reader in
                 ScrollView {
                     LazyVStack(spacing: 8) {
-                        if !conversations.exhaustedHistory.contains(chat.id) && !messages.isEmpty {
-                            Button {
-                                conversations.loadOlder(chat.id)
-                            } label: {
-                                if isLoading {
-                                    ProgressView().tint(colors.accent)
-                                } else {
-                                    Text("Показать более ранние сообщения")
-                                }
-                            }
-                            .font(.footnote)
-                            .foregroundStyle(colors.accent)
-                            .disabled(isLoading)
-                            .padding(.vertical, 12)
+                        // Older messages are fetched when the user scrolls
+                        // to the first visible row. No manual paging button.
+                        if isLoading && !messages.isEmpty {
+                            ProgressView()
+                                .tint(colors.accent)
+                                .padding(.vertical, 12)
+                                .frame(maxWidth: .infinity)
+                                .accessibilityLabel("Загружаем предыдущие сообщения")
                         }
 
                         if messages.isEmpty {
@@ -70,9 +68,27 @@ struct BeyGramConversationView: View {
                             .id(message.id)
                             .onAppear {
                                 conversations.messageBecameVisible(chatID: chat.id, messageID: message.id)
+                                if message.id == messages.last?.id {
+                                    latestMessageWasVisible = true
+                                }
+                                // onAppear on a LazyVStack row runs only when
+                                // it approaches the viewport, unlike eagerly
+                                // paginating the entire history on chat open.
+                                if message.id == messages.first?.id,
+                                   positionedInitialHistory,
+                                   (!latestMessageWasVisible || messages.count <= 12),
+                                   !isLoading,
+                                   !conversations.exhaustedHistory.contains(chat.id),
+                                   paginationAnchorID == nil {
+                                    paginationAnchorID = message.id
+                                    conversations.loadOlder(chat.id)
+                                }
                             }
                             .onDisappear {
                                 conversations.messageBecameHidden(chatID: chat.id, messageID: message.id)
+                                if message.id == messages.last?.id {
+                                    latestMessageWasVisible = false
+                                }
                             }
                         }
                     }
@@ -80,17 +96,50 @@ struct BeyGramConversationView: View {
                     .padding(.vertical, 16)
                 }
                 .onChange(of: messages.count) { _ in
-                    if let target = initialMessageID, !didReachSearchResult {
-                        if messages.contains(where: { $0.id == target }) {
-                            withAnimation(.easeOut(duration: 0.22)) {
-                                reader.scrollTo(target, anchor: .center)
-                            }
+                    let newest = messages.last?.id
+                    // Prepending history must never call the generic
+                    // scroll-to-bottom path: restore the former top row.
+                    if let anchor = paginationAnchorID,
+                       messages.first?.id != anchor {
+                        paginationAnchorID = nil
+                        reader.scrollTo(anchor, anchor: .top)
+                        previouslyNewestID = newest
+                        return
+                    }
+
+                    if !positionedInitialHistory {
+                        if let target = initialMessageID {
+                            guard messages.contains(where: { $0.id == target }) else { return }
+                            reader.scrollTo(target, anchor: .center)
                             didReachSearchResult = true
+                        } else {
+                            guard let newest else { return }
+                            reader.scrollTo(newest, anchor: .bottom)
+                            latestMessageWasVisible = true
                         }
-                    } else if initialMessageID == nil, let id = messages.last?.id {
+                        positionedInitialHistory = true
+                        previouslyNewestID = newest
+                        return
+                    }
+
+                    // New incoming/outgoing messages only move the viewport
+                    // when the latest message was already visible.
+                    if initialMessageID == nil, paginationAnchorID == nil,
+                       newest != previouslyNewestID, latestMessageWasVisible,
+                       let newest {
                         withAnimation(.easeOut(duration: 0.22)) {
-                            reader.scrollTo(id, anchor: .bottom)
+                            reader.scrollTo(newest, anchor: .bottom)
                         }
+                    }
+                    previouslyNewestID = newest
+                }
+                .onChange(of: isLoading) { loading in
+                    // A failed or exhausted page may contain no new IDs.
+                    // Release the anchor to allow another attempt on a
+                    // subsequent scroll away and back to the top.
+                    if !loading, let anchor = paginationAnchorID,
+                       messages.first?.id == anchor {
+                        paginationAnchorID = nil
                     }
                 }
                 .onAppear {
