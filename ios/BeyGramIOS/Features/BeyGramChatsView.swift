@@ -28,6 +28,14 @@ struct BeyGramChatsView: View {
 
     private var colors: BeyGramChatColors { .selected(scheme, preset: appearancePreset) }
 
+    private var remoteOnly: [TelegramChatPreview] {
+        guard !search.isEmpty else { return [] }
+        let visibleIDs = Set(filtered.map(\.id))
+        return conversations.matchingChats.filter {
+            filter.matches($0) && !visibleIDs.contains($0.id)
+        }
+    }
+
     private var filtered: [TelegramChatPreview] {
         conversations.mainChats.filter { chat in
             filter.matches(chat) &&
@@ -94,7 +102,20 @@ struct BeyGramChatsView: View {
                                 chatRows(regular)
                             }
 
-                            if filtered.isEmpty {
+                            if !remoteOnly.isEmpty {
+                                sectionHeader("ЕЩЁ В TELEGRAM")
+                                chatRows(remoteOnly)
+                            }
+
+                            if conversations.isSearchingChats && !search.isEmpty {
+                                ProgressView("Ищем чаты в Telegram…")
+                                    .font(.footnote)
+                                    .tint(colors.accent)
+                                    .padding(.vertical, 18)
+                            }
+
+                            if filtered.isEmpty && remoteOnly.isEmpty &&
+                               !conversations.isSearchingChats {
                                 emptyState
                             }
                         }
@@ -107,8 +128,19 @@ struct BeyGramChatsView: View {
             }
             .background(colors.screen.ignoresSafeArea())
             .navigationBarHidden(true)
+            .task(id: search) {
+                let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !query.isEmpty else {
+                    conversations.clearChatSearch()
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled else { return }
+                conversations.searchKnownChats(query)
+            }
             .navigationDestination(for: Int64.self) { id in
-                if let chat = (conversations.mainChats + conversations.archivedChats).first(where: { $0.id == id }) {
+                if let chat = (conversations.mainChats + conversations.archivedChats +
+                   conversations.matchingChats).first(where: { $0.id == id }) {
                     BeyGramConversationView(conversations: conversations, chat: chat)
                 } else {
                     Text("Чат больше недоступен.")
@@ -202,7 +234,9 @@ struct BeyGramChatsView: View {
             Text(search.isEmpty ? "Чатов пока нет" : "Ничего не найдено")
                 .font(.headline)
                 .foregroundStyle(colors.primary)
-            Text("Чаты появятся здесь после загрузки из Telegram.")
+            Text(search.isEmpty
+                 ? "Чаты появятся здесь после загрузки из Telegram."
+                 : "Попробуйте другое имя или название чата.")
                 .font(.footnote)
                 .foregroundStyle(colors.secondary)
                 .multilineTextAlignment(.center)
