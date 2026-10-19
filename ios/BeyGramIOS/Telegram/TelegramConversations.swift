@@ -6,6 +6,8 @@ import TDLibKit
 @MainActor
 final class TelegramConversations: ObservableObject {
     @Published private(set) var mainChats: [TelegramChatPreview] = []
+    @Published private(set) var matchingChats: [TelegramChatPreview] = []
+    @Published private(set) var isSearchingChats = false
     @Published private(set) var contacts: [TelegramContact] = []
     @Published private(set) var contactsLoading = false
     @Published private(set) var archivedChats: [TelegramChatPreview] = []
@@ -19,6 +21,8 @@ final class TelegramConversations: ObservableObject {
 
     private weak var client: TDLibClient?
     private var rawChats: [Int64: [String: Any]] = [:]
+    private var searchRevision = 0
+    private var searchedIDs: [Int64] = []
     private var activeChats: Set<Int64> = []
     private var visibleMessages: [Int64: Set<Int64>] = [:]
     private var readFlushTasks: [Int64: Task<Void, Never>] = [:]
@@ -114,6 +118,65 @@ final class TelegramConversations: ObservableObject {
         }
     }
 
+    /// Combine TDLib's offline index with its known-chat server search.
+    /// A revision token prevents old responses replacing a newer query.
+    func searchKnownChats(_ query: String) {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        searchRevision += 1
+        let revision = searchRevision
+        searchedIDs = []
+        matchingChats = []
+        isSearchingChats = !normalized.isEmpty
+        guard !normalized.isEmpty else { return }
+
+        request(TelegramRequestFactory.make(SearchChats(
+            limit: 35, query: normalized, typeFilter: nil
+        ))) { [weak self] response in
+            self?.appendSearchMatches(response, revision: revision)
+        }
+
+        if normalized.count >= 2 {
+            request(TelegramRequestFactory.make(SearchChatsOnServer(
+                limit: 35, query: normalized, typeFilter: nil
+            ))) { [weak self] response in
+                self?.appendSearchMatches(response, revision: revision)
+                if self?.searchRevision == revision {
+                    self?.isSearchingChats = false
+                }
+            }
+        } else {
+            isSearchingChats = false
+        }
+    }
+
+    func clearChatSearch() {
+        searchRevision += 1
+        searchedIDs = []
+        matchingChats = []
+        isSearchingChats = false
+    }
+
+    private func appendSearchMatches(_ response: [String: Any], revision: Int) {
+        guard revision == searchRevision else { return }
+        let items = response["chat_ids"] as? [Any] ?? []
+        var seen = Set(searchedIDs)
+        for item in items.prefix(35) {
+            let id = TelegramJSON.int64(item)
+            if id != 0 && seen.insert(id).inserted {
+                searchedIDs.append(id)
+                if rawChats[id] == nil { fetchChat(id) }
+            }
+        }
+        publishSearchResults()
+    }
+
+    private func publishSearchResults() {
+        matchingChats = searchedIDs.compactMap { id in
+            guard let value = rawChats[id] else { return nil }
+            return TelegramChatPreview.from(value)
+        }
+    }
+
     private func fetchChat(_ id: Int64) {
         request(TelegramRequestFactory.make(GetChat(chatId: id))) { [weak self] result in
             guard TelegramJSON.string(result["@type"]) == "chat" else { return }
@@ -126,6 +189,7 @@ final class TelegramConversations: ObservableObject {
         guard id != 0 else { return }
         rawChats[id] = chat
         publishChats()
+        publishSearchResults()
     }
 
     private func modifyChat(_ id: Int64, mutate: (inout [String: Any]) -> Void) {
@@ -136,6 +200,7 @@ final class TelegramConversations: ObservableObject {
         mutate(&chat)
         rawChats[id] = chat
         publishChats()
+        publishSearchResults()
     }
 
     private func publishChats() {
@@ -524,38 +589,7 @@ final class TelegramConversations: ObservableObject {
             return
         }
 
-        let file = InputFile.inputFileLocal(InputFileLocal(path: attachment.localURL.path))
-        let formatted = trimmed.isEmpty
-            ? nil : FormattedText(entities: [], text: trimmed)
-        let content: InputMessageContent
-
-        switch attachment.kind {
-        case .photo:
-            content = .inputMessagePhoto(InputMessagePhoto(
-                caption: formatted,
-                hasSpoiler: false,
-                photo: InputPhoto(
-                    addedStickerFileIds: [],
-                    height: attachment.height,
-                    photo: file,
-                    thumbnail: nil,
-                    video: nil,
-                    width: attachment.width
-                ),
-                selfDestructType: nil,
-                showCaptionAboveMedia: false
-            ))
-        case .document:
-            content = .inputMessageDocument(InputMessageDocument(
-                caption: formatted,
-                document: InputDocument(
-                    disableContentTypeDetection: true,
-                    document: file,
-                    thumbnail: nil
-                )
-            ))
-        }
-
+        let content = makeOutgoingContent(attachment, caption: trimmed)
         let reply: InputMessageReplyTo? = messageID.map {
             .inputMessageReplyToMessage(InputMessageReplyToMessage(
                 checklistTaskId: 0, messageId: $0,
@@ -589,6 +623,122 @@ final class TelegramConversations: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             completion(false)
+        }
+    }
+
+    /// Builds exactly the same TDLib input content for single sends and albums.
+    private func makeOutgoingContent(
+        _ attachment: BeyGramOutgoingAttachment, caption: String
+    ) -> InputMessageContent {
+        let input = InputFile.inputFileLocal(
+            InputFileLocal(path: attachment.localURL.path)
+        )
+        let formatted: FormattedText? = caption.isEmpty
+            ? nil : FormattedText(entities: [], text: caption)
+
+        switch attachment.kind {
+        case .photo:
+            return .inputMessagePhoto(InputMessagePhoto(
+                caption: formatted,
+                hasSpoiler: false,
+                photo: InputPhoto(
+                    addedStickerFileIds: [],
+                    height: attachment.height,
+                    photo: input,
+                    thumbnail: nil,
+                    video: nil,
+                    width: attachment.width
+                ),
+                selfDestructType: nil,
+                showCaptionAboveMedia: false
+            ))
+        case .video:
+            return .inputMessageVideo(InputMessageVideo(
+                caption: formatted,
+                hasSpoiler: false,
+                selfDestructType: nil,
+                showCaptionAboveMedia: false,
+                video: InputVideo(
+                    addedStickerFileIds: [],
+                    cover: nil,
+                    duration: attachment.durationSeconds,
+                    height: attachment.height,
+                    startTimestamp: 0,
+                    supportsStreaming: true,
+                    thumbnail: nil,
+                    video: input,
+                    width: attachment.width
+                )
+            ))
+        case .document:
+            return .inputMessageDocument(InputMessageDocument(
+                caption: formatted,
+                document: InputDocument(
+                    disableContentTypeDetection: true,
+                    document: input,
+                    thumbnail: nil
+                )
+            ))
+        }
+    }
+
+    /// TDLib supports 2–10 photos/videos as one album. Unlike sequential
+    /// sendMessage calls, Telegram displays these as a grouped attachment.
+    func sendMediaAlbum(
+        _ attachments: [BeyGramOutgoingAttachment],
+        to chatID: Int64,
+        caption: String,
+        replyTo replyID: Int64? = nil,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard (2...10).contains(attachments.count),
+              attachments.allSatisfy({ $0.kind == .photo || $0.kind == .video }),
+              caption.count <= 1024 else {
+            errorMessage = "В одном альбоме допускается от 2 до 10 фото или видео."
+            completion(false)
+            return
+        }
+
+        guard attachments.allSatisfy({
+            FileManager.default.fileExists(atPath: $0.localURL.path)
+        }) else {
+            errorMessage = "Одно из вложений больше недоступно."
+            completion(false)
+            return
+        }
+
+        let contents = attachments.enumerated().map { index, attachment in
+            makeOutgoingContent(
+                attachment, caption: index == 0 ? caption : ""
+            )
+        }
+        let reply: InputMessageReplyTo? = replyID.map {
+            .inputMessageReplyToMessage(InputMessageReplyToMessage(
+                checklistTaskId: 0, messageId: $0, pollOptionId: "", quote: nil
+            ))
+        }
+        request(TelegramRequestFactory.make(SendMessageAlbum(
+            chatId: chatID,
+            inputMessageContents: contents,
+            options: nil,
+            replyTo: reply,
+            topicId: nil
+        ))) { [weak self] response in
+            guard TelegramJSON.string(response["@type"]) == "messages" else {
+                self?.errorMessage = TelegramJSON.string(response["message"])
+                completion(false)
+                return
+            }
+            let messages = response["messages"] as? [[String: Any]] ?? []
+            guard messages.count == attachments.count else {
+                self?.errorMessage = "TDLib вернула неполный ответ на отправку альбома."
+                completion(false)
+                return
+            }
+            for message in messages {
+                self?.upsertMessage(message)
+            }
+            completion(true)
         }
     }
 
