@@ -338,6 +338,11 @@ final class TelegramConversations: ObservableObject {
             }
         case "updateChatReadInbox":
             modifyChat(chatID) { $0["unread_count"] = update["unread_count"] }
+        case "updateChatReadOutbox":
+            // Used for the same single/double checkmark distinction as Android.
+            modifyChat(chatID) {
+                $0["last_read_outbox_message_id"] = update["last_read_outbox_message_id"]
+            }
         case "updateChatNotificationSettings":
             modifyChat(chatID) { $0["notification_settings"] = update["notification_settings"] }
         case "updateNewMessage":
