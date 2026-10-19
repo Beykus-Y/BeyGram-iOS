@@ -120,6 +120,7 @@ struct TelegramChatMessage: Identifiable, Equatable {
     let timestamp: Int
     let status: String
     let isText: Bool
+    let media: TelegramMessageMedia?
 
     var time: String { TelegramJSON.shortTime(timestamp) }
 
@@ -136,7 +137,8 @@ struct TelegramChatMessage: Identifiable, Equatable {
             outgoing: TelegramJSON.flag(raw["is_outgoing"]),
             timestamp: TelegramJSON.integer(raw["date"]),
             status: sendState,
-            isText: TelegramJSON.string(content["@type"]) == "messageText"
+            isText: TelegramJSON.string(content["@type"]) == "messageText",
+            media: TelegramMessageMedia.from(raw)
         )
     }
 }

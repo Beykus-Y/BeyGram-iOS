@@ -48,7 +48,7 @@ struct BeyGramConversationView: View {
                         }
 
                         ForEach(messages) { message in
-                            BeyGramMessageBubble(message: message, colors: colors)
+                            BeyGramMessageBubble(message: message, conversations: conversations, colors: colors)
                                 .id(message.id)
                         }
                     }
@@ -130,6 +130,7 @@ struct BeyGramConversationView: View {
 
 private struct BeyGramMessageBubble: View {
     let message: TelegramChatMessage
+    @ObservedObject var conversations: TelegramConversations
     let colors: BeyGramChatColors
 
     var body: some View {
@@ -137,7 +138,13 @@ private struct BeyGramMessageBubble: View {
             if message.outgoing { Spacer(minLength: 55) }
 
             VStack(alignment: .leading, spacing: 5) {
-                if message.isText {
+                if let media = message.media {
+                    BeyGramMediaAttachmentView(
+                        media: media,
+                        conversations: conversations,
+                        colors: colors
+                    )
+                } else if message.isText {
                     Text(message.text)
                         .font(.system(size: 15))
                         .foregroundStyle(colors.primary)
