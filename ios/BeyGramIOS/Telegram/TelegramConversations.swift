@@ -291,11 +291,14 @@ final class TelegramConversations: ObservableObject {
     ) {
         request(query) { result in
             let kind = TelegramJSON.string(result["@type"])
-            if kind == "error" {
+            switch kind {
+            case "ok":
+                completion(nil)
+            case "error":
                 let detail = TelegramJSON.string(result["message"])
                 completion(detail.isEmpty ? "Telegram отклонил действие." : detail)
-            } else {
-                completion(nil)
+            default:
+                completion("Неожиданный ответ TDLib: действие не подтверждено.")
             }
         }
     }
