@@ -13,7 +13,7 @@ private enum BeyGramChatFilter: String, CaseIterable, Identifiable {
         case .all: return true
         case .people: return !chat.isGroup
         case .groups: return chat.isGroup
-        case .unread: return chat.unreadCount > 0
+        case .unread: return chat.hasUnread
         }
     }
 }
@@ -27,6 +27,8 @@ struct BeyGramChatsView: View {
     @State private var filter = BeyGramChatFilter.all
     @State private var showingArchive = false
     @State private var showingGlobalSearch = false
+    @State private var chatToDelete: TelegramChatPreview?
+    @State private var chatActionError: String?
 
     private var colors: BeyGramChatColors { .selected(scheme, preset: appearancePreset) }
 
@@ -142,6 +144,35 @@ struct BeyGramChatsView: View {
             .navigationBarHidden(true)
             .sheet(isPresented: $showingGlobalSearch) {
                 BeyGramGlobalMessageSearchView(conversations: conversations)
+            }
+            .confirmationDialog(
+                "Удалить чат «\(chatToDelete?.title ?? "")»?",
+                isPresented: Binding(
+                    get: { chatToDelete != nil },
+                    set: { if !$0 { chatToDelete = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let chat = chatToDelete {
+                    Button("Удалить чат только у меня", role: .destructive) {
+                        conversations.deleteChatForSelf(chat) { chatActionError = $0 }
+                        chatToDelete = nil
+                    }
+                }
+                Button("Отмена", role: .cancel) { chatToDelete = nil }
+            } message: {
+                Text("История чата будет удалена из вашего аккаунта. У других участников сообщения останутся.")
+            }
+            .alert(
+                "Не удалось выполнить действие",
+                isPresented: Binding(
+                    get: { chatActionError != nil },
+                    set: { if !$0 { chatActionError = nil } }
+                )
+            ) {
+                Button("Понятно", role: .cancel) { chatActionError = nil }
+            } message: {
+                Text(chatActionError ?? "")
             }
             .task(id: search) {
                 // Immediately hide stale results while waiting for debounce.
@@ -316,6 +347,53 @@ struct BeyGramChatsView: View {
                 )
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                // Context actions operate only on actual main/archive rows,
+                // never on unlisted matches from Telegram server search.
+                if chat.mainOrder > 0 || chat.archiveOrder > 0 {
+                    Button {
+                        conversations.moveChat(
+                            chat, toArchive: chat.archiveOrder == 0
+                        ) { chatActionError = $0 }
+                    } label: {
+                        Label(
+                            chat.archiveOrder > 0 ? "Вернуть из архива" : "В архив",
+                            systemImage: chat.archiveOrder > 0 ? "tray.and.arrow.up" : "archivebox"
+                        )
+                    }
+
+                    Button {
+                        conversations.setChatPinned(
+                            chat, pinned: !chat.isPinned
+                        ) { chatActionError = $0 }
+                    } label: {
+                        Label(
+                            chat.isPinned ? "Открепить" : "Закрепить",
+                            systemImage: chat.isPinned ? "pin.slash" : "pin"
+                        )
+                    }
+
+                    Button {
+                        conversations.setChatUnread(
+                            chat, unread: !chat.hasUnread
+                        ) { chatActionError = $0 }
+                    } label: {
+                        Label(
+                            chat.hasUnread ? "Отметить прочитанным" : "Пометить непрочитанным",
+                            systemImage: chat.hasUnread ? "envelope.open" : "envelope.badge"
+                        )
+                    }
+
+                    if chat.canDeleteForSelf {
+                        Divider()
+                        Button(role: .destructive) {
+                            chatToDelete = chat
+                        } label: {
+                            Label("Удалить чат…", systemImage: "trash")
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -365,8 +443,8 @@ private struct BeyGramChatRow: View {
 
                     Text(chat.lastMessageTime)
                         .font(.system(size: 12,
-                                      weight: chat.unreadCount > 0 ? .semibold : .regular))
-                        .foregroundStyle(chat.unreadCount > 0 ? colors.accent : colors.secondary)
+                                      weight: chat.hasUnread ? .semibold : .regular))
+                        .foregroundStyle(chat.hasUnread ? colors.accent : colors.secondary)
                 }
 
                 HStack(spacing: 6) {
@@ -400,8 +478,9 @@ private struct BeyGramChatRow: View {
                         }
                     }
 
-                    if chat.unreadCount > 0 {
-                        Text(chat.unreadCount > 99 ? "99+" : String(chat.unreadCount))
+                    if chat.hasUnread {
+                        Text(chat.unreadCount > 99 ? "99+" :
+                             (chat.unreadCount > 0 ? String(chat.unreadCount) : "•"))
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(chat.isMuted ? colors.surface : colors.onAccent)
                             .padding(.horizontal, 7)
