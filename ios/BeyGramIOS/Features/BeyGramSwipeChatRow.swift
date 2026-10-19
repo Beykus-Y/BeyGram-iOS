@@ -45,6 +45,26 @@ struct BeyGramSwipeChatRow<Content: View>: View {
     }
 
     var body: some View {
+        Group {
+            if canSwipe {
+                swipeSurface
+                    .accessibilityAction(named: Text(
+                        chat.archiveOrder > 0 ? "Вернуть из архива" : "В архив"
+                    )) {
+                        onArchive()
+                    }
+                    .accessibilityAction(named: Text(
+                        chat.hasUnread ? "Отметить прочитанным" : "Пометить непрочитанным"
+                    )) {
+                        onRead()
+                    }
+            } else {
+                swipeSurface
+            }
+        }
+    }
+
+    private var swipeSurface: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: 0) {
                 // Revealed on a rightward gesture. The action itself is
@@ -119,12 +139,6 @@ struct BeyGramSwipeChatRow<Content: View>: View {
         }
         .clipped()
         .animation(motion, value: openChatID)
-        .accessibilityAction(named: Text(chat.archiveOrder > 0 ? "Вернуть из архива" : "В архив")) {
-            if canSwipe { onArchive() }
-        }
-        .accessibilityAction(named: Text(chat.hasUnread ? "Отметить прочитанным" : "Пометить непрочитанным")) {
-            if canSwipe { onRead() }
-        }
     }
 
     private func close() {
