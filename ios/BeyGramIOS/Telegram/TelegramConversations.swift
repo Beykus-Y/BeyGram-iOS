@@ -359,6 +359,56 @@ final class TelegramConversations: ObservableObject {
         }
     }
 
+    /// Explicitly overrides mute for this one chat while preserving every
+    /// independent TDLib notification setting (sound, previews, stories, etc.).
+    func setChatMuted(
+        _ chat: TelegramChatPreview,
+        muted: Bool,
+        completion: @escaping (String?) -> Void
+    ) {
+        guard let raw = rawChats[chat.id] else {
+            completion("Информация о чате ещё не загружена.")
+            return
+        }
+        let rawSettings = TelegramJSON.object(raw["notification_settings"])
+        guard !rawSettings.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: rawSettings) else {
+            completion("Настройки уведомлений этого чата недоступны.")
+            return
+        }
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        guard let settings = try? decoder.decode(ChatNotificationSettings.self, from: data) else {
+            // Never replace unknown existing settings with guessed defaults.
+            completion("Не удалось прочитать все настройки уведомлений. Изменения не внесены.")
+            return
+        }
+
+        // TDLib considers a mute duration of more than 366 days permanent.
+        let replacement = ChatNotificationSettings(
+            disableMentionNotifications: settings.disableMentionNotifications,
+            disablePinnedMessageNotifications: settings.disablePinnedMessageNotifications,
+            muteFor: muted ? 366 * 24 * 60 * 60 + 1 : 0,
+            muteStories: settings.muteStories,
+            showPreview: settings.showPreview,
+            showStoryPoster: settings.showStoryPoster,
+            soundId: settings.soundId,
+            storySoundId: settings.storySoundId,
+            useDefaultDisableMentionNotifications: settings.useDefaultDisableMentionNotifications,
+            useDefaultDisablePinnedMessageNotifications: settings.useDefaultDisablePinnedMessageNotifications,
+            useDefaultMuteFor: false,
+            useDefaultMuteStories: settings.useDefaultMuteStories,
+            useDefaultShowPreview: settings.useDefaultShowPreview,
+            useDefaultShowStoryPoster: settings.useDefaultShowStoryPoster,
+            useDefaultSound: settings.useDefaultSound,
+            useDefaultStorySound: settings.useDefaultStorySound
+        )
+        performChatAction(TelegramRequestFactory.make(SetChatNotificationSettings(
+            chatId: chat.id, notificationSettings: replacement
+        )), completion: completion)
+    }
+
     func deleteChatForSelf(
         _ chat: TelegramChatPreview,
         completion: @escaping (String?) -> Void
