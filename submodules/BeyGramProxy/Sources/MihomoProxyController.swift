@@ -150,7 +150,12 @@ public final class MihomoProxyController {
                 let group = try self.client.proxies(group: MihomoProxyController.groupName)
                 var delays: [String: Int] = [:]
                 for node in group.nodes {
-                    delays[node.name] = try self.client.testDelay(proxy: node.name, timeoutMilliseconds: 5000)
+                    // One node that fails must not cancel the others. It is reported as -1.
+                    do {
+                        delays[node.name] = try self.client.testDelay(proxy: node.name, timeoutMilliseconds: 5000)
+                    } catch {
+                        delays[node.name] = -1
+                    }
                 }
                 self.deliver(.success(delays), to: completion)
             } catch {
