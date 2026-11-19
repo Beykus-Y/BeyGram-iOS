@@ -324,7 +324,12 @@ final class AuthorizedApplicationContext {
                 return
             }
 
-            ingestTriggerWordsFromAccount(context: context, batches: messageList)
+            ingestTriggerWordsFromAccount(context: context, batches: messageList, isChatOpen: { [weak self] peerId in
+                guard let controller = self?.rootController.topViewController as? ChatControllerImpl else {
+                    return false
+                }
+                return controller.chatLocation.peerId == peerId
+            })
 
             if let strongSelf = self, let (messages, _, notify, threadData) = messageList.last, let firstMessage = messages.first {
                 if UIApplication.shared.applicationState == .active {

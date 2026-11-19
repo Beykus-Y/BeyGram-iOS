@@ -98,7 +98,8 @@ private func postTriggerAlert(identifier: String, title: String, body: String, d
 /// Preview and category settings come from the engine, so a hidden preview keeps no text in the feed and in the alert.
 public func ingestTriggerWordsFromAccount(
     context: AccountContext,
-    batches: [([Message], PeerGroupId, Bool, MessageHistoryThreadData?)]
+    batches: [([Message], PeerGroupId, Bool, MessageHistoryThreadData?)],
+    isChatOpen: @escaping (EnginePeer.Id) -> Bool
 ) {
     guard BeyGramSettings.shared.isEnabled(.triggerWords), !TriggerWordsStore.shared.state.rules.isEmpty else {
         return
@@ -121,7 +122,7 @@ public func ingestTriggerWordsFromAccount(
                     text: message.text,
                     senderName: senderName(message.author),
                     isChatMuted: settings.muted,
-                    isChatOpenOnScreen: false,
+                    isChatOpenOnScreen: isChatOpen(message.id.peerId),
                     isProtectedContent: message.flags.contains(.CopyProtected)
                 )
                 let account = TriggerWordAccountSettings(
