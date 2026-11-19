@@ -1,4 +1,5 @@
 import Foundation
+import BeyGramTriggerWordsTelegram
 import UIKit
 import Intents
 import TelegramPresentationData
@@ -322,6 +323,8 @@ final class AuthorizedApplicationContext {
             if messageList.isEmpty {
                 return
             }
+
+            ingestTriggerWordsFromAccount(context: context, batches: messageList)
 
             if let strongSelf = self, let (messages, _, notify, threadData) = messageList.last, let firstMessage = messages.first {
                 if UIApplication.shared.applicationState == .active {
