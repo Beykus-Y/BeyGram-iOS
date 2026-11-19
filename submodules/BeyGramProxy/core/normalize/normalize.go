@@ -235,7 +235,7 @@ func decodeBase64Document(source string) (string, bool) {
 	if !utf8.Valid(bytes) {
 		return "", false
 	}
-	decoded := strings.TrimSpace(strings.TrimPrefix(string(bytes), "﻿"))
+	decoded := strings.TrimSpace(strings.TrimPrefix(string(bytes), "\uFEFF"))
 	if decoded == "" || strings.ContainsRune(decoded, 0) {
 		return "", false
 	}
