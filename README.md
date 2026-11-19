@@ -1,84 +1,116 @@
-# BeyGram
+# Telegram iOS Source Code Compilation Guide
 
-Android-клиент Telegram на Kotlin, Jetpack Compose и TDLib. Проект находится в активной разработке; интерфейс пока использует простые функциональные экраны.
+We welcome all developers to use our API and source code to create applications on our platform.
+There are several things we require from **all developers** for the moment.
 
-## Что реализовано
+# Creating your Telegram Application
 
-- Авторизация по номеру, коду и облачному паролю Telegram.
-- Список чатов с порядком и закреплениями от Telegram, аватарами и счётчиками непрочитанного.
-- История сообщений, ответы свайпом пузыря или через меню с переходом к оригиналу, копирование, редактирование и удаление с проверкой прав.
-- Просмотр фото, видео и аудио; отправка медиа и исходных файлов с подписью.
-- Сведения о чатах и просмотр/редактирование своего профиля, включая фотографию.
-- Уведомления без Google Play Services/Firebase: прямое подключение TDLib и опциональная фоновая служба.
-- SOCKS5/MTProto/Web-прокси, реакция на смену сети/VPN и диагностика подключения.
-- Прокси Mihomo: HTTPS YAML-подписка, локальный SOCKS на `127.0.0.1` без VPN-профиля, проверка пинга серверов и авто-переключение после затяжного `Connecting`.
-- Раздельные Dev/Prod-варианты и отдельная политика для будущих настроек прочтения и присутствия.
+1. [**Obtain your own api_id**](https://core.telegram.org/api/obtaining_api_id) for your application.
+2. Please **do not** use the name Telegram for your app — or make sure your users understand that it is unofficial.
+3. Kindly **do not** use our standard logo (white paper plane in a blue circle) as your app's logo.
+3. Please study our [**security guidelines**](https://core.telegram.org/mtproto/security_guidelines) and take good care of your users' data and privacy.
+4. Please remember to publish **your** code too in order to comply with the licences.
 
-## Сборка
+# Quick Compilation Guide
 
-Нужны Android SDK с платформой, указанной в `app/build.gradle.kts`, и JDK согласно `gradle/gradle-daemon-jvm.properties`. Минимальная версия Android — 10 (API 29). Gradle Wrapper включён в репозиторий.
+## Get the Code
 
-1. Откройте проект в Android Studio и укажите установленный Android SDK. Локальный путь SDK хранится в игнорируемом `local.properties`.
-2. Скопируйте `secrets.properties.example` в `secrets.properties` и заполните собственные `telegramApiId` и `telegramApiHash`, полученные в [Telegram API development tools](https://my.telegram.org/apps).
-3. Соберите нужный вариант:
-
-```powershell
-.\gradlew.bat :app:assembleDevDebug
-.\gradlew.bat :app:assembleProdRelease
+```
+git clone --recursive -j8 https://github.com/TelegramMessenger/Telegram-iOS.git
 ```
 
-Для Bash используйте `./gradlew` с теми же задачами.
+## Setup Xcode
 
-| Вариант | Application ID | APK |
-| --- | --- | --- |
-| Dev | `com.beykus.beygram.dev` | `app/build/outputs/apk/dev/debug/app-dev-debug.apk` |
-| Prod | `com.beykus.beygram` | `app/build/outputs/apk/prod/release/app-prod-release-unsigned.apk` |
+Install Xcode (directly from https://developer.apple.com/download/applications or using the App Store).
 
-Prod не содержит отладочного режима; для распространения нужно настроить собственную release-подпись. API-ключи не хранятся в репозитории. При отсутствии готовой конфигурации TDLib приложение показывает экран входа с причиной, без чатов.
+## Adjust Configuration
 
-Включены Java bindings TDLib и `libtdjni.so` для **ARM64 (`arm64-v8a`)**. Для других архитектур нужно собрать соответствующие библиотеки; эмулятор x86 без них не использует реальный Telegram. Артефакты TDLib включены намеренно, чтобы ARM64-сборка работала после клонирования. Локальный каталог исходников `td-master` и инструменты сборки не включаются.
+1. Generate a random identifier:
+```
+openssl rand -hex 8
+```
+2. Create a new Xcode project. Use `Telegram` as the Product Name. Use `org.{identifier from step 1}` as the Organization Identifier.
+3. Open `Keychain Access` and navigate to `Certificates`. Locate `Apple Development: your@email.address (XXXXXXXXXX)` and double tap the certificate. Under `Details`, locate `Organizational Unit`. This is the Team ID.
+4. Edit `build-system/template_minimal_development_configuration.json`. Use data from the previous steps.
 
-## Обновление на телефоне
+## Generate an Xcode project
 
-Для **Stable** доступна ручная проверка из приложения: «Настройки → Обновления → Проверить обновления».
-APK скачивается только после подтверждения и устанавливается системным установщиком Android.
-Подробности по совместимости версий, подписанию и GitHub Releases — в [инструкции по Stable-обновлениям](docs/stable-updates.md).
+```
+python3 build-system/Make/Make.py \
+    --cacheDir="$HOME/telegram-bazel-cache" \
+    generateProject \
+    --configurationPath=build-system/template_minimal_development_configuration.json \
+    --xcodeManagedCodesigning
+```
+
+# Advanced Compilation Guide
+
+## Xcode
+
+1. Copy and edit `build-system/appstore-configuration.json`.
+2. Copy `build-system/fake-codesigning`. Create and download provisioning profiles, using the `profiles` folder as a reference for the entitlements.
+3. Generate an Xcode project:
+```
+python3 build-system/Make/Make.py \
+    --cacheDir="$HOME/telegram-bazel-cache" \
+    generateProject \
+    --configurationPath=configuration_from_step_1.json \
+    --codesigningInformationPath=directory_from_step_2
+```
+
+## IPA
+
+1. Repeat the steps from the previous section. Use distribution provisioning profiles.
+2. Run:
+```
+python3 build-system/Make/Make.py \
+    --cacheDir="$HOME/telegram-bazel-cache" \
+    build \
+    --configurationPath=...see previous section... \
+    --codesigningInformationPath=...see previous section... \
+    --buildNumber=100001 \
+    --configuration=release_arm64
+```
+
+# FAQ
+
+## Xcode is stuck at "build-request.json not updated yet"
+
+Occasionally, you might observe the following message in your build log:
+```
+"/Users/xxx/Library/Developer/Xcode/DerivedData/Telegram-xxx/Build/Intermediates.noindex/XCBuildData/xxx.xcbuilddata/build-request.json" not updated yet, waiting...
+```
+
+Should this occur, simply cancel the ongoing build and initiate a new one.
+
+## Telegram_xcodeproj: no such package 
+
+Following a system restart, the auto-generated Xcode project might encounter a build failure accompanied by this error:
+```
+ERROR: Skipping '@rules_xcodeproj_generated//generator/Telegram/Telegram_xcodeproj:Telegram_xcodeproj': no such package '@rules_xcodeproj_generated//generator/Telegram/Telegram_xcodeproj': BUILD file not found in directory 'generator/Telegram/Telegram_xcodeproj' of external repository @rules_xcodeproj_generated. Add a BUILD file to a directory to mark it as a package.
+```
+
+If you encounter this issue, re-run the project generation steps in the README.
 
 
-**Сохраняйте установленное приложение и его данные.** Для обновления используйте `adb install -r` с прежними application ID и ключом подписи. Не исправляйте конфликт подписи удалением приложения: это удалит локальную сессию Telegram.
+# Tips
 
-Для текущего устройства доступен `scripts/update-dev.ps1`: он проверяет существующую установку, заменяет APK и сравнивает исходное время установки. Пути SDK/ADB и серийный номер можно переопределить параметрами скрипта.
+## Codesigning is not required for simulator-only builds
 
-Не запускайте `connectedAndroidTest`/`connectedDevDebugAndroidTest` на установленном приложении с реальным аккаунтом. Для инструментальных проверок нужен отдельный эмулятор или application ID с изолированными данными. Подробные правила — в [AGENTS.md](AGENTS.md).
+Add `--disableProvisioningProfiles`:
+```
+python3 build-system/Make/Make.py \
+    --cacheDir="$HOME/telegram-bazel-cache" \
+    generateProject \
+    --configurationPath=path-to-configuration.json \
+    --codesigningInformationPath=path-to-provisioning-data \
+    --disableProvisioningProfiles
+```
 
-## Уведомления
+## Versions
 
-Разрешите уведомления в Android. Для фонового приёма включите соответствующий переключатель и при необходимости разрешите работу без оптимизации батареи. Постоянное подключение отображается тихим уведомлением с кнопкой остановки. Глубокий сон, ограничения производителя и отсутствие доступа к Telegram могут задерживать доставку.
+Each release is built using a specific Xcode version (see `versions.json`). The helper script checks the versions of the installed software and reports an error if they don't match the ones specified in `versions.json`. It is possible to bypass these checks:
 
-## Диагностика и отчёты о проблеме
-
-В разделе «Настройки → Диагностика» доступны ручной просмотр данных, «Поделиться логами» (системный Share) и — при настроенном сервере — отправка отчёта о проблеме. Отчёт никогда не отправляется в фоне: только явной кнопкой после того, как пользователь видел точный состав данных.
-
-Поток отчёта: приложение генерирует nonce (256 бит) и `report_id` (UUIDv4), отправляет видимую команду `/report <nonce>` служебному боту через TDLib-сессию пользователя, дожидается подтверждения от бота (проверяются отправитель, чат и цепочка ответа) и только затем выполняет `POST /api/v1/bug-reports` сервера диагностики. Статус `delivered` появляется только по GET-запросу статуса. Секретов в APK нет: токены ботов и серверный `NONCE_PEPPER` живут на сервере.
-
-### Публичная конфигурация (не секреты)
-
-| Ключ `BuildConfig` | Свойство/`secrets.properties` | Значение по умолчанию | Назначение |
-| --- | --- | --- | --- |
-| `DIAGNOSTICS_API_BASE_URL` | `diagnosticsApiBaseUrl` | `https://beygram.beykus.fun` | HTTPS-origin сервера отчётов. Пусто — отправка отчётов выключена, ручной экспорт продолжает работать |
-| `REPORT_BOT_USERNAME` | `reportBotUsername` | `BeyGram_Bot` | Username служебного бота без `@` |
-| `REPORT_BOT_USER_ID` | `reportBotUserId` | `8841599020` | Telegram user id того же бота; пиннинг проверяется при открытии чата |
-
-Переопределение — gradle-свойство (`-PdiagnosticsApiBaseUrl=...`) или строка в `secrets.properties`; менять код не нужно. Серверная часть — репозиторий [BeyGram-Diagnostics-Server](https://github.com/Beykus-Y/BeyGram-Diagnostics-Server): там настраиваются `REPORT_BOT_TOKEN`, `NONCE_PEPPER`, `DELIVERY_CHAT_ID` и allowlist тестировщиков.
-
-## Лицензия
-
-BeyGram распространяется под лицензией GNU GPL v3. Полный текст лежит в [LICENSE](LICENSE). Сторонние компоненты и их лицензии перечислены в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## Документация
-
-- [Android: сборка, SDK/ADB и диагностика](docs/android-development.md)
-- [TDLib и нативные библиотеки](docs/tdlib.md)
-- [Архитектура сообщений и политик приватности](docs/conversation-architecture.md)
-- [Уведомления без Google-сервисов](docs/notifications.md)
-- [Сторонние компоненты](THIRD_PARTY_NOTICES.md)
+```
+python3 build-system/Make/Make.py --overrideXcodeVersion build ... # Don't check the version of Xcode
+```
