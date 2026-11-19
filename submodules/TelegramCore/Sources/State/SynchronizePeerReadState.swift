@@ -1,3 +1,4 @@
+import BeyGramStealth
 import Foundation
 import Postbox
 internal import TelegramApi
@@ -252,6 +253,11 @@ private func validatePeerReadState(network: Network, postbox: Postbox, stateMana
 }
 
 private func pushPeerReadState(network: Network, postbox: Postbox, stateManager: AccountStateManager, peerId: PeerId, readState: PeerReadState) -> Signal<PeerReadState, PeerReadStateValidationError> {
+    // BeyGram stealth: with read receipts hidden, the read state is not sent and counts as synchronized, so it is not sent
+    // later either (submodules/BeyGramStealth).
+    if !BeyGramStealthHooks.allows(.readHistory, accountPeerId: stateManager.accountPeerId.toInt64(), chatPeerId: peerId.toInt64()) {
+        return .single(readState)
+    }
     if peerId.namespace == Namespaces.Peer.SecretChat {
         // Decide whether a request is needed before looking the peer up: inputSecretChat goes
         // through loadedPeerWithId, which never emits when the peer row is missing and fails
