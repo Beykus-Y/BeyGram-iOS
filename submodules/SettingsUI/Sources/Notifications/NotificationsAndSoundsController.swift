@@ -111,6 +111,7 @@ private enum NotificationsAndSoundsSection: Int32 {
     case displayNamesOnLockscreen
     case badge
     case joinedNotifications
+    case bgPush
     case reset
 }
 
@@ -165,6 +166,7 @@ private enum NotificationsAndSoundsEntry: ItemListNodeEntry {
     case joinedNotifications(PresentationTheme, String, Bool)
     case joinedNotificationsInfo(PresentationTheme, String)
     
+    case bgPush(PresentationTheme, String)
     case reset(PresentationTheme, String)
     case resetNotice(PresentationTheme, String)
     
@@ -184,6 +186,8 @@ private enum NotificationsAndSoundsEntry: ItemListNodeEntry {
                 return NotificationsAndSoundsSection.badge.rawValue
             case .joinedNotifications, .joinedNotificationsInfo:
                 return NotificationsAndSoundsSection.joinedNotifications.rawValue
+            case .bgPush:
+                return NotificationsAndSoundsSection.bgPush.rawValue
             case .reset, .resetNotice:
                 return NotificationsAndSoundsSection.reset.rawValue
         }
@@ -237,10 +241,12 @@ private enum NotificationsAndSoundsEntry: ItemListNodeEntry {
                 return 24
             case .joinedNotificationsInfo:
                 return 25
-            case .reset:
+            case .bgPush:
                 return 26
-            case .resetNotice:
+            case .reset:
                 return 27
+            case .resetNotice:
+                return 28
         }
     }
     
@@ -409,6 +415,12 @@ private enum NotificationsAndSoundsEntry: ItemListNodeEntry {
                 } else {
                     return false
                 }
+            case let .bgPush(lhsTheme, lhsText):
+                if case let .bgPush(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
+                    return true
+                } else {
+                    return false
+                }
             case let .reset(lhsTheme, lhsText):
                 if case let .reset(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
                     return true
@@ -509,6 +521,10 @@ private enum NotificationsAndSoundsEntry: ItemListNodeEntry {
                 }, tag: self.tag)
             case let .joinedNotificationsInfo(_, text):
                 return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+            case let .bgPush(_, title):
+                return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: title, kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
+                    arguments.pushController(beyGramPushController(context: arguments.context))
+                })
             case let .reset(_, text):
                 return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: text, kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
                     arguments.resetNotifications()
@@ -619,6 +635,7 @@ private func notificationsAndSoundsEntries(authorizationStatus: AccessType, warn
     entries.append(.joinedNotifications(presentationData.theme, presentationData.strings.NotificationSettings_ContactJoined, globalSettings.contactsJoined))
     entries.append(.joinedNotificationsInfo(presentationData.theme, presentationData.strings.NotificationSettings_ContactJoinedInfo))
     
+    entries.append(.bgPush(presentationData.theme, beyGramPushSettingsTitle()))
     entries.append(.reset(presentationData.theme, presentationData.strings.Notifications_ResetAllNotifications))
     entries.append(.resetNotice(presentationData.theme, presentationData.strings.Notifications_ResetAllNotificationsHelp))
     

@@ -20,6 +20,14 @@
 2. В месте хука читать `BeyGramSettings.shared.isEnabled(.<case>)`. Выключенная функция не должна менять поведение Telegram.
 3. Не менять формат ключей без увеличения `BeyGramSettings.schemaVersion` и миграции.
 
-## Пока не подключено
+## BG Push (блок G2)
 
-Модуль не входит ни в одну цель приложения, поэтому сборка `Telegram/Telegram` его не компилирует. Компиляция модуля не проверена: в облачной сессии нет Swift и Bazel. Проверка случится при подключении модуля к приложению, в сборке на macOS.
+- `BeyGramPush.swift`: модели (`BeyGramPushIngress`, `BeyGramPushState`), HTTP-клиент `BeyGramPushClient` (`/api/v1/push/pairings`, `/api/v1/push/installations/{id}`), хранилище `BeyGramPushStore` (`UserDefaults`, ключ `beygram.push.state.v1`) и разбор ссылки `BeyGramPushOpenRequest` для `beygram://push/open?account=&peer=&msg=`. Только Foundation.
+- Регистрация токена в Telegram (`account.registerDevice` и `unregisterDevice` с `token_type` 10): `TelegramCore/Sources/TelegramEngine/AccountData/BeyGramPushRegistration.swift`. Это новый файл, существующий путь APNs и VoIP не менялся.
+- Экран и строка в «Уведомления»: `SettingsUI/Sources/BeyGramPush/BeyGramPushController.swift`. Переключатель управляет `BeyGramFeature.bgPush`, который по умолчанию выключен.
+- Deep link: ветка в `AppDelegate.openUrl` работает только при включённом флаге. Если аккаунт не совпадает или чат не найден, открывается список чатов.
+- Контракт сервера: issue #30 в BeyGram-Diagnostics-Server. Контракт не подтверждён на iPhone: go/no-go проверяет владелец.
+
+## Статус сборки
+
+Код написан в облачной сессии без Swift и Bazel, поэтому компиляция не проверена. Первая проверка пойдёт одним CI-прогоном ветки `integration/beygram-ios` после слияния волны.

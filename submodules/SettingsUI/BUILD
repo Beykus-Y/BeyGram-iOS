@@ -14,6 +14,7 @@ swift_library(
     deps = [
         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
         "//submodules/BeyGramAppearance",
+        "//submodules/BeyGramKit:BeyGramKit",
         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
         "//submodules/Display:Display",
         "//submodules/TelegramCore:TelegramCore",
