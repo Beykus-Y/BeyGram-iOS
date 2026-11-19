@@ -54,6 +54,8 @@ load(
     "telegram_bazel_path",
     "telegram_use_xcode_managed_codesigning",
     "telegram_bundle_id",
+    "telegram_display_name",
+    "telegram_app_specific_url_scheme",
     "telegram_aps_environment",
     "telegram_team_id",
     "telegram_enable_icloud",
@@ -430,25 +432,13 @@ plist_fragment(
             <string>{telegram_bundle_id}</string>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>telegram</string>
-            </array>
-        </dict>
-        <dict>
-            <key>CFBundleTypeRole</key>
-            <string>Viewer</string>
-            <key>CFBundleURLName</key>
-            <string>{telegram_bundle_id}.compatibility</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>tg</string>
-                <string>tonsite</string>
-                <string>ton</string>
-                <string>tc</string>
+                <string>{telegram_app_specific_url_scheme}</string>
             </array>
         </dict>
     </array>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_app_specific_url_scheme = telegram_app_specific_url_scheme,
     )
 )
 
@@ -660,6 +650,7 @@ plist_fragment(
     <string>FMWK</string>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -701,6 +692,7 @@ plist_fragment(
     <string>FMWK</string>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -742,6 +734,7 @@ plist_fragment(
     <string>FMWK</string>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -786,6 +779,7 @@ plist_fragment(
     <string>FMWK</string>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -804,6 +798,7 @@ plist_fragment(
     <string>FMWK</string>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -885,6 +880,7 @@ plist_fragment(
     <string>FMWK</string>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -903,6 +899,7 @@ plist_fragment(
     <string>FMWK</string>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -964,6 +961,7 @@ plist_fragment(
     <string>FMWK</string>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -1077,6 +1075,7 @@ plist_fragment(
     </dict>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -1167,6 +1166,7 @@ plist_fragment(
     </dict>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -1267,6 +1267,7 @@ plist_fragment(
     </array>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -1399,6 +1400,7 @@ plist_fragment(
     </dict>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -1547,6 +1549,7 @@ plist_fragment(
     </dict>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 
@@ -1696,11 +1699,11 @@ plist_fragment(
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Telegram</string>
+    <string>{telegram_display_name}</string>
     <key>CFBundleIdentifier</key>
     <string>{telegram_bundle_id}</string>
     <key>CFBundleName</key>
-    <string>Telegram</string>
+    <string>{telegram_display_name}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>
@@ -1875,6 +1878,7 @@ plist_fragment(
     <true/>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
+        telegram_display_name = telegram_display_name,
     )
 )
 

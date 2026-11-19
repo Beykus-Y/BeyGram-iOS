@@ -691,7 +691,14 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             networkEngineFactory: RustNetworkEngineFactory()
         )
         
-        guard let appGroupUrl = maybeAppGroupUrl else {
+        let appGroupUrl: URL
+        if let containerUrl = maybeAppGroupUrl {
+            appGroupUrl = containerUrl
+        } else if let appSupportUrl = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let fallbackUrl = appSupportUrl.appendingPathComponent("beygram-app-group", isDirectory: true)
+            try? FileManager.default.createDirectory(at: fallbackUrl, withIntermediateDirectories: true)
+            appGroupUrl = fallbackUrl
+        } else {
             self.mainWindow?.presentNative(UIAlertController(title: nil, message: "Error 2", preferredStyle: .alert))
             return true
         }
