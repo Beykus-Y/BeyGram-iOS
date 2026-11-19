@@ -20,6 +20,7 @@ import UndoUI
 import LegacyUI
 import PassportUI
 import SettingsUI
+import BeyGramKit
 import AppBundle
 import UrlHandling
 import OpenSSLEncryptionProvider
@@ -2690,7 +2691,14 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             }
         }
         |> deliverOnMainQueue).start(next: { sharedContext, context, authContext in
-            if let authContext = authContext, let confirmationCode = parseConfirmationCodeUrl(sharedContext: sharedContext, url: url) {
+            if let pushRequest = BeyGramPushOpenRequest(url: url), BeyGramSettings.shared.isEnabled(.bgPush) {
+                if let context = context, let peerId = pushRequest.peerId {
+                    let activeUserId = context.context.account.peerId.id._internalGetInt64Value()
+                    if pushRequest.accountUserId == nil || pushRequest.accountUserId == activeUserId {
+                        context.openChatWithPeerId(peerId: PeerId(peerId), threadId: nil, messageId: nil, activateInput: false, storyId: nil)
+                    }
+                }
+            } else if let authContext = authContext, let confirmationCode = parseConfirmationCodeUrl(sharedContext: sharedContext, url: url) {
                 authContext.rootController.applyConfirmationCode(confirmationCode)
             } else if let context = context {
                 if (WalletContext.isTonConnectUrl(url.absoluteString) || url.scheme?.lowercased() == "ton"), !WalletConfiguration.with(appConfiguration: context.context.currentAppConfiguration.with { $0 }).isAvailable {
