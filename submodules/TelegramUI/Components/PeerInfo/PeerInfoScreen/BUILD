@@ -88,6 +88,8 @@ swift_library(
         "//submodules/TelegramUI/Components/PeerInfo/PeerInfoStoryGridScreen",
         "//submodules/TelegramUI/Components/QrStudioScreen",
         "//submodules/PeerInfoUI",
+        "//submodules/BeyGramKit:BeyGramKit",
+        "//submodules/BeyGramTriggerWordsUI:BeyGramTriggerWordsUI",
         "//submodules/TelegramUI/Components/PeerInfo/PeerInfoVisualMediaPaneNode",
         "//submodules/TelegramUI/Components/Settings/PeerNameColorScreen",
         "//submodules/PeerPresenceStatusManager",

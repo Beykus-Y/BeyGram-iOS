@@ -4,6 +4,8 @@ import Display
 import AccountContext
 import TelegramPresentationData
 import TelegramCore
+import BeyGramKit
+import BeyGramTriggerWordsUI
 import PhoneNumberFormat
 import ItemListUI
 import SwiftSignalKit
@@ -270,6 +272,11 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
     items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 3, text: presentationData.strings.Settings_Appearance, icon: PresentationResourcesSettings.appearance, action: {
         interaction.openSettings(.appearance)
     }))
+    if BeyGramSettings.shared.isEnabled(.triggerWords) {
+        items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 90, text: "Trigger words", icon: PresentationResourcesSettings.appearance, action: {
+            interaction.openSettings(.triggerWords)
+        }))
+    }
     
     items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 6, label: .text(data.isPowerSavingEnabled == true ? presentationData.strings.Settings_PowerSavingOn : presentationData.strings.Settings_PowerSavingOff), text: presentationData.strings.Settings_PowerSaving, icon: PresentationResourcesSettings.powerSaving, action: {
         interaction.openSettings(.powerSaving)
