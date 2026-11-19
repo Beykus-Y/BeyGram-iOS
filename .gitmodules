@@ -35,3 +35,6 @@ url=https://github.com/bazelbuild/rules_swift.git
 [submodule "third-party/mtproto-engine"]
 	path = third-party/mtproto-engine
 	url = https://github.com/TelegramMessenger/mtproto-engine.git
+[submodule "submodules/BeyGramMedia/BGMediaCore"]
+	path = submodules/BeyGramMedia/BGMediaCore
+	url = https://github.com/Beykus-Y/BG-Media.git
