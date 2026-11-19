@@ -9,9 +9,9 @@ import ItemListUI
 import AccountContext
 import BeyGramKit
 
-// Экран BG Push: включение функции, привязка PWA, статус и отключение.
+// Экран BG Push: включение функции, регистрация, статус и отключение.
 // Флаг `BeyGramFeature.bgPush` выключен по умолчанию. Пока он выключен, экран показывает только переключатель:
-// сеть не используется и Telegram ничего не регистрирует.
+// сеть не используется и Telegram ничего не регистрирует. Выключение переключателя отзывает регистрацию.
 
 private func beyGramPushIsRussian() -> Bool {
     return (Locale.preferredLanguages.first ?? "").hasPrefix("ru")
@@ -24,10 +24,6 @@ private func beyGramPushLocalized(_ russian: String, _ english: String) -> Strin
 /// Название строки в настройках уведомлений.
 public func beyGramPushSettingsTitle() -> String {
     return beyGramPushLocalized("BG Push (экспериментально)", "BG Push (experimental)")
-}
-
-private func beyGramPushAppVersion() -> String {
-    return (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0"
 }
 
 private func beyGramPushErrorText(_ error: BeyGramPushError) -> String {
@@ -50,22 +46,30 @@ private func beyGramPushInfoText() -> String {
     )
 }
 
-private func beyGramPushStatusText(state: BeyGramPushState?, lastError: String?) -> String {
+private func beyGramPushStatusText(registration: BeyGramPushState?, hasSecrets: Bool, isRegistering: Bool, lastError: String?) -> String {
     var text: String
-    switch state?.status {
-    case .pending?:
-        text = beyGramPushLocalized("Ждём установки страницы и разрешения на уведомления", "Waiting for the page install and the notification permission")
-    case .completed?:
-        if state?.telegramRegistered == true {
-            text = beyGramPushLocalized("Привязано. Telegram принял регистрацию", "Linked. Telegram accepted the registration")
+    if let registration = registration {
+        if !hasSecrets {
+            text = beyGramPushLocalized("Секреты привязки не найдены на этом устройстве. Отключите BG Push и настройте заново", "The link secrets are missing on this device. Disconnect BG Push and set it up again")
         } else {
-            text = beyGramPushLocalized("Привязано, но Telegram не подтвердил регистрацию. Проверьте статус", "Linked, but Telegram has not confirmed the registration. Check the status")
+            switch registration.state {
+            case .pending:
+                text = beyGramPushLocalized("Ждём установки страницы и разрешения на уведомления", "Waiting for the page install and the notification permission")
+            case .active:
+                if registration.telegramConfirmedAt != nil {
+                    text = beyGramPushLocalized("Привязано. Telegram подтвердил регистрацию", "Linked. Telegram confirmed the registration")
+                } else if isRegistering {
+                    text = beyGramPushLocalized("Привязано. Регистрируем в Telegram", "Linked. Registering with Telegram")
+                } else {
+                    text = beyGramPushLocalized("Привязано, но Telegram ещё не подтвердил регистрацию. Нажмите «Проверить статус»", "Linked, but Telegram has not confirmed the registration yet. Tap “Check the status”")
+                }
+            case .expired:
+                text = beyGramPushLocalized("Срок установки истёк. Настройте заново", "The setup window has expired. Set it up again")
+            case .revoked:
+                text = beyGramPushLocalized("Привязка отозвана на сервере. Настройте заново", "The link was revoked on the server. Set it up again")
+            }
         }
-    case .expired?:
-        text = beyGramPushLocalized("Ссылка установки истекла. Настройте заново", "The setup link has expired. Set it up again")
-    case .revoked?:
-        text = beyGramPushLocalized("Привязка отозвана на сервере. Настройте заново", "The link was revoked on the server. Set it up again")
-    case nil:
+    } else {
         text = beyGramPushLocalized("Не настроено", "Not set up")
     }
     if let lastError = lastError {
@@ -236,7 +240,7 @@ private enum BeyGramPushEntry: ItemListNodeEntry {
     }
 }
 
-private func beyGramPushEntries(presentationData: PresentationData, enabled: Bool, state: BeyGramPushState?, lastError: String?) -> [BeyGramPushEntry] {
+private func beyGramPushEntries(presentationData: PresentationData, enabled: Bool, registration: BeyGramPushState?, hasSecrets: Bool, isRegistering: Bool, lastError: String?) -> [BeyGramPushEntry] {
     let theme = presentationData.theme
     let languageCode = beyGramPushIsRussian() ? "ru" : "en"
     var entries: [BeyGramPushEntry] = []
@@ -246,18 +250,19 @@ private func beyGramPushEntries(presentationData: PresentationData, enabled: Boo
     guard enabled else {
         return entries
     }
-    entries.append(.text(theme, beyGramPushStatusText(state: state, lastError: lastError), 1))
-    let hasPairing = state?.pairingId != nil
-    let status = state?.status
-    if !hasPairing || status == .expired || status == .revoked {
+    entries.append(.text(theme, beyGramPushStatusText(registration: registration, hasSecrets: hasSecrets, isRegistering: isRegistering, lastError: lastError), 1))
+    let needsSetup = registration == nil || registration?.state == .expired || registration?.state == .revoked
+    if needsSetup {
         entries.append(.action(theme, beyGramPushLocalized("Настроить уведомления", "Set up notifications"), .setup, false))
     }
-    if status == .pending {
+    if hasSecrets, let registration = registration, registration.state == .pending {
         entries.append(.action(theme, beyGramPushLocalized("Открыть страницу установки в Safari", "Open the setup page in Safari"), .openSetupPage, false))
         entries.append(.action(theme, beyGramPushLocalized("Показать QR-код", "Show the QR code"), .showQr, false))
     }
-    if hasPairing {
-        entries.append(.action(theme, beyGramPushLocalized("Проверить статус", "Check the status"), .check, false))
+    if registration != nil {
+        if hasSecrets {
+            entries.append(.action(theme, beyGramPushLocalized("Проверить статус", "Check the status"), .check, false))
+        }
         entries.append(.action(theme, beyGramPushLocalized("Отключить и удалить привязку", "Disconnect and remove the link"), .disconnect, true))
     }
     return entries
@@ -267,13 +272,24 @@ private func beyGramPushEntries(presentationData: PresentationData, enabled: Boo
 private final class BeyGramPushScreenModel {
     private let context: AccountContext
     private let store = BeyGramPushStore.shared
+    private let secretStore = BeyGramPushSecretStore.shared
     private let client = BeyGramPushClient()
-    private let registrationDisposable = MetaDisposable()
+    private let registerDisposable = MetaDisposable()
+    private let unregisterDisposable = MetaDisposable()
     private var pollTimer: Timer?
     private var revisionValue = 0
+    private var isPolling = false
+    private var isBusy = false
+    /// После ошибки Telegram или подтверждения автоматически не повторяем. Повтор запускает «Проверить статус».
+    private var telegramAttemptFailed = false
 
     let revision = ValuePromise<Int>(0, ignoreRepeated: false)
+    /// Ошибка действия: создание, отзыв, регистрация или подтверждение в Telegram.
     var lastError: String?
+    /// Ошибка последнего опроса сервера. Сбрасывается при успешном опросе.
+    var pollError: String?
+    /// Регистрация в Telegram идёт сейчас.
+    var isRegistering = false
     weak var controller: UIViewController?
 
     init(context: AccountContext) {
@@ -282,7 +298,8 @@ private final class BeyGramPushScreenModel {
 
     deinit {
         self.pollTimer?.invalidate()
-        self.registrationDisposable.dispose()
+        self.registerDisposable.dispose()
+        self.unregisterDisposable.dispose()
     }
 
     private func bump() {
@@ -290,10 +307,33 @@ private final class BeyGramPushScreenModel {
         self.revision.set(self.revisionValue)
     }
 
+    /// Запускает опрос, если регистрация ещё не завершена. Вызывается при открытии экрана и при включении функции.
+    func resume() {
+        guard let registration = self.store.load() else {
+            return
+        }
+        switch registration.state {
+        case .pending:
+            self.startPolling()
+        case .active:
+            if registration.telegramConfirmedAt == nil {
+                self.startPolling()
+            }
+        case .expired, .revoked:
+            break
+        }
+    }
+
     func setEnabled(_ enabled: Bool) {
         BeyGramSettings.shared.setEnabled(enabled, for: .bgPush)
-        if !enabled {
+        if enabled {
+            self.lastError = nil
+            self.pollError = nil
+            self.resume()
+        } else {
+            // Выключенная функция не должна оставлять регистрацию в Telegram и на сервере.
             self.stopPolling()
+            self.disconnect(completion: nil)
         }
         self.bump()
     }
@@ -307,31 +347,57 @@ private final class BeyGramPushScreenModel {
         case .showQr:
             self.showQr()
         case .check:
+            self.lastError = nil
+            self.telegramAttemptFailed = false
+            self.isRegistering = false
             self.poll()
         case .disconnect:
-            self.disconnect()
+            self.disconnect(completion: nil)
         }
     }
 
     private func startSetup() {
-        let installationId = self.store.loadOrCreate().installationId
-        self.client.createPairing(installationId: installationId, appVersion: beyGramPushAppVersion()) { [weak self] result in
+        guard !self.isBusy else {
+            return
+        }
+        if self.store.load() != nil {
+            // Старую регистрацию сначала отзываем, иначе на сервере останутся лишние привязки.
+            self.disconnect(completion: { [weak self] cleared in
+                if cleared {
+                    self?.createRegistration()
+                }
+            })
+        } else {
+            self.createRegistration()
+        }
+    }
+
+    private func createRegistration() {
+        self.isBusy = true
+        self.lastError = nil
+        self.pollError = nil
+        self.bump()
+        let bearer = BeyGramPushBearer.generate()
+        self.client.createRegistration(bearer: bearer) { [weak self] result in
             DispatchQueue.main.async {
                 guard let strongSelf = self else {
                     return
                 }
+                strongSelf.isBusy = false
                 switch result {
-                case let .success(pairing):
-                    var state = strongSelf.store.loadOrCreate()
-                    state.pairingId = pairing.pairingId
-                    state.pollToken = pairing.pollToken
-                    state.setupUrl = pairing.setupUrl
-                    state.expiresAt = pairing.expiresAt
-                    state.status = .pending
-                    state.ingress = nil
-                    state.telegramRegistered = false
-                    strongSelf.store.save(state)
-                    strongSelf.lastError = nil
+                case let .success(registration):
+                    let secrets = BeyGramPushSecrets(registrationId: registration.registrationId, bearer: bearer, ingressUrl: registration.ingressUrl, setupUrl: registration.setupUrl, telegramKeys: nil)
+                    guard strongSelf.secretStore.save(secrets) else {
+                        // Без сохранённых секретов регистрацию не отследить, поэтому отзываем её, пока bearer ещё в памяти.
+                        strongSelf.client.deleteRegistration(registrationId: registration.registrationId, bearer: bearer) { _ in
+                        }
+                        strongSelf.lastError = beyGramPushLocalized("Не удалось сохранить секреты в Keychain", "Could not save the secrets to the Keychain")
+                        strongSelf.bump()
+                        return
+                    }
+                    strongSelf.store.save(BeyGramPushState(registrationId: registration.registrationId, state: registration.state, expiresAt: registration.expiresAt, telegramConfirmedAt: nil))
+                    strongSelf.telegramAttemptFailed = false
+                    strongSelf.isRegistering = false
                     strongSelf.bump()
                     strongSelf.startPolling()
                     strongSelf.openSetupPage()
@@ -343,15 +409,15 @@ private final class BeyGramPushScreenModel {
         }
     }
 
-    func openSetupPage() {
-        guard let setupUrl = self.store.load()?.setupUrl else {
+    private func openSetupPage() {
+        guard let setupUrl = self.secretStore.load()?.setupUrl else {
             return
         }
         self.context.sharedContext.applicationBindings.openUrl(setupUrl)
     }
 
-    func showQr() {
-        guard let setupUrl = self.store.load()?.setupUrl, let controller = self.controller else {
+    private func showQr() {
+        guard let setupUrl = self.secretStore.load()?.setupUrl, let controller = self.controller else {
             return
         }
         let navigationController = UINavigationController(rootViewController: BeyGramPushQrController(link: setupUrl))
@@ -359,86 +425,178 @@ private final class BeyGramPushScreenModel {
     }
 
     func poll() {
-        guard let state = self.store.load(), let pairingId = state.pairingId, let pollToken = state.pollToken else {
+        guard !self.isPolling, let registration = self.store.load(), let secrets = self.secretStore.load(), secrets.registrationId == registration.registrationId else {
             return
         }
-        self.client.pollPairing(pairingId: pairingId, pollToken: pollToken) { [weak self] result in
+        let registrationId = registration.registrationId
+        self.isPolling = true
+        self.client.pollRegistration(registrationId: registrationId, bearer: secrets.bearer) { [weak self] result in
             DispatchQueue.main.async {
                 guard let strongSelf = self else {
                     return
                 }
+                strongSelf.isPolling = false
                 switch result {
-                case let .success(pollResult):
-                    strongSelf.apply(pollResult)
+                case let .success(status):
+                    strongSelf.apply(status, registrationId: registrationId)
                 case let .failure(error):
-                    strongSelf.lastError = beyGramPushErrorText(error)
+                    strongSelf.pollError = beyGramPushErrorText(error)
                     strongSelf.bump()
                 }
             }
         }
     }
 
-    private func apply(_ pollResult: BeyGramPushPollResult) {
-        guard var state = self.store.load() else {
+    private func apply(_ status: BeyGramPushRegistrationStatus, registrationId: String) {
+        // Ответ относится к регистрации, которая могла смениться, пока шёл запрос. Тогда он не нужен.
+        guard var registration = self.store.load(), registration.registrationId == registrationId, var secrets = self.secretStore.load(), secrets.registrationId == registrationId else {
             return
         }
-        state.status = pollResult.status
-        if let ingress = pollResult.ingress, state.ingress != ingress {
-            state.ingress = ingress
-            state.telegramRegistered = false
+        self.pollError = nil
+        registration.state = status.state
+        if let expiresAt = status.expiresAt {
+            registration.expiresAt = expiresAt
         }
-        self.store.save(state)
-        self.lastError = nil
+        if let confirmedAt = status.telegramConfirmedAt {
+            registration.telegramConfirmedAt = confirmedAt
+        }
+        if let keys = status.telegramKeys, secrets.telegramKeys != keys {
+            secrets.telegramKeys = keys
+            self.secretStore.save(secrets)
+        }
+        self.store.save(registration)
         self.bump()
-        switch pollResult.status {
+        switch status.state {
         case .pending:
             break
-        case .completed:
-            self.stopPolling()
-            if !state.telegramRegistered, let ingress = state.ingress {
-                self.register(ingress: ingress)
+        case .active:
+            if registration.telegramConfirmedAt != nil {
+                self.stopPolling()
+            } else if let keys = secrets.telegramKeys {
+                if !self.telegramAttemptFailed && !self.isRegistering {
+                    self.register(keys: keys)
+                }
+            } else {
+                self.lastError = beyGramPushLocalized("Сервер не вернул ключи Telegram", "The server did not return the Telegram keys")
+                self.bump()
             }
         case .expired, .revoked:
             self.stopPolling()
         }
     }
 
-    private func register(ingress: BeyGramPushIngress) {
-        guard let token = ingress.registrationToken() else {
+    private func register(keys: BeyGramPushTelegramKeys) {
+        guard let secrets = self.secretStore.load(), let token = BeyGramPushTelegramToken(endpoint: secrets.ingressUrl, keys: keys).registrationToken() else {
+            self.telegramAttemptFailed = true
             self.lastError = beyGramPushLocalized("Не удалось подготовить токен регистрации", "Could not prepare the registration token")
             self.bump()
             return
         }
+        self.isRegistering = true
+        self.bump()
         let registration = beyGramRegisterWebPushToken(account: self.context.account, token: token, otherAccountUserIds: []) |> deliverOnMainQueue
-        self.registrationDisposable.set(registration.start(next: { [weak self] registered in
+        self.registerDisposable.set(registration.start(next: { [weak self] registered in
             guard let strongSelf = self else {
                 return
             }
-            if var state = strongSelf.store.load() {
-                state.telegramRegistered = registered
-                strongSelf.store.save(state)
+            strongSelf.isRegistering = false
+            if registered {
+                strongSelf.confirm()
+            } else {
+                strongSelf.telegramAttemptFailed = true
+                strongSelf.lastError = beyGramPushLocalized("Telegram не принял регистрацию. Нажмите «Проверить статус», чтобы повторить", "Telegram did not accept the registration. Tap “Check the status” to retry")
             }
-            strongSelf.lastError = registered ? nil : beyGramPushLocalized("Telegram не принял регистрацию токена", "Telegram did not accept the token registration")
             strongSelf.bump()
         }))
     }
 
-    private func disconnect() {
-        self.stopPolling()
-        guard let state = self.store.load() else {
+    /// Сообщает серверу, что Telegram принял токен. Сервер отмечает время подтверждения.
+    private func confirm() {
+        guard let registration = self.store.load(), let secrets = self.secretStore.load(), secrets.registrationId == registration.registrationId else {
             return
         }
-        if state.telegramRegistered, let ingress = state.ingress, let token = ingress.registrationToken() {
-            let unregistration = beyGramUnregisterWebPushToken(account: self.context.account, token: token, otherAccountUserIds: []) |> deliverOnMainQueue
-            self.registrationDisposable.set(unregistration.start(completed: {}))
-        }
-        if let pollToken = state.pollToken {
-            self.client.deleteInstallation(installationId: state.installationId, pollToken: pollToken) { _ in
+        let registrationId = registration.registrationId
+        self.client.confirmTelegram(registrationId: registrationId, bearer: secrets.bearer) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let strongSelf = self else {
+                    return
+                }
+                switch result {
+                case .success:
+                    if var confirmed = strongSelf.store.load(), confirmed.registrationId == registrationId {
+                        confirmed.telegramConfirmedAt = Date()
+                        strongSelf.store.save(confirmed)
+                    }
+                    strongSelf.telegramAttemptFailed = false
+                    strongSelf.lastError = nil
+                    strongSelf.stopPolling()
+                case let .failure(error):
+                    strongSelf.telegramAttemptFailed = true
+                    strongSelf.lastError = beyGramPushErrorText(error)
+                }
+                strongSelf.bump()
             }
         }
-        self.store.clear()
+    }
+
+    /// Отзывает регистрацию на сервере, затем снимает токен с Telegram. Локальное состояние стирается,
+    /// только когда сервер подтвердил отзыв, чтобы повтор был возможен. Completion получает true, если состояние очищено.
+    private func disconnect(completion: ((Bool) -> Void)?) {
+        guard !self.isBusy else {
+            completion?(false)
+            return
+        }
+        self.stopPolling()
+        guard let registration = self.store.load() else {
+            completion?(true)
+            return
+        }
+        guard let secrets = self.secretStore.load(), secrets.registrationId == registration.registrationId else {
+            // Секретов нет, поэтому отозвать регистрацию на сервере нельзя. Очищаем только локальное состояние.
+            self.clearLocal()
+            self.bump()
+            completion?(true)
+            return
+        }
+        self.isBusy = true
         self.lastError = nil
         self.bump()
+        self.client.deleteRegistration(registrationId: registration.registrationId, bearer: secrets.bearer) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let strongSelf = self else {
+                    return
+                }
+                strongSelf.isBusy = false
+                switch result {
+                case .success:
+                    strongSelf.releaseTelegramToken(secrets: secrets)
+                    strongSelf.clearLocal()
+                    strongSelf.bump()
+                    completion?(true)
+                case let .failure(error):
+                    strongSelf.lastError = beyGramPushLocalized("Не удалось отозвать привязку на сервере: ", "Could not revoke the link on the server: ") + beyGramPushErrorText(error)
+                    strongSelf.bump()
+                    completion?(false)
+                }
+            }
+        }
+    }
+
+    private func releaseTelegramToken(secrets: BeyGramPushSecrets) {
+        guard let keys = secrets.telegramKeys, let token = BeyGramPushTelegramToken(endpoint: secrets.ingressUrl, keys: keys).registrationToken() else {
+            return
+        }
+        let unregistration = beyGramUnregisterWebPushToken(account: self.context.account, token: token, otherAccountUserIds: []) |> deliverOnMainQueue
+        self.unregisterDisposable.set(unregistration.start(completed: {}))
+    }
+
+    private func clearLocal() {
+        self.store.clear()
+        self.secretStore.clear()
+        self.isRegistering = false
+        self.telegramAttemptFailed = false
+        self.pollError = nil
+        self.lastError = nil
     }
 
     private func startPolling() {
@@ -467,12 +625,14 @@ public func beyGramPushController(context: AccountContext) -> ViewController {
     |> deliverOnMainQueue
     |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
         let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("BG Push"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
-        let entries = beyGramPushEntries(presentationData: presentationData, enabled: BeyGramSettings.shared.isEnabled(.bgPush), state: BeyGramPushStore.shared.load(), lastError: model.lastError)
+        let errorText = [model.lastError, model.pollError].compactMap({ $0 }).joined(separator: "\n")
+        let entries = beyGramPushEntries(presentationData: presentationData, enabled: BeyGramSettings.shared.isEnabled(.bgPush), registration: BeyGramPushStore.shared.load(), hasSecrets: BeyGramPushSecretStore.shared.load() != nil, isRegistering: model.isRegistering, lastError: errorText.isEmpty ? nil : errorText)
         let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
         return (controllerState, (listState, arguments))
     }
 
     let controller = ItemListController(context: context, state: signal)
     model.controller = controller
+    model.resume()
     return controller
 }
