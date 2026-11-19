@@ -128,3 +128,25 @@ public final class TriggerWordsStore {
         storage.set(try? JSONEncoder().encode(state), forKey: Self.storageKey)
     }
 }
+
+/// `UserDefaults` adapter for `TriggerWordsStore`.
+public final class UserDefaultsTriggerWordStorage: TriggerWordKeyValueStore {
+    private let defaults: UserDefaults
+
+    public init(defaults: UserDefaults) {
+        self.defaults = defaults
+    }
+
+    public func data(forKey key: String) -> Data? {
+        defaults.data(forKey: key)
+    }
+
+    public func set(_ data: Data?, forKey key: String) {
+        defaults.set(data, forKey: key)
+    }
+}
+
+extension TriggerWordsStore {
+    /// The app-wide store. Every screen and the update handler must share it, so the state stays in one place.
+    public static let shared = TriggerWordsStore(storage: UserDefaultsTriggerWordStorage(defaults: .standard))
+}
