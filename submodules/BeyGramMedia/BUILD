@@ -94,6 +94,7 @@ objc_library(
         "Foundation",
         "AVFoundation",
         "QuartzCore",
+        "UIKit",
     ],
     visibility = [
         "//visibility:public",
