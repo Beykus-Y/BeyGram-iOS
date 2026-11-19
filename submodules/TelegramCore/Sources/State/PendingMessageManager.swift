@@ -1,4 +1,3 @@
-import BeyGramStealth
 import Foundation
 import Postbox
 import SwiftSignalKit
@@ -1280,16 +1279,6 @@ public final class PendingMessageManager {
                     }
                 }
                                 
-                // BeyGram stealth sending (submodules/BeyGramStealth): a send that stealth mode schedules on the server.
-                switch BeyGramStealthHooks.sendDecision(accountPeerId: accountPeerId.toInt64(), explicitScheduleTime: scheduleTime, isSchedulable: peerId.namespace != Namespaces.Peer.SecretChat && allowPaidStars == nil, nowSeconds: Int32(network.globalTime)) {
-                case .unchanged:
-                    break
-                case let .scheduled(date):
-                    scheduleTime = date
-                    flags |= Int32(1 << 10)
-                case .refused:
-                    return failMessages(postbox: postbox, ids: group.map { $0.0 })
-                }
                 let sendMessageRequest: Signal<Api.Updates, MTRpcError>
                 if isForward {
                     if messages.contains(where: { $0.0.groupingKey != nil }) {
@@ -1831,16 +1820,6 @@ public final class PendingMessageManager {
                 
                 let dependencyTag = PendingMessageRequestDependencyTag(messageId: messageId)
                 
-                // BeyGram stealth sending (submodules/BeyGramStealth): a send that stealth mode schedules on the server.
-                switch BeyGramStealthHooks.sendDecision(accountPeerId: accountPeerId.toInt64(), explicitScheduleTime: scheduleTime, isSchedulable: messageId.peerId.namespace != Namespaces.Peer.SecretChat && allowPaidStars == nil, nowSeconds: Int32(network.globalTime)) {
-                case .unchanged:
-                    break
-                case let .scheduled(date):
-                    scheduleTime = date
-                    flags |= Int32(1 << 10)
-                case .refused:
-                    return failMessages(postbox: postbox, ids: [messageId])
-                }
                 let sendMessageRequest: Signal<NetworkRequestResult<Api.Updates>, MTRpcError>
                 switch content.content {
                     case let .richMessage(assembledRichMessage):

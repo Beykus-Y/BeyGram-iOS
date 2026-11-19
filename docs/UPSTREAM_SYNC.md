@@ -49,7 +49,6 @@
 | Файл | Что добавлено | Модуль |
 |---|---|---|
 | `submodules/TelegramCore/BUILD` | зависимость `//submodules/BeyGramStealth:BeyGramStealth` | BeyGramStealth |
-| `submodules/TelegramCore/Sources/State/PendingMessageManager.swift` | `sendGroupMessagesContent` и `sendMessageContent`: дата отложенной отправки (`scheduleDate` и флаг 10), отказ для непланируемых отправок | BeyGramStealth |
 | `submodules/TelegramCore/Sources/State/ManagedAccountPresence.swift` | `updatePresence`: скрытый онлайн; параметр `accountPeerId` в `AccountPresenceManager` | BeyGramStealth |
 | `submodules/TelegramCore/Sources/Account/Account.swift` | передача `accountPeerId` в `AccountPresenceManager` | BeyGramStealth |
 | `submodules/TelegramCore/Sources/State/ManagedLocalInputActivities.swift` | `requestActivity`: скрытый набор текста и другие действия в чате | BeyGramStealth |
