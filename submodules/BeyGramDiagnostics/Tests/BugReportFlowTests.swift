@@ -40,3 +40,13 @@ final class BugReportFlowTests: XCTestCase {
         XCTAssertEqual(BugReportFlow.reduce(.awaitingNonce(reportId: id), .cancel), .idle)
     }
 }
+
+final class BugReportClientRequestTests: XCTestCase {
+    func testUploadRequestHasNoBodyLeakOfNonceOutsideHeader() throws {
+        let nonce = String(repeating: "B", count: 43)
+        let (body, _) = try BugReportBuilder.makeBody(reportId: "r", description: "d", summary: nil, meta: BugReportClientMeta(), events: [])
+        let request = try BugReportBuilder.makeUploadRequest(baseURL: URL(string: "https://example.invalid/")!, nonce: nonce, body: body)
+        let bodyText = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+        XCTAssertFalse(bodyText.contains(nonce))
+    }
+}
