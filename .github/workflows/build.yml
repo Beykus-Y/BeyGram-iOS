@@ -17,10 +17,7 @@ on:
     tags:
       - 'v*'
       - 'release-*'
-  pull_request:
-    branches:
-      - DEV
-      - main
+# Pull request не запускают сборку: она идёт часами на macOS. Запуск вручную через workflow_dispatch.
 
 concurrency:
   group: ios-build-${{ github.ref }}
