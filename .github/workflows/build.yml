@@ -146,11 +146,13 @@ jobs:
 
       - name: Build BeyGram IPA (release_arm64, sideload-ready)
         run: |
+          set -o pipefail
           mkdir -p "$HOME/telegram-bazel-cache"
           python3 -u build-system/Make/Make.py \
             --cacheDir="$HOME/telegram-bazel-cache" \
             build \
             --configurationPath="$RUNNER_TEMP/beygram-ci-config.json" \
+            --xcodeManagedCodesigning \
             --disableProvisioningProfiles \
             --disableExtensions \
             --configuration=release_arm64 \
