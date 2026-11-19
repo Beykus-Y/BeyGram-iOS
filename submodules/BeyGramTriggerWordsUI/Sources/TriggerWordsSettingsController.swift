@@ -59,8 +59,8 @@ private enum TriggerWordsSettingsEntry: ItemListNodeEntry, Equatable {
     case addAction(Bool)
     case status(String)
     case rulesHeader
-    case rule(UUID, String, Bool)
-    case ruleRemove(UUID, String)
+    case rule(Int, UUID, String, Bool)
+    case ruleRemove(Int, UUID, String)
     case noRules
     case clearFeed(Int)
 
@@ -79,7 +79,8 @@ private enum TriggerWordsSettingsEntry: ItemListNodeEntry, Equatable {
         }
     }
 
-    /// Stable ids: fixed rows use small numbers; rule rows use the order of the list.
+    /// Stable ids: fixed rows use small numbers; a rule's rows use its position in the list, so the ids
+    /// do not depend on per-process hashing.
     var stableId: Int64 {
         switch self {
         case .featureSwitch: return 0
@@ -94,8 +95,8 @@ private enum TriggerWordsSettingsEntry: ItemListNodeEntry, Equatable {
         case .status: return 15
         case .rulesHeader: return 20
         case .noRules: return 21
-        case .rule(let id, _, _): return 1000 + Int64(abs(id.hashValue % 1_000_000)) * 2
-        case .ruleRemove(let id, _): return 1000 + Int64(abs(id.hashValue % 1_000_000)) * 2 + 1
+        case let .rule(index, _, _, _): return 1000 + Int64(index) * 2
+        case let .ruleRemove(index, _, _): return 1000 + Int64(index) * 2 + 1
         case .clearFeed: return 30
         }
     }
@@ -137,11 +138,11 @@ private enum TriggerWordsSettingsEntry: ItemListNodeEntry, Equatable {
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         case .rulesHeader:
             return ItemListSectionHeaderItem(presentationData: presentationData, text: "Words", sectionId: self.section)
-        case let .rule(id, text, enabled):
+        case let .rule(_, id, text, enabled):
             return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: text, kind: enabled ? .neutral : .disabled, alignment: .natural, sectionId: self.section, style: .blocks, action: {
                 arguments.toggleRule(id)
             })
-        case let .ruleRemove(id, text):
+        case let .ruleRemove(_, id, text):
             return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Remove \(text)", kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
                 arguments.removeRule(id)
             })
@@ -182,11 +183,11 @@ private func triggerWordsSettingsEntries(store: TriggerWordsStore, settings: Bey
     if store.state.rules.isEmpty {
         entries.append(.noRules)
     } else {
-        for rule in store.state.rules {
+        for (index, rule) in store.state.rules.enumerated() {
             let mode = rule.mode == .wholeWord ? "whole word" : "anywhere in text"
             let caption = "\(rule.pattern) · \(mode)"
-            entries.append(.rule(rule.id, rule.isEnabled ? caption : caption + " · off", rule.isEnabled))
-            entries.append(.ruleRemove(rule.id, rule.pattern))
+            entries.append(.rule(index, rule.id, rule.isEnabled ? caption : caption + " · off", rule.isEnabled))
+            entries.append(.ruleRemove(index, rule.id, rule.pattern))
         }
     }
     if !store.state.mentions.isEmpty {

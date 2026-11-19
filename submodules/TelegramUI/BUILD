@@ -77,6 +77,7 @@ swift_library(
         "//submodules/MtProtoKit:MtProtoKit",
         "//submodules/TelegramPresentationData:TelegramPresentationData",
         "//submodules/AccountContext:AccountContext",
+        "//submodules/BeyGramTriggerWordsTelegram:BeyGramTriggerWordsTelegram",
         "//submodules/LegacyComponents:LegacyComponents",
         "//submodules/lottie-ios:Lottie",
         "//submodules/FFMpegBinding:FFMpegBinding",
