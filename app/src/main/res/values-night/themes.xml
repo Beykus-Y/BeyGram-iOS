@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- The window shows this colour until the first frame, so a dark system does not flash white at launch. -->
-    <style name="Theme.BeyGram" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">#FF161417</item>
-    </style>
-</resources>

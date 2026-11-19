@@ -1,84 +1,52 @@
-# BeyGram
+# BeyGram iOS
 
-Android-клиент Telegram на Kotlin, Jetpack Compose и TDLib. Проект находится в активной разработке; интерфейс пока использует простые функциональные экраны.
+Неофициальный клиент Telegram для iOS в экосистеме **BeyGram**, основанный на официальной кодовой базе [`TelegramMessenger/Telegram-iOS`](https://github.com/TelegramMessenger/Telegram-iOS).
 
-## Что реализовано
+## Происхождение и текущий upstream
 
-- Авторизация по номеру, коду и облачному паролю Telegram.
-- Список чатов с порядком и закреплениями от Telegram, аватарами и счётчиками непрочитанного.
-- История сообщений, ответы свайпом пузыря или через меню с переходом к оригиналу, копирование, редактирование и удаление с проверкой прав.
-- Просмотр фото, видео и аудио; отправка медиа и исходных файлов с подписью.
-- Сведения о чатах и просмотр/редактирование своего профиля, включая фотографию.
-- Уведомления без Google Play Services/Firebase: прямое подключение TDLib и опциональная фоновая служба.
-- SOCKS5/MTProto/Web-прокси, реакция на смену сети/VPN и диагностика подключения.
-- Прокси Mihomo: HTTPS YAML-подписка, локальный SOCKS на `127.0.0.1` без VPN-профиля, проверка пинга серверов и авто-переключение после затяжного `Connecting`.
-- Раздельные Dev/Prod-варианты и отдельная политика для будущих настроек прочтения и присутствия.
+- **Версия BeyGram:** `0.0.1` (`DEV`)
+- **Базовый upstream:** `TelegramMessenger/Telegram-iOS`
+- **Тег upstream:** `release-13.2`
+- **Commit SHA upstream:** `24638bc69bd083981b178dd1e7f921eebbf7fc46`
+- **Лицензия:** GPLv2 (условия оригинального проекта Telegram iOS; исходный код публикуется с сохранением всех оригинальных лицензий и copyright notices).
 
-## Сборка
+## Основные отличия от официального Telegram iOS
 
-Нужны Android SDK с платформой, указанной в `app/build.gradle.kts`, и JDK согласно `gradle/gradle-daemon-jvm.properties`. Минимальная версия Android — 10 (API 29). Gradle Wrapper включён в репозиторий.
+- **Независимая идентификация:**
+  - DEV Bundle ID: `com.beykus.beygram.dev` (`BeyGram DEV`)
+  - Release Bundle ID: `com.beykus.beygram` (`BeyGram`)
+  - URL-схема: `beygram://` (схемы `tg://`, `telegram://`, `ton://`, `tonsite://`, `tc://` и Associated Domains отключены, чтобы не перехватывать ссылки у официального Telegram).
+- **Поддержка бесплатного sideloading (AltStore / SideStore):**
+  - В `Make.py build` добавлена поддержка `--disableProvisioningProfiles` и `--disableExtensions`.
+  - В `submodules/TelegramUI/Sources/AppDelegate.swift` добавлен безопасный fallback при `containerURL(forSecurityApplicationGroupIdentifier:) == nil` на локальный каталог `Library/Application Support/beygram-app-group`, что предотвращает ошибку `Error 2` при переподписании бесплатным Apple ID.
+- **Брендинг:**
+  - Иконка приложения адаптирована из фирменного стиля Android-клиента [`Beykus-Y/BeyGram`](https://github.com/Beykus-Y/BeyGram).
+  - Обновлены `CFBundleDisplayName`, `CFBundleName`, экран приветствия (`Tour.*`) и описания разрешений.
 
-1. Откройте проект в Android Studio и укажите установленный Android SDK. Локальный путь SDK хранится в игнорируемом `local.properties`.
-2. Скопируйте `secrets.properties.example` в `secrets.properties` и заполните собственные `telegramApiId` и `telegramApiHash`, полученные в [Telegram API development tools](https://my.telegram.org/apps).
-3. Соберите нужный вариант:
+## Структура веток
 
-```powershell
-.\gradlew.bat :app:assembleDevDebug
-.\gradlew.bat :app:assembleProdRelease
-```
+- `main` — стабильные версии BeyGram.
+- `DEV` — основная ветка разработки.
+- `feature/*` — ветки отдельных задач.
+- `backup/*` — архивные ветки предыдущей реализации BeyGram iOS до перехода на кодовую базу Telegram (`backup/pre-telegram-migration-main`, `backup/pre-telegram-migration-dev`).
+- `upstream` remote — `https://github.com/TelegramMessenger/Telegram-iOS.git`.
 
-Для Bash используйте `./gradlew` с теми же задачами.
+## Сборка через GitHub Actions
 
-| Вариант | Application ID | APK |
-| --- | --- | --- |
-| Dev | `com.beykus.beygram.dev` | `app/build/outputs/apk/dev/debug/app-dev-debug.apk` |
-| Prod | `com.beykus.beygram` | `app/build/outputs/apk/prod/release/app-prod-release-unsigned.apk` |
+Workflow: [`.github/workflows/build.yml`](.github/workflows/build.yml)
 
-Prod не содержит отладочного режима; для распространения нужно настроить собственную release-подпись. API-ключи не хранятся в репозитории. При отсутствии готовой конфигурации TDLib приложение показывает экран входа с причиной, без чатов.
+- **Runner:** `xcode-27` (macOS 27, Xcode 27.1, ARM64).
+- **Система сборки:** Bazel (`9.2.0` из `versions.json`) через `build-system/Make/Make.py`.
+- **Запуск:** вручную через `workflow_dispatch` (выбор канала `DEV` или `release`), а также автоматически при push в `main` или теги `v*` / `release-*`.
+- **Секреты репозитория:** `TELEGRAM_API_ID` и `TELEGRAM_API_HASH` (подставляются во временную конфигурацию на время сборки и никогда не логируются).
+- **Проверка результата:** [`build-system/verify-ipa.sh`](build-system/verify-ipa.sh) автоматически проверяет структуру `Payload/*.app`, архитектуру `arm64`, отсутствие simulator-бинарников, Bundle ID, Display Name, версию, URL-схемы и отсутствие посторонних сертификатов.
 
-Включены Java bindings TDLib и `libtdjni.so` для **ARM64 (`arm64-v8a`)**. Для других архитектур нужно собрать соответствующие библиотеки; эмулятор x86 без них не использует реальный Telegram. Артефакты TDLib включены намеренно, чтобы ARM64-сборка работала после клонирования. Локальный каталог исходников `td-master` и инструменты сборки не включаются.
+## Локальная разработка с Windows и требования к macOS
 
-## Обновление на телефоне
-
-Для **Stable** доступна ручная проверка из приложения: «Настройки → Обновления → Проверить обновления».
-APK скачивается только после подтверждения и устанавливается системным установщиком Android.
-Подробности по совместимости версий, подписанию и GitHub Releases — в [инструкции по Stable-обновлениям](docs/stable-updates.md).
-
-
-**Сохраняйте установленное приложение и его данные.** Для обновления используйте `adb install -r` с прежними application ID и ключом подписи. Не исправляйте конфликт подписи удалением приложения: это удалит локальную сессию Telegram.
-
-Для текущего устройства доступен `scripts/update-dev.ps1`: он проверяет существующую установку, заменяет APK и сравнивает исходное время установки. Пути SDK/ADB и серийный номер можно переопределить параметрами скрипта.
-
-Не запускайте `connectedAndroidTest`/`connectedDevDebugAndroidTest` на установленном приложении с реальным аккаунтом. Для инструментальных проверок нужен отдельный эмулятор или application ID с изолированными данными. Подробные правила — в [AGENTS.md](AGENTS.md).
-
-## Уведомления
-
-Разрешите уведомления в Android. Для фонового приёма включите соответствующий переключатель и при необходимости разрешите работу без оптимизации батареи. Постоянное подключение отображается тихим уведомлением с кнопкой остановки. Глубокий сон, ограничения производителя и отсутствие доступа к Telegram могут задерживать доставку.
-
-## Диагностика и отчёты о проблеме
-
-В разделе «Настройки → Диагностика» доступны ручной просмотр данных, «Поделиться логами» (системный Share) и — при настроенном сервере — отправка отчёта о проблеме. Отчёт никогда не отправляется в фоне: только явной кнопкой после того, как пользователь видел точный состав данных.
-
-Поток отчёта: приложение генерирует nonce (256 бит) и `report_id` (UUIDv4), отправляет видимую команду `/report <nonce>` служебному боту через TDLib-сессию пользователя, дожидается подтверждения от бота (проверяются отправитель, чат и цепочка ответа) и только затем выполняет `POST /api/v1/bug-reports` сервера диагностики. Статус `delivered` появляется только по GET-запросу статуса. Секретов в APK нет: токены ботов и серверный `NONCE_PEPPER` живут на сервере.
-
-### Публичная конфигурация (не секреты)
-
-| Ключ `BuildConfig` | Свойство/`secrets.properties` | Значение по умолчанию | Назначение |
-| --- | --- | --- | --- |
-| `DIAGNOSTICS_API_BASE_URL` | `diagnosticsApiBaseUrl` | `https://beygram.beykus.fun` | HTTPS-origin сервера отчётов. Пусто — отправка отчётов выключена, ручной экспорт продолжает работать |
-| `REPORT_BOT_USERNAME` | `reportBotUsername` | `BeyGram_Bot` | Username служебного бота без `@` |
-| `REPORT_BOT_USER_ID` | `reportBotUserId` | `8841599020` | Telegram user id того же бота; пиннинг проверяется при открытии чата |
-
-Переопределение — gradle-свойство (`-PdiagnosticsApiBaseUrl=...`) или строка в `secrets.properties`; менять код не нужно. Серверная часть — репозиторий [BeyGram-Diagnostics-Server](https://github.com/Beykus-Y/BeyGram-Diagnostics-Server): там настраиваются `REPORT_BOT_TOKEN`, `NONCE_PEPPER`, `DELIVERY_CHAT_ID` и allowlist тестировщиков.
-
-## Лицензия
-
-BeyGram распространяется под лицензией GNU GPL v3. Полный текст лежит в [LICENSE](LICENSE). Сторонние компоненты и их лицензии перечислены в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Сборка iOS-приложения требует **macOS** и **Xcode** (согласно `versions.json`: macOS `27`, Xcode `27.1`, Bazel `9.2.0`, Python 3). На **Windows** выполняется редактирование кода, управление Git/PR и запуск/мониторинг сборок через GitHub Actions (`gh`).
 
 ## Документация
 
-- [Android: сборка, SDK/ADB и диагностика](docs/android-development.md)
-- [TDLib и нативные библиотеки](docs/tdlib.md)
-- [Архитектура сообщений и политик приватности](docs/conversation-architecture.md)
-- [Уведомления без Google-сервисов](docs/notifications.md)
-- [Сторонние компоненты](THIRD_PARTY_NOTICES.md)
+- [Установка через AltStore / SideStore и ограничения бесплатной подписи](docs/SIDELOADING.md)
+- [Обновление исходников из upstream Telegram-iOS](docs/UPSTREAM_SYNC.md)
+- [Оригинальная документация сборки Telegram-iOS](Telegram/CLAUDE.md)
