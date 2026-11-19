@@ -2,62 +2,84 @@ import Foundation
 
 // BG Push: уведомления для iOS без платного аккаунта Apple Developer.
 //
-// Клиент создаёт привязку на сервере, получает от него ingress-описание и передаёт его Telegram
-// как web push токен (token_type 10). Контракт сервера: issue #30 в BeyGram-Diagnostics-Server.
-// Контракт не подтверждён прототипом на iPhone: go/no-go проверяет владелец.
-// Этот файл использует только Foundation. Вызовы Telegram находятся в TelegramCore (BeyGramPushRegistration.swift).
+// Клиент создаёт регистрацию на сервере и получает от него ingress-адрес. Затем Telegram получает этот адрес
+// как web push токен (token_type 10). Контракт: раздел «API для нативного клиента» в docs/bg-push.md
+// репозитория BeyGram-Diagnostics-Server (issue #30). Контракт не подтверждён прототипом на iPhone:
+// go/no-go проверяет владелец. Секреты лежат в Keychain (BeyGramPushSecrets.swift), вызовы Telegram в TelegramCore.
 
-/// Статус привязки на сервере.
-public enum BeyGramPushPairingStatus: String, Codable, Equatable {
+/// Статус регистрации на сервере. Совпадает с полем `state` ответа.
+public enum BeyGramPushRegistrationState: String, Codable, Equatable {
     case pending
-    case completed
+    case active
     case expired
     case revoked
 }
 
-/// Ingress-описание, которое Telegram получает как web push токен.
-public struct BeyGramPushIngress: Codable, Equatable {
-    public let endpoint: String
+/// Ключи ingress, которыми Telegram шифрует уведомления. Сервер отдаёт их владельцу, когда регистрация `active`.
+public struct BeyGramPushTelegramKeys: Codable, Equatable {
     public let p256dh: String
     public let auth: String
 
-    public init(endpoint: String, p256dh: String, auth: String) {
-        self.endpoint = endpoint
+    public init(p256dh: String, auth: String) {
         self.p256dh = p256dh
         self.auth = auth
     }
+}
 
-    /// JSON для поля `token` в `account.registerDevice` с `token_type` 10. Nil, если сериализация не удалась.
+/// Web push токен для `account.registerDevice` с `token_type` 10: адрес ingress и его ключи.
+public struct BeyGramPushTelegramToken: Codable, Equatable {
+    public let endpoint: String
+    public let keys: BeyGramPushTelegramKeys
+
+    public init(endpoint: String, keys: BeyGramPushTelegramKeys) {
+        self.endpoint = endpoint
+        self.keys = keys
+    }
+
+    /// JSON для поля `token`. Nil, если кодирование не удалось.
     public func registrationToken() -> String? {
-        let object: [String: Any] = [
-            "endpoint": self.endpoint,
-            "keys": [
-                "p256dh": self.p256dh,
-                "auth": self.auth,
-            ],
-        ]
-        guard JSONSerialization.isValidJSONObject(object), let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(self) else {
             return nil
         }
         return String(data: data, encoding: .utf8)
     }
 }
 
-/// Результат создания привязки.
-public struct BeyGramPushPairing: Equatable {
-    public let pairingId: String
-    /// Секрет для опроса статуса. Хранится только на устройстве.
-    public let pollToken: String
-    /// Страница установки PWA, которую открывают в Safari.
-    public let setupUrl: String
-    public let expiresAt: Date?
+/// Bearer владельца: 256 случайных бит в base64url без дополнения, то есть 43 символа, как ожидает сервер.
+public enum BeyGramPushBearer {
+    public static func generate() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        for index in bytes.indices {
+            bytes[index] = UInt8.random(in: UInt8.min ... UInt8.max)
+        }
+        return Data(bytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
 }
 
-/// Ответ сервера на опрос привязки.
-public struct BeyGramPushPollResult: Equatable {
-    public let status: BeyGramPushPairingStatus
-    /// Приходит только при статусе `completed`.
-    public let ingress: BeyGramPushIngress?
+/// Регистрация, которую вернул сервер при создании. Адрес ingress и ссылка установки отдаются один раз.
+public struct BeyGramPushRegistration: Equatable {
+    public let registrationId: String
+    public let state: BeyGramPushRegistrationState
+    public let expiresAt: Date?
+    public let ingressUrl: String
+    /// Страница установки PWA. Одноразовый код привязки передаётся в её фрагменте.
+    public let setupUrl: String
+}
+
+/// Ответ сервера на опрос регистрации.
+public struct BeyGramPushRegistrationStatus: Equatable {
+    public let state: BeyGramPushRegistrationState
+    /// Срок установки. Приходит, пока регистрация `pending`.
+    public let expiresAt: Date?
+    /// Ключи Telegram. Приходят владельцу, когда регистрация `active`.
+    public let telegramKeys: BeyGramPushTelegramKeys?
+    /// Когда сервер получил подтверждение от клиента. Nil, пока его нет.
+    public let telegramConfirmedAt: Date?
 }
 
 public enum BeyGramPushError: Error, Equatable {
@@ -67,46 +89,34 @@ public enum BeyGramPushError: Error, Equatable {
     case decoding
 }
 
-private struct BeyGramPushPairingWire: Decodable {
-    let pairingId: String
-    let pollToken: String
+private struct BeyGramPushCreateWire: Decodable {
+    let registrationId: String
+    let state: BeyGramPushRegistrationState
+    let expiresAt: Double?
+    let ingressUrl: String
     let setupUrl: String
-    let expiresAt: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case pairingId = "pairing_id"
-        case pollToken = "poll_token"
-        case setupUrl = "setup_url"
-        case expiresAt = "expires_at"
-    }
 }
 
-private struct BeyGramPushPollKeysWire: Decodable {
-    let p256dh: String
-    let auth: String
+private struct BeyGramPushStatusWire: Decodable {
+    let state: BeyGramPushRegistrationState
+    let expiresAt: Double?
+    let telegramConfirmedAt: Double?
+    let telegramKeys: BeyGramPushTelegramKeys?
 }
 
-private struct BeyGramPushPollIngressWire: Decodable {
-    let endpoint: String
-    let keys: BeyGramPushPollKeysWire
+/// Ключи ответа сервера приходят в snake_case (`registration_id`, `ingress_url`, `telegram_keys`).
+private func beyGramPushDecode<T: Decodable>(_ type: T.Type, from data: Data) -> T? {
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    return try? decoder.decode(type, from: data)
 }
 
-private struct BeyGramPushPollWire: Decodable {
-    let status: BeyGramPushPairingStatus
-    let ingress: BeyGramPushPollIngressWire?
-}
-
-private func beyGramPushParseDate(_ value: String?) -> Date? {
-    guard let value = value else {
+/// Временные метки сервера приходят как Unix-время в секундах.
+private func beyGramPushDate(_ seconds: Double?) -> Date? {
+    guard let seconds = seconds else {
         return nil
     }
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let date = formatter.date(from: value) {
-        return date
-    }
-    formatter.formatOptions = [.withInternetDateTime]
-    return formatter.date(from: value)
+    return Date(timeIntervalSince1970: seconds)
 }
 
 /// Идентификаторы в путях запроса принимаются только из безопасного набора символов.
@@ -117,6 +127,7 @@ private func beyGramPushIsSafeSegment(_ value: String) -> Bool {
 }
 
 /// HTTP-клиент BG Push. Колбэки приходят в фоновой очереди, интерфейс сам переходит на main.
+/// Все запросы владельца авторизуются его bearer. Ingress и PWA сюда не ходят.
 public final class BeyGramPushClient {
     public static let defaultBaseUrl = URL(string: "https://beygram.beykus.fun")!
 
@@ -128,59 +139,49 @@ public final class BeyGramPushClient {
         self.session = session
     }
 
-    /// `POST /api/v1/push/pairings`: начинает привязку.
-    public func createPairing(installationId: String, appVersion: String, completion: @escaping (Result<BeyGramPushPairing, BeyGramPushError>) -> Void) {
-        guard beyGramPushIsSafeSegment(installationId) else {
-            completion(.failure(.invalidRequest))
-            return
-        }
-        let body: [String: Any] = [
-            "installation_id": installationId,
-            "platform": "ios",
-            "app_version": appVersion,
-        ]
-        self.perform(path: "api/v1/push/pairings", method: "POST", bearerToken: nil, body: body) { result in
+    /// `POST /api/v1/push/registrations`: создаёт регистрацию. Тело запроса не нужно.
+    public func createRegistration(bearer: String, completion: @escaping (Result<BeyGramPushRegistration, BeyGramPushError>) -> Void) {
+        self.perform(path: "api/v1/push/registrations", method: "POST", bearer: bearer) { result in
             switch result {
             case let .failure(error):
                 completion(.failure(error))
             case let .success(data):
-                guard let wire = try? JSONDecoder().decode(BeyGramPushPairingWire.self, from: data) else {
+                guard let wire = beyGramPushDecode(BeyGramPushCreateWire.self, from: data) else {
                     completion(.failure(.decoding))
                     return
                 }
-                completion(.success(BeyGramPushPairing(pairingId: wire.pairingId, pollToken: wire.pollToken, setupUrl: wire.setupUrl, expiresAt: beyGramPushParseDate(wire.expiresAt))))
+                completion(.success(BeyGramPushRegistration(registrationId: wire.registrationId, state: wire.state, expiresAt: beyGramPushDate(wire.expiresAt), ingressUrl: wire.ingressUrl, setupUrl: wire.setupUrl)))
             }
         }
     }
 
-    /// `GET /api/v1/push/pairings/{id}`: читает статус привязки. Секрет опроса передаётся в заголовке.
-    public func pollPairing(pairingId: String, pollToken: String, completion: @escaping (Result<BeyGramPushPollResult, BeyGramPushError>) -> Void) {
-        guard beyGramPushIsSafeSegment(pairingId) else {
+    /// `GET /api/v1/push/registrations/{id}`: статус регистрации.
+    public func pollRegistration(registrationId: String, bearer: String, completion: @escaping (Result<BeyGramPushRegistrationStatus, BeyGramPushError>) -> Void) {
+        guard beyGramPushIsSafeSegment(registrationId) else {
             completion(.failure(.invalidRequest))
             return
         }
-        self.perform(path: "api/v1/push/pairings/" + pairingId, method: "GET", bearerToken: pollToken, body: nil) { result in
+        self.perform(path: "api/v1/push/registrations/" + registrationId, method: "GET", bearer: bearer) { result in
             switch result {
             case let .failure(error):
                 completion(.failure(error))
             case let .success(data):
-                guard let wire = try? JSONDecoder().decode(BeyGramPushPollWire.self, from: data) else {
+                guard let wire = beyGramPushDecode(BeyGramPushStatusWire.self, from: data) else {
                     completion(.failure(.decoding))
                     return
                 }
-                let ingress = wire.ingress.map({ BeyGramPushIngress(endpoint: $0.endpoint, p256dh: $0.keys.p256dh, auth: $0.keys.auth) })
-                completion(.success(BeyGramPushPollResult(status: wire.status, ingress: ingress)))
+                completion(.success(BeyGramPushRegistrationStatus(state: wire.state, expiresAt: beyGramPushDate(wire.expiresAt), telegramKeys: wire.telegramKeys, telegramConfirmedAt: beyGramPushDate(wire.telegramConfirmedAt))))
             }
         }
     }
 
-    /// `DELETE /api/v1/push/installations/{id}`: отзывает установку и её подписки на сервере.
-    public func deleteInstallation(installationId: String, pollToken: String, completion: @escaping (Result<Void, BeyGramPushError>) -> Void) {
-        guard beyGramPushIsSafeSegment(installationId) else {
+    /// `POST /api/v1/push/registrations/{id}/telegram-confirm`: клиент сообщает, что Telegram принял регистрацию.
+    public func confirmTelegram(registrationId: String, bearer: String, completion: @escaping (Result<Void, BeyGramPushError>) -> Void) {
+        guard beyGramPushIsSafeSegment(registrationId) else {
             completion(.failure(.invalidRequest))
             return
         }
-        self.perform(path: "api/v1/push/installations/" + installationId, method: "DELETE", bearerToken: pollToken, body: nil) { result in
+        self.perform(path: "api/v1/push/registrations/" + registrationId + "/telegram-confirm", method: "POST", bearer: bearer) { result in
             switch result {
             case let .failure(error):
                 completion(.failure(error))
@@ -190,22 +191,28 @@ public final class BeyGramPushClient {
         }
     }
 
-    private func perform(path: String, method: String, bearerToken: String?, body: [String: Any]?, completion: @escaping (Result<Data, BeyGramPushError>) -> Void) {
+    /// `DELETE /api/v1/push/registrations/{id}`: отзывает регистрацию. Повторный вызов безопасен.
+    public func deleteRegistration(registrationId: String, bearer: String, completion: @escaping (Result<Void, BeyGramPushError>) -> Void) {
+        guard beyGramPushIsSafeSegment(registrationId) else {
+            completion(.failure(.invalidRequest))
+            return
+        }
+        self.perform(path: "api/v1/push/registrations/" + registrationId, method: "DELETE", bearer: bearer) { result in
+            switch result {
+            case let .failure(error):
+                completion(.failure(error))
+            case .success:
+                completion(.success(()))
+            }
+        }
+    }
+
+    private func perform(path: String, method: String, bearer: String, completion: @escaping (Result<Data, BeyGramPushError>) -> Void) {
         var request = URLRequest(url: self.baseUrl.appendingPathComponent(path))
         request.httpMethod = method
         request.timeoutInterval = 20
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let bearerToken = bearerToken {
-            request.setValue("Bearer " + bearerToken, forHTTPHeaderField: "Authorization")
-        }
-        if let body = body {
-            guard let bodyData = try? JSONSerialization.data(withJSONObject: body, options: []) else {
-                completion(.failure(.invalidRequest))
-                return
-            }
-            request.httpBody = bodyData
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        }
+        request.setValue("Bearer " + bearer, forHTTPHeaderField: "Authorization")
         let task = self.session.dataTask(with: request) { data, response, error in
             if error != nil {
                 completion(.failure(.network))
@@ -225,22 +232,18 @@ public final class BeyGramPushClient {
     }
 }
 
-/// Состояние BG Push на устройстве. Хранится в `UserDefaults`, как и остальные настройки BeyGram.
+/// Состояние регистрации, которое можно хранить в UserDefaults. Секретов здесь нет: они в BeyGramPushSecrets (Keychain).
 public struct BeyGramPushState: Codable, Equatable {
-    /// Случайный id установки (UUID). Создаётся при первой настройке и удаляется вместе с привязкой.
-    public var installationId: String
-    public var pairingId: String?
-    public var pollToken: String?
-    public var setupUrl: String?
+    public var registrationId: String
+    public var state: BeyGramPushRegistrationState
     public var expiresAt: Date?
-    public var status: BeyGramPushPairingStatus?
-    public var ingress: BeyGramPushIngress?
-    /// Подтвердил ли Telegram регистрацию web push токена для текущего ingress.
-    public var telegramRegistered: Bool
+    public var telegramConfirmedAt: Date?
 
-    public init(installationId: String) {
-        self.installationId = installationId
-        self.telegramRegistered = false
+    public init(registrationId: String, state: BeyGramPushRegistrationState, expiresAt: Date?, telegramConfirmedAt: Date?) {
+        self.registrationId = registrationId
+        self.state = state
+        self.expiresAt = expiresAt
+        self.telegramConfirmedAt = telegramConfirmedAt
     }
 }
 
@@ -248,7 +251,7 @@ public struct BeyGramPushState: Codable, Equatable {
 public final class BeyGramPushStore {
     public static let shared = BeyGramPushStore(defaults: UserDefaults.standard)
 
-    private static let key = "beygram.push.state.v1"
+    private static let key = "beygram.push.state.v2"
 
     private let defaults: UserDefaults
 
@@ -256,22 +259,12 @@ public final class BeyGramPushStore {
         self.defaults = defaults
     }
 
-    /// Текущее состояние или nil, если BG Push ещё не настраивали.
+    /// Текущее состояние или nil, если регистрации нет.
     public func load() -> BeyGramPushState? {
         guard let data = self.defaults.data(forKey: BeyGramPushStore.key) else {
             return nil
         }
         return try? JSONDecoder().decode(BeyGramPushState.self, from: data)
-    }
-
-    /// Текущее состояние. Если его нет, создаёт новое с новым id установки.
-    public func loadOrCreate() -> BeyGramPushState {
-        if let state = self.load() {
-            return state
-        }
-        let state = BeyGramPushState(installationId: UUID().uuidString)
-        self.save(state)
-        return state
     }
 
     public func save(_ state: BeyGramPushState) {
