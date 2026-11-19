@@ -14,10 +14,12 @@ on:
   push:
     branches:
       - main
+      - 'build/**'
     tags:
       - 'v*'
       - 'release-*'
-# Pull request не запускают сборку: она идёт часами на macOS. Запуск вручную через workflow_dispatch.
+# Pull request сборку не запускают: она идёт часами на macOS. Запуск вручную через workflow_dispatch
+# или push в ветку build/**, например build/ios-integration.
 
 concurrency:
   group: ios-build-${{ github.ref }}
