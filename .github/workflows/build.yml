@@ -140,6 +140,7 @@ jobs:
               cfg = json.load(f)
           cfg['api_id'] = os.environ['TELEGRAM_API_ID']
           cfg['api_hash'] = os.environ['TELEGRAM_API_HASH']
+          cfg['team_id'] = 'C67CF9S4VU'
           with open(out_path, 'w', encoding='utf-8') as f:
               json.dump(cfg, f, indent=2)
           EOF
@@ -148,12 +149,16 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$HOME/telegram-bazel-cache"
+          python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
+          python3 build-system/generate-sideload-codesigning.py \
+            --bundleId "${{ steps.meta.outputs.bundle_id }}" \
+            --teamId "C67CF9S4VU" \
+            --outDir "$RUNNER_TEMP/sideload-codesigning"
           python3 -u build-system/Make/Make.py \
             --cacheDir="$HOME/telegram-bazel-cache" \
             build \
             --configurationPath="$RUNNER_TEMP/beygram-ci-config.json" \
-            --xcodeManagedCodesigning \
-            --disableProvisioningProfiles \
+            --codesigningInformationPath="$RUNNER_TEMP/sideload-codesigning" \
             --disableExtensions \
             --configuration=release_arm64 \
             --buildNumber="${{ steps.meta.outputs.build_number }}" 2>&1 | tee "$RUNNER_TEMP/build.log"
@@ -162,6 +167,7 @@ jobs:
         if: always()
         run: |
           rm -f "$RUNNER_TEMP/beygram-ci-config.json"
+          rm -rf "$RUNNER_TEMP/sideload-codesigning"
 
       - name: Collect and verify IPA artifacts
         run: |
