@@ -3,6 +3,7 @@ import UIKit
 import Display
 import AccountContext
 import BeyGramTriggerWordsUI
+import BeyGramReportUI
 import SwiftSignalKit
 import TelegramCore
 import SettingsUI
@@ -156,6 +157,8 @@ extension PeerInfoScreenNode {
             push(themeSettingsController(context: self.context))
         case .triggerWords:
             push(triggerWordsSettingsController(context: self.context))
+        case .beyGramReport:
+            push(reportController(context: self.context, appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""))
         case .language:
             push(LocalizationListController(context: self.context))
         case .premium:
