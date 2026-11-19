@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import UserNotifications
 import Display
 import SwiftSignalKit
 import TelegramPresentationData
@@ -211,6 +212,10 @@ public func triggerWordsSettingsController(context: AccountContext) -> ViewContr
 
     let arguments = TriggerWordsSettingsArguments(toggleFeature: { value in
         settings.setEnabled(value, for: .triggerWords)
+        if value {
+            // Without permission the alert is added silently and never shown, so ask once when the feature turns on.
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge], completionHandler: { _, _ in })
+        }
         bump()
     }, setScope: { scope in
         store.setScope(scope)
