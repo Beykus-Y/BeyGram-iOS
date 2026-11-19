@@ -61,13 +61,23 @@ def main():
         with open(plist_path, 'wb') as f:
             plistlib.dump(plist_data, f)
 
-        subprocess.check_call([
-            'openssl', 'pkcs12',
-            '-in', p12_path,
-            '-passin', 'pass:',
-            '-nodes',
-            '-out', pem_path,
-        ])
+        try:
+            subprocess.check_call([
+                'openssl', 'pkcs12',
+                '-legacy',
+                '-in', p12_path,
+                '-passin', 'pass:',
+                '-nodes',
+                '-out', pem_path,
+            ])
+        except subprocess.CalledProcessError:
+            subprocess.check_call([
+                'openssl', 'pkcs12',
+                '-in', p12_path,
+                '-passin', 'pass:',
+                '-nodes',
+                '-out', pem_path,
+            ])
 
         out_profile = os.path.join(profiles_dir, 'Telegram.mobileprovision')
         subprocess.check_call([
