@@ -277,6 +277,11 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
             interaction.openSettings(.triggerWords)
         }))
     }
+    if BeyGramSettings.shared.isEnabled(.updateCheck) {
+        items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 92, text: "Updates", icon: PresentationResourcesSettings.appearance, action: {
+            interaction.openSettings(.beyGramUpdates)
+        }))
+    }
     if BeyGramSettings.shared.isEnabled(.diagnostics) {
         items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 91, text: "Report a problem", icon: PresentationResourcesSettings.appearance, action: {
             interaction.openSettings(.beyGramReport)
