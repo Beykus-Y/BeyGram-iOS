@@ -7,10 +7,12 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 cc_library(
     name = "BGWaveCore",
     srcs = [
+        "BGWaveController.cpp",
         "BGWaveInvite.cpp",
         "BGWaveSession.cpp",
     ],
     hdrs = [
+        "BGWaveController.hpp",
         "BGWaveInvite.hpp",
         "BGWaveSession.hpp",
     ],
@@ -24,6 +26,15 @@ cc_library(
 cc_test(
     name = "BGWaveCoreTests",
     srcs = ["Tests/BGWaveCoreTests.cpp"],
+    copts = ["-std=c++20"],
+    deps = [":BGWaveCore"],
+)
+
+# Controller host test (the Android scenarios over a fake session, the golden control invites, and a loopback over
+# the core), same command with BGWaveControllerTests.
+cc_test(
+    name = "BGWaveControllerTests",
+    srcs = ["Tests/BGWaveControllerTests.cpp"],
     copts = ["-std=c++20"],
     deps = [":BGWaveCore"],
 )
