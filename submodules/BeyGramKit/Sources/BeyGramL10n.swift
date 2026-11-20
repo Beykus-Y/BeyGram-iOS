@@ -10,6 +10,11 @@ public enum BeyGramPluralCategory: String, CaseIterable {
 
 /// Unified localization keys for all BeyGram features.
 public enum BeyGramStringKey: String, CaseIterable {
+    // BG Wave: the hint for a session that failed where a denied Local Network permission may be the cause
+    case bgWaveLocalNetworkTitle = "bgwave.localNetwork.title"
+    case bgWaveLocalNetworkMessage = "bgwave.localNetwork.message"
+    case bgWaveLocalNetworkSettings = "bgwave.localNetwork.settings"
+    case bgWaveLocalNetworkNotNow = "bgwave.localNetwork.notNow"
     // Common
     case commonBack = "common.back"
     case commonCancel = "common.cancel"
