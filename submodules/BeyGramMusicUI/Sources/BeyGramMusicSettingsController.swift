@@ -8,6 +8,7 @@ import PresentationDataUtils
 import AccountContext
 import BeyGramKit
 import BeyGramMedia
+import BeyGramMusicFormat
 
 private final class BeyGramMusicArguments {
     let setEnabled: (BeyGramFeature, Bool) -> Void
