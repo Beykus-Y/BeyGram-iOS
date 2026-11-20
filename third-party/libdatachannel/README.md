@@ -20,8 +20,8 @@ These are the commits libdatachannel v0.22.5's `.gitmodules` and BG-Media's Fetc
 from upstream: `diff -rq` against the tree that the Linux build used shows no differences. Files that the build does not
 compile (tests, examples, docs, Windows and Nettle code paths) are not copied.
 
-Licence check for Beykus: the MPL-2.0 files keep their licence inside the app, which is GPL-2.0-or-later. MPL-2.0 is
-a secondary licence compatible with GPL-2.0 or later. Please confirm this reading before the first release build.
+Licence check (an engineering record, not a legal opinion): the MPL-2.0 files keep their licence inside the app, which is GPL-2.0-or-later. No source file in this tree carries the MPL-2.0 notice "Incompatible With Secondary Licenses", and none carries the MPL-2.0 Exhibit A notice either, so the MPL terms reach these files through the LICENSE files. The attribution and the reading are in the root NOTICE. MPL-2.0 is
+a secondary licence compatible with GPL-2.0 or later. Whether the combined build may be distributed is the owner's decision.
 
 ## What is not vendored, and why
 
