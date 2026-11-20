@@ -67,10 +67,17 @@ BGWaveSession::~BGWaveSession() {
 }
 
 bool BGWaveSession::startOffer(std::int64_t nowUnixSeconds) {
+    return startOffer(nowUnixSeconds, options_.offerTtlSeconds);
+}
+
+bool BGWaveSession::startOffer(std::int64_t nowUnixSeconds, std::int64_t offerTtlSeconds) {
     if (!pipeline_ || options_.role != bw::WaveRole::Host) {
         return false;
     }
-    return pipeline_->startOffer(resolveUnixSeconds(nowUnixSeconds), options_.offerTtlSeconds);
+    if (offerTtlSeconds <= 0 || offerTtlSeconds > bw::kWaveMaxSignalTtlSeconds) {
+        return false;
+    }
+    return pipeline_->startOffer(resolveUnixSeconds(nowUnixSeconds), offerTtlSeconds);
 }
 
 bool BGWaveSession::acceptInvite(std::string_view link, std::int64_t nowUnixSeconds, std::string* error) {
