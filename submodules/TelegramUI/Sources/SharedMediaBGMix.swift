@@ -8,6 +8,16 @@ import AccountContext
 import BeyGramMedia
 import BeyGramYandexMusic
 
+/// Why BG Mix could not play the current item of the playlist.
+enum SharedMediaBGMixFailure: Equatable {
+    /// The item has no file BG Mix can read: the file is missing, its download failed, or its source cannot be played.
+    case unavailable
+    /// BG Mix refused the file when it was queued.
+    case rejected
+    /// BG Mix could not prepare the track. The text is the engine's message, when it gave one.
+    case preparation(String?)
+}
+
 /// BG Mix as the engine of the `.music` playlist in `SharedMediaPlayer`.
 ///
 /// Ownership: the playlist decides what is current and what is next. MediaManager keeps the lock screen, the
@@ -29,6 +39,9 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
     var onItemEnded: (() -> Void)?
     /// Main queue. The playlist should move to the prepared next track.
     var onAdvanceRequested: (() -> Void)?
+    /// Main queue. The current item cannot play, so the playlist moves on. Called only while playback is wanted: otherwise
+    /// the item waits for the next play request, which queues it again.
+    var onCurrentItemFailed: ((SharedMediaBGMixFailure) -> Void)?
 
     private struct StatusSample {
         let key: AnyHashable?
@@ -50,6 +63,8 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
     private let fillDisposable = MetaDisposable()
 
     private var endedTrackId: UInt64?
+    /// The track whose failure was last reported, so one failed track moves the playlist on once.
+    private var reportedFailedTrackId: UInt64?
     /// The item the playlist was last asked to move to. Cleared when the playlist's current item changes, so a later
     /// return to an earlier item is followed again.
     private var advanceRequestedTo: AnyHashable?
@@ -124,13 +139,37 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
         self.syncQueue()
     }
 
-    /// The current item repeats: the queue is rebuilt from it and playback is wanted again.
+    /// The current item repeats: the queue is rebuilt from it, and it plays again when playback is wanted.
     func restartCurrent() {
         self.rebuild()
-        self.play()
+        // A restart after the user paused queues the item again but does not start it.
+        if self.wantsPlaying {
+            self.wantPlayback()
+        }
     }
 
+    /// Plays the current item. An item that is not queued, or whose track failed, is queued again first.
     func play() {
+        let needsQueue = self.currentItemNeedsQueue()
+        // The play request is recorded before the item is queued again, so a failure of the new try is reported.
+        self.wantPlayback()
+        if needsQueue {
+            self.rebuild()
+        }
+    }
+
+    /// True when the current item has no track in the queue, or its track failed to prepare.
+    private func currentItemNeedsQueue() -> Bool {
+        guard let currentItem = self.currentItem else {
+            return false
+        }
+        guard let trackId = self.trackIdByKey[currentItem.stableId] else {
+            return true
+        }
+        return self.player.snapshot.queue.first(where: { $0.identifier == trackId })?.state == .failed
+    }
+
+    private func wantPlayback() {
         self.wantsPlaying = true
         if self.sessionDisposable == nil {
             self.acquireSession()
@@ -173,6 +212,7 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
         }
 
         self.checkEnded(snapshot)
+        self.checkFailed(snapshot)
 
         // Only a change from playing to paused is a pause by the system (an interruption, or the route went away). A track
         // that is loaded and waits for its first play also reads as paused, and must not cancel a play request.
@@ -246,6 +286,20 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
         }
         self.endedTrackId = master.identifier
         self.onItemEnded?()
+    }
+
+    /// The current item's track failed to prepare. Reported once per track, and only while playback is wanted.
+    private func checkFailed(_ snapshot: BGMixSnapshot) {
+        guard self.wantsPlaying, !snapshot.transitionActive, let currentItem = self.currentItem else {
+            return
+        }
+        guard let track = snapshot.queue.first(where: { self.keyByTrackId[$0.identifier] == currentItem.stableId }),
+              track.state == .failed, track.identifier != self.reportedFailedTrackId
+        else {
+            return
+        }
+        self.reportedFailedTrackId = track.identifier
+        self.onCurrentItemFailed?(.preparation(track.error))
     }
 
     /// BG Mix has moved on to the playlist's next item: a scheduled crossfade has started it, or the outgoing track ended
@@ -350,12 +404,13 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
     }
 
     private func forgetTracks() {
+        self.reportedFailedTrackId = nil
         self.trackIdByKey.removeAll()
         self.keyByTrackId.removeAll()
         self.queueOrder.removeAll()
     }
 
-    /// Resolves the files of the current and next items that are not queued yet, then queues them in order.
+    /// Resolves the file of the current item when it is not queued yet, then queues it. The next item follows once the current one is queued.
     private func fill() {
         guard let currentItem = self.currentItem else {
             return
@@ -370,48 +425,65 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
         self.fillGeneration += 1
         let generation = self.fillGeneration
 
+        let neededCurrent: SharedMediaPlaylistItem? = needsCurrent ? currentItem : nil
+        let neededNext: SharedMediaPlaylistItem? = needsNext ? nextItem : nil
         let currentSignal: Signal<URL?, NoError>
-        if needsCurrent {
-            currentSignal = self.fileURL(for: currentItem)
+        if let neededCurrent = neededCurrent {
+            currentSignal = self.fileURL(for: neededCurrent)
         } else {
             currentSignal = .single(nil)
         }
-        let nextSignal: Signal<URL?, NoError>
-        if needsNext, let nextItem = nextItem {
-            nextSignal = self.fileURL(for: nextItem)
-        } else {
-            nextSignal = .single(nil)
-        }
-        let neededCurrent: SharedMediaPlaylistItem? = needsCurrent ? currentItem : nil
-        let neededNext: SharedMediaPlaylistItem? = needsNext ? nextItem : nil
 
         self.fillDisposable.set((currentSignal
-        |> mapToSignal { currentURL -> Signal<(URL?, URL?), NoError> in
-            return nextSignal
-            |> map { nextURL -> (URL?, URL?) in
-                return (currentURL, nextURL)
-            }
-        }
-        |> deliverOnMainQueue).startStrict(next: { [weak self] urls in
-            self?.commitFill(generation: generation, current: neededCurrent, currentURL: urls.0, next: neededNext, nextURL: urls.1)
+        |> deliverOnMainQueue).startStrict(next: { [weak self] currentURL in
+            self?.commitCurrent(generation: generation, item: neededCurrent, url: currentURL, next: neededNext)
         }))
     }
 
-    private func commitFill(generation: Int, current: SharedMediaPlaylistItem?, currentURL: URL?, next: SharedMediaPlaylistItem?, nextURL: URL?) {
+    /// The current item is queued as soon as its file is known, so it never waits for the next item. The next item is
+    /// resolved after it, which keeps the order of the queue.
+    private func commitCurrent(generation: Int, item: SharedMediaPlaylistItem?, url: URL?, next: SharedMediaPlaylistItem?) {
         guard generation == self.fillGeneration else {
             return
         }
-        if let current = current {
-            guard let currentURL = currentURL, self.addToQueue(current, url: currentURL) else {
-                // The current track cannot be queued (its file is missing, or BG Mix refused it): move on.
-                self.onItemEnded?()
+        if let item = item {
+            guard let url = url else {
+                // The file is missing or its download failed: BG Mix cannot play the item.
+                self.reportCurrentFailure(.unavailable)
+                return
+            }
+            guard self.addToQueue(item, url: url) else {
+                self.reportCurrentFailure(.rejected)
                 return
             }
         }
-        if let next = next, let nextURL = nextURL {
-            _ = self.addToQueue(next, url: nextURL)
+        self.tryPlay(self.player.snapshot)
+        guard let next = next else {
+            return
+        }
+        self.fillDisposable.set((self.fileURL(for: next)
+        |> deliverOnMainQueue).startStrict(next: { [weak self] nextURL in
+            self?.commitNext(generation: generation, item: next, url: nextURL)
+        }))
+    }
+
+    private func commitNext(generation: Int, item: SharedMediaPlaylistItem, url: URL?) {
+        guard generation == self.fillGeneration else {
+            return
+        }
+        // A next item that cannot be queued is not played here: the playlist reaches it later and reports it then.
+        if let url = url {
+            _ = self.addToQueue(item, url: url)
         }
         self.tryPlay(self.player.snapshot)
+    }
+
+    /// The current item cannot be queued. Reported only while playback is wanted; otherwise it waits for the next play request.
+    private func reportCurrentFailure(_ failure: SharedMediaBGMixFailure) {
+        guard self.wantsPlaying else {
+            return
+        }
+        self.onCurrentItemFailed?(failure)
     }
 
     private func addToQueue(_ item: SharedMediaPlaylistItem, url: URL) -> Bool {
