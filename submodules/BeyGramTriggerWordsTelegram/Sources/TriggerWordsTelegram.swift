@@ -9,11 +9,13 @@ import BeyGramTriggerWords
 private let triggerAlertThread = "bg-trigger-words"
 private let maxTriggerAlertsInTray = 10
 
+/// Holds the disposable of a `firstValue` subscription until the value arrives.
+private final class FirstValueDisposableBox {
+    var disposable: Disposable?
+}
+
 private func firstValue<T>(_ signal: Signal<T, NoError>) async -> T {
-    final class Box {
-        var disposable: Disposable?
-    }
-    let box = Box()
+    let box = FirstValueDisposableBox()
     return await withCheckedContinuation { (continuation: CheckedContinuation<T, Never>) in
         box.disposable = signal.start(next: { value in
             withExtendedLifetime(box) {
