@@ -484,14 +484,22 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
         }
         |> deliverOnMainQueue
 
-        let downloaded: Signal<Never, NoError> = self.engine.resources.fetch(reference: reference.resourceReference(media.resource), userLocation: .other, userContentType: .audio)
+        // The fetch ends with the file on disk (`true`) or with a failed download (`false`). After a failed download the file
+        // never completes, so waiting for it would hang. A failed fetch answers nil at once, and BG Mix skips the track.
+        let fetchSucceeded: Signal<Bool, NoError> = self.engine.resources.fetch(reference: reference.resourceReference(media.resource), userLocation: .other, userContentType: .audio)
         |> ignoreValues
-        |> `catch` { _ -> Signal<Never, NoError> in
-            return .complete()
+        |> map { _ -> Bool in return true }
+        |> then(.single(true))
+        |> `catch` { _ -> Signal<Bool, NoError> in
+            return .single(false)
         }
-        // `then` forwards the values of its first signal, so the fetch is mapped to a URL type first. It never emits.
-        let fetched: Signal<URL?, NoError> = downloaded |> map { _ -> URL? in return nil }
-        return fetched |> then(complete)
+        return fetchSucceeded |> mapToSignal { succeeded -> Signal<URL?, NoError> in
+            if succeeded {
+                return complete
+            } else {
+                return .single(nil)
+            }
+        }
     }
 
     // MARK: - Published state
