@@ -783,18 +783,19 @@ public func enqueueMessages(account: Account, peerId: PeerId, messages: [Enqueue
     }
     return signal
     |> mapToSignal { transformed -> Signal<[MessageId?], NoError> in
-        switch beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, nowSeconds: Int32(account.network.globalTime), messages: transformed.map { $0.1 }) {
-        case let .send(batch):
+        let nowSeconds = Int32(account.network.globalTime)
+        switch beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, nowSeconds: nowSeconds, messages: transformed.map { $0.1 }) {
+        case let .send(batch, stealthDelays: stealthDelays):
             // The batch keeps the order and the count of the transformed messages, so each message keeps its media flag.
             let prepared = zip(transformed, batch).map { pair -> (Bool, EnqueueMessage) in (pair.0.0, pair.1) }
-            return enqueueTransformedMessages(account: account, peerId: peerId, messages: prepared)
+            return enqueueTransformedMessages(account: account, peerId: peerId, messages: prepared, stealthDelays: stealthDelays, nowSeconds: nowSeconds)
         case .refused:
             return enqueueTransformedRefusedMessages(account: account, peerId: peerId, messages: transformed)
         }
     }
 }
 
-private func enqueueTransformedMessages(account: Account, peerId: PeerId, messages: [(Bool, EnqueueMessage)]) -> Signal<[MessageId?], NoError> {
+private func enqueueTransformedMessages(account: Account, peerId: PeerId, messages: [(Bool, EnqueueMessage)], stealthDelays: [Int32?], nowSeconds: Int32) -> Signal<[MessageId?], NoError> {
     return account.postbox.transaction { transaction -> ([MessageId?], [MessageId]) in
         var resultIds = Array<MessageId?>(repeating: nil, count: messages.count)
         var ephemeralMessageIds: [MessageId] = []
@@ -821,7 +822,9 @@ private func enqueueTransformedMessages(account: Account, peerId: PeerId, messag
             }
         }
 
-        return (resultIds, ephemeralMessageIds)
+        // A message that stealth refused is stored failed, and the ephemeral path below must not send it.
+        let failedIds = beyGramStealthRecordScheduled(transaction: transaction, accountPeerId: account.peerId, ids: resultIds, stealthDelays: stealthDelays, nowSeconds: nowSeconds, refusedIds: Set(ephemeralMessageIds))
+        return (resultIds, ephemeralMessageIds.filter { !failedIds.contains($0) })
     }
     |> map { resultIds, ephemeralMessageIds -> [MessageId?] in
         for messageId in ephemeralMessageIds {
@@ -920,12 +923,13 @@ public func resendMessages(account: Account, messageIds: [MessageId], sendNowCon
                 }
             }
             // A resend follows the rules of a new send. A batch that cannot be scheduled stays failed, and is not deleted.
-            let resendBatch: BeyGramStealthBatch = sendNowConsent ? .send(messages) : beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, nowSeconds: nowSeconds, messages: messages)
-            guard case let .send(preparedMessages) = resendBatch else {
+            let resendBatch: BeyGramStealthBatch = sendNowConsent ? .send(messages, stealthDelays: Array<Int32?>(repeating: nil, count: messages.count)) : beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, nowSeconds: nowSeconds, messages: messages)
+            guard case let .send(preparedMessages, stealthDelays: stealthDelays) = resendBatch else {
                 continue
             }
             removeMessageIds.append(contentsOf: peerRemoveMessageIds)
-            let _ = enqueueMessages(transaction: transaction, account: account, peerId: peerId, messages: preparedMessages.map { (false, $0) })
+            let enqueuedIds = enqueueMessages(transaction: transaction, account: account, peerId: peerId, messages: preparedMessages.map { (false, $0) })
+            beyGramStealthRecordScheduled(transaction: transaction, accountPeerId: account.peerId, ids: enqueuedIds, stealthDelays: stealthDelays, nowSeconds: nowSeconds, refusedIds: [])
         }
         _internal_deleteMessages(transaction: transaction, mediaBox: account.postbox.mediaBox, ids: removeMessageIds, deleteMedia: false)
     }

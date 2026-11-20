@@ -61,4 +61,50 @@ final class BeyGramStealthTests: XCTestCase {
         let decoded = try JSONDecoder().decode(BeyGramStealthSettings.self, from: data)
         XCTAssertEqual(decoded, settings)
     }
+
+    private func temporaryDefaults() throws -> (defaults: UserDefaults, suite: String) {
+        let suite = "BeyGramStealthTests.\(UUID().uuidString)"
+        return (try XCTUnwrap(UserDefaults(suiteName: suite)), suite)
+    }
+
+    func testScheduleTimeNeverLeadsLessThanTheMinimum() {
+        XCTAssertEqual(beyGramStealthScheduleTime(nowSeconds: 1000, delaySeconds: 5), 1000 + BeyGramStealthSettings.minimumServerLeadSeconds)
+        XCTAssertEqual(beyGramStealthScheduleTime(nowSeconds: 1000, delaySeconds: 60), 1060)
+    }
+
+    func testScheduleRegistryKeepsEachAccountsEntriesAcrossARestart() throws {
+        let (defaults, suite) = try temporaryDefaults()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        BeyGramStealthScheduleRegistry(defaults: defaults).register(accountPeerId: 1, messageKey: "a", delaySeconds: 60, scheduleTime: 1060, nowSeconds: 1000)
+        let restarted = BeyGramStealthScheduleRegistry(defaults: defaults)
+        XCTAssertEqual(restarted.scheduledSend(accountPeerId: 1, messageKey: "a"), BeyGramStealthScheduledSend(delaySeconds: 60, scheduleTime: 1060, registeredAt: 1000))
+        XCTAssertNil(restarted.scheduledSend(accountPeerId: 2, messageKey: "a"))
+        XCTAssertNil(restarted.scheduledSend(accountPeerId: 1, messageKey: "b"))
+    }
+
+    func testScheduleRegistryHoldsTheDateItWasRewrittenWith() throws {
+        let (defaults, suite) = try temporaryDefaults()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        let registry = BeyGramStealthScheduleRegistry(defaults: defaults)
+        registry.register(accountPeerId: 1, messageKey: "a", delaySeconds: 60, scheduleTime: 1060, nowSeconds: 1000)
+        registry.register(accountPeerId: 1, messageKey: "a", delaySeconds: 60, scheduleTime: 1100, nowSeconds: 1040)
+        XCTAssertEqual(registry.scheduledSend(accountPeerId: 1, messageKey: "a"), BeyGramStealthScheduledSend(delaySeconds: 60, scheduleTime: 1100, registeredAt: 1040))
+    }
+
+    func testScheduleRegistryDropsEntriesOlderThanTheRetention() throws {
+        let (defaults, suite) = try temporaryDefaults()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        let registry = BeyGramStealthScheduleRegistry(defaults: defaults)
+        let later = 1000 + BeyGramStealthScheduleRegistry.retentionSeconds + 1
+        registry.register(accountPeerId: 1, messageKey: "old", delaySeconds: 30, scheduleTime: 1030, nowSeconds: 1000)
+        registry.register(accountPeerId: 1, messageKey: "new", delaySeconds: 30, scheduleTime: later + 30, nowSeconds: later)
+        XCTAssertNil(registry.scheduledSend(accountPeerId: 1, messageKey: "old"))
+        XCTAssertNotNil(registry.scheduledSend(accountPeerId: 1, messageKey: "new"))
+    }
 }
