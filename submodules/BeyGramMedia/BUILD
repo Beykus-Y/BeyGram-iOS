@@ -53,7 +53,7 @@ cc_library(
         "BGMediaCore/include/**/*.hpp",
         "BGMediaCore/src/**/*.h",
         "BGMediaCore/src/**/*.hpp",
-    ]),
+    ], allow_empty = True),
     includes = [
         "BGMediaCore/include",
         "BGMediaCore/src",

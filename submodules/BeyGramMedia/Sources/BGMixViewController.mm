@@ -1,17 +1,25 @@
 #import "BeyGramMedia/BGMixViewController.h"
 #import "BeyGramMedia/BGMixPlayer.h"
 
+// Written by BeyGramSettings (BeyGramKit) as "beygram.feature." + BeyGramFeature.musicLibrary.rawValue.
+static NSString *const BGMixFeatureKey = @"beygram.feature.musicLibrary";
+
 @interface BGMixViewController () <UIDocumentPickerDelegate, UITableViewDataSource>
 @property (nonatomic, strong) BGMixPlayer *player;
 @property (nonatomic, strong) NSMutableArray<NSDictionary *> *tracks; // {id: NSNumber, name: NSString}
 @property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) UIToolbar *toolbar;
 @property (nonatomic, strong) UIBarButtonItem *playButton;
 @property (nonatomic, strong) NSURL *mixDirectory;
 @property (nonatomic) BOOL playing;
 @end
 
 BOOL BGMixFeatureEnabled(void) {
-    return NO;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if ([defaults objectForKey:BGMixFeatureKey] == nil) {
+        return NO;
+    }
+    return [defaults boolForKey:BGMixFeatureKey];
 }
 
 @implementation BGMixViewController
@@ -36,24 +44,40 @@ BOOL BGMixFeatureEnabled(void) {
     [self.player invalidate];
 }
 
+// The screen is hosted inside a Telegram ViewController, which has its own navigation bar.
+// UIKit navigationItem buttons would not show there, so the actions live in a bottom toolbar.
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = UIColor.systemBackgroundColor;
 
-    self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
-    self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+    self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     self.tableView.dataSource = self;
     [self.view addSubview:self.tableView];
 
-    self.navigationItem.rightBarButtonItems = @[
-        [[UIBarButtonItem alloc] initWithTitle:@"Add" style:UIBarButtonItemStylePlain target:self action:@selector(addTapped)],
-    ];
     self.playButton = [[UIBarButtonItem alloc] initWithTitle:@"Play" style:UIBarButtonItemStylePlain target:self action:@selector(playTapped)];
-    self.navigationItem.leftBarButtonItems = @[
+    self.toolbar = [[UIToolbar alloc] initWithFrame:CGRectZero];
+    self.toolbar.translatesAutoresizingMaskIntoConstraints = NO;
+    self.toolbar.items = @[
+        [[UIBarButtonItem alloc] initWithTitle:@"Add" style:UIBarButtonItemStylePlain target:self action:@selector(addTapped)],
+        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil],
         self.playButton,
+        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil],
         [[UIBarButtonItem alloc] initWithTitle:@"Next" style:UIBarButtonItemStylePlain target:self action:@selector(nextTapped)],
+        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil],
         [[UIBarButtonItem alloc] initWithTitle:@"Clear" style:UIBarButtonItemStylePlain target:self action:@selector(clearTapped)],
     ];
+    [self.view addSubview:self.toolbar];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.tableView.bottomAnchor constraintEqualToAnchor:self.toolbar.topAnchor],
+        [self.toolbar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.toolbar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.toolbar.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+    ]];
 }
 
 - (void)addTapped {

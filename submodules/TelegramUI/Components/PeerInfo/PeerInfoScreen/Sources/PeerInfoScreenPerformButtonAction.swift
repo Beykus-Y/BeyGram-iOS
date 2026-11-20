@@ -878,14 +878,12 @@ extension PeerInfoScreenNode {
                     }
                     
                     let clearPeerHistory = ClearPeerHistory(context: strongSelf.context, peer: EnginePeer(user), chatPeer: chatPeer, cachedData: strongSelf.data?.cachedData)
-                    if BeyGramSettings.shared.isEnabled(.chatExport) {
-                        items.append(.action(ContextMenuActionItem(text: "Export chat", icon: { theme in
-                            generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Info"), color: theme.contextMenu.primaryColor)
-                        }, action: { _, f in
-                            f(.default)
-                            self?.openBeyGramChatExport(peer: EnginePeer(user))
-                        })))
-                    }
+                    items.append(.action(ContextMenuActionItem(text: "Export chat", icon: { theme in
+                        generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Info"), color: theme.contextMenu.primaryColor)
+                    }, action: { _, f in
+                        f(.default)
+                        self?.openBeyGramChatExport(peer: EnginePeer(user))
+                    })))
                     if clearPeerHistory.canClearForMyself != nil || clearPeerHistory.canClearForEveryone != nil {
                         items.append(.action(ContextMenuActionItem(text: strongSelf.presentationData.strings.PeerInfo_ClearMessages, icon: { theme in
                             generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/ClearMessages"), color: theme.contextMenu.primaryColor)
@@ -1094,14 +1092,12 @@ extension PeerInfoScreenNode {
                     }
                     
                     let clearPeerHistory = ClearPeerHistory(context: strongSelf.context, peer: EnginePeer(channel), chatPeer: EnginePeer(channel), cachedData: strongSelf.data?.cachedData)
-                    if BeyGramSettings.shared.isEnabled(.chatExport) {
-                        items.append(.action(ContextMenuActionItem(text: "Export chat", icon: { theme in
-                            generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Info"), color: theme.contextMenu.primaryColor)
-                        }, action: { _, f in
-                            f(.default)
-                            self?.openBeyGramChatExport(peer: EnginePeer(channel))
-                        })))
-                    }
+                    items.append(.action(ContextMenuActionItem(text: "Export chat", icon: { theme in
+                        generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Info"), color: theme.contextMenu.primaryColor)
+                    }, action: { _, f in
+                        f(.default)
+                        self?.openBeyGramChatExport(peer: EnginePeer(channel))
+                    })))
                     if clearPeerHistory.canClearForMyself != nil || clearPeerHistory.canClearForEveryone != nil {
                         items.append(.action(ContextMenuActionItem(text: strongSelf.presentationData.strings.PeerInfo_ClearMessages, icon: { theme in
                             generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/ClearMessages"), color: theme.contextMenu.primaryColor)
@@ -1261,14 +1257,12 @@ extension PeerInfoScreenNode {
                     }
                     
                     let clearPeerHistory = ClearPeerHistory(context: strongSelf.context, peer: EnginePeer(group), chatPeer: EnginePeer(group), cachedData: strongSelf.data?.cachedData)
-                    if BeyGramSettings.shared.isEnabled(.chatExport) {
-                        items.append(.action(ContextMenuActionItem(text: "Export chat", icon: { theme in
-                            generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Info"), color: theme.contextMenu.primaryColor)
-                        }, action: { _, f in
-                            f(.default)
-                            self?.openBeyGramChatExport(peer: EnginePeer(group))
-                        })))
-                    }
+                    items.append(.action(ContextMenuActionItem(text: "Export chat", icon: { theme in
+                        generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Info"), color: theme.contextMenu.primaryColor)
+                    }, action: { _, f in
+                        f(.default)
+                        self?.openBeyGramChatExport(peer: EnginePeer(group))
+                    })))
                     if clearPeerHistory.canClearForMyself != nil || clearPeerHistory.canClearForEveryone != nil {
                         items.append(.action(ContextMenuActionItem(text: strongSelf.presentationData.strings.PeerInfo_ClearMessages, icon: { theme in
                             generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/ClearMessages"), color: theme.contextMenu.primaryColor)

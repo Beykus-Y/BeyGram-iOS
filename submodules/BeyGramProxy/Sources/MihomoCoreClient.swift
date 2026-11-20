@@ -1,3 +1,6 @@
+// This file is part of BeyGram and is distributed under the GNU General Public License v3.0.
+// See submodules/BeyGramProxy/LICENSE and the NOTICE file at the repository root.
+
 import Foundation
 
 /// Why a call to the core failed. `refused` carries the core's own message, which the user sees.

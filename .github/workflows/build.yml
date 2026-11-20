@@ -116,6 +116,18 @@ jobs:
           python3 --version
           df -h
 
+      - name: Set up Go for Mihomo core
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'submodules/BeyGramProxy/core/go.mod'
+          cache: true
+          cache-dependency-path: 'submodules/BeyGramProxy/core/go.sum'
+
+      - name: Run Mihomo Go unit tests
+        run: |
+          cd submodules/BeyGramProxy/core
+          go test ./...
+
       - name: Locate Bazel repository cache
         id: bazel-paths
         run: |

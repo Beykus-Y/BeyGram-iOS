@@ -272,21 +272,21 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
     items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 3, text: presentationData.strings.Settings_Appearance, icon: PresentationResourcesSettings.appearance, action: {
         interaction.openSettings(.appearance)
     }))
-    if BeyGramSettings.shared.isEnabled(.triggerWords) {
-        items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 90, text: "Trigger words", icon: PresentationResourcesSettings.appearance, action: {
-            interaction.openSettings(.triggerWords)
-        }))
-    }
-    if BeyGramSettings.shared.isEnabled(.updateCheck) {
-        items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 92, text: "Updates", icon: PresentationResourcesSettings.appearance, action: {
-            interaction.openSettings(.beyGramUpdates)
-        }))
-    }
-    if BeyGramSettings.shared.isEnabled(.diagnostics) {
-        items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 91, text: "Report a problem", icon: PresentationResourcesSettings.appearance, action: {
-            interaction.openSettings(.beyGramReport)
-        }))
-    }
+    items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 90, text: "Trigger words", icon: PresentationResourcesSettings.appearance, action: {
+        interaction.openSettings(.triggerWords)
+    }))
+    items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 93, text: "Privacy", icon: PresentationResourcesSettings.security, action: {
+        interaction.openSettings(.beyGramPrivacy)
+    }))
+    items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 94, text: "BG Music", icon: PresentationResourcesSettings.appearance, action: {
+        interaction.openSettings(.beyGramMusic)
+    }))
+    items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 92, text: "Updates", icon: PresentationResourcesSettings.appearance, action: {
+        interaction.openSettings(.beyGramUpdates)
+    }))
+    items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 91, text: "Report a problem", icon: PresentationResourcesSettings.appearance, action: {
+        interaction.openSettings(.beyGramReport)
+    }))
     
     items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 6, label: .text(data.isPowerSavingEnabled == true ? presentationData.strings.Settings_PowerSavingOn : presentationData.strings.Settings_PowerSavingOff), text: presentationData.strings.Settings_PowerSaving, icon: PresentationResourcesSettings.powerSaving, action: {
         interaction.openSettings(.powerSaving)

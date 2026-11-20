@@ -350,6 +350,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         precondition(!testIsLaunched)
         testIsLaunched = true
         CrashReportCollector.shared.start()
+        BeyGramMihomoRuntime.shared.resumeIfNeeded()
         
         let _ = voipTokenPromise.get().start(next: { token in
             self.voipDeviceToken.set(.single(token))
@@ -1069,6 +1070,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             try resetWalletLocalSecrets()
         })
         self.accountManager = accountManager
+        BeyGramMihomoRuntime.shared.attachAccountManager(accountManager, mihomoEnabled: true)
 
         telegramUIDeclareEncodables()
         initializeAccountManagement()

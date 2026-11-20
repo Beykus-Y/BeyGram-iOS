@@ -759,6 +759,10 @@ private func opportunisticallyTransformOutgoingMedia(network: Network, postbox: 
 }
 
 public func enqueueMessages(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {
+    // BeyGram stealth: may turn the sends into server-scheduled messages, or refuse the batch (submodules/BeyGramStealth).
+    guard let messages = beyGramStealthPreparedMessages(accountPeerId: account.peerId, peerId: peerId, nowSeconds: Int32(account.network.globalTime), messages: messages) else {
+        return .single(Array(repeating: nil, count: messages.count))
+    }
     let signal: Signal<[(Bool, EnqueueMessage)], NoError>
     if let transformOutgoingMessageMedia = account.transformOutgoingMessageMedia {
         signal = opportunisticallyTransformOutgoingMedia(network: account.network, postbox: account.postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messages: messages, userInteractive: true)
