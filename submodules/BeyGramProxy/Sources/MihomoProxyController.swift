@@ -110,6 +110,41 @@ public final class MihomoProxyController {
         }
     }
 
+    /// Loads the saved subscription again and keeps its server list. Neither the automatic switch nor Telegram's proxy
+    /// settings change. A running core takes the new profile at once, and only when the profile differs from the one it
+    /// runs; the node in use stays when it is still in the list. A failed load changes nothing.
+    public func refreshSubscription(completion: @escaping (Result<[String], Error>) -> Void) {
+        guard let source = currentState.subscriptionSource else {
+            deliver(.failure(MihomoProxyError.noSubscription), to: completion)
+            return
+        }
+        loadText(source) { result in
+            self.queue.async {
+                do {
+                    let text = try result.get()
+                    let credentials = try LoopbackCredentialStore.loadOrCreate()
+                    let profile = try self.client.normalize(source: text, credentials: credentials)
+                    self.update { state in
+                        state.serverNames = profile.serverNames
+                        if let selected = state.selectedNode, !profile.serverNames.contains(selected) {
+                            state.selectedNode = nil
+                        }
+                    }
+                    if self.currentState.isRunning, let running = self.profileYAML, running != profile.yaml {
+                        self.profileYAML = profile.yaml
+                        self.restartCore()
+                        if !self.currentState.isRunning {
+                            throw MihomoCoreError.refused("Ядро не запустилось с обновлённой подпиской. Подключение остановлено.")
+                        }
+                    }
+                    self.deliver(.success(profile.serverNames), to: completion)
+                } catch {
+                    self.deliver(.failure(error), to: completion)
+                }
+            }
+        }
+    }
+
     /// Loads the saved subscription, starts the core on the loopback inlet, and selects the node the user chose.
     public func start(completion: @escaping (Result<Void, Error>) -> Void) {
         guard let source = currentState.subscriptionSource else {
@@ -504,8 +539,13 @@ public final class MihomoProxyController {
             completion(.success(source))
             return
         }
-        SubscriptionFetcher.fetch(source) { result in
-            completion(result.mapError { $0 as Error })
+        do {
+            let installationId = try InstallationIdentifierStore.loadOrCreate()
+            SubscriptionFetcher.fetch(source, installationId: installationId) { result in
+                completion(result.mapError { $0 as Error })
+            }
+        } catch {
+            completion(.failure(error))
         }
     }
 
