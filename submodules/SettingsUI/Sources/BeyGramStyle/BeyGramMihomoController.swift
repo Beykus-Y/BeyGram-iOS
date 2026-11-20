@@ -30,6 +30,8 @@ private struct BeyGramMihomoScreenState: Equatable {
     var phase: BeyGramMihomoConnectionPhase
     var isUpdatingSubscription: Bool = false
     var isMeasuringDelays: Bool = false
+    var latencyCompleted: Int = 0
+    var latencyTotal: Int = 0
     var serverNames: [String]
     var selectedNode: String?
     var autoSelect: Bool = false
@@ -42,7 +44,7 @@ private struct BeyGramMihomoScreenState: Equatable {
         case .connecting, .reconnecting:
             return true
         default:
-            return self.isUpdatingSubscription || self.isMeasuringDelays
+            return self.isUpdatingSubscription
         }
     }
 
@@ -550,10 +552,15 @@ private func beyGramMihomoEntries(presentationData: PresentationData, state: Bey
         entries.append(.sortPicker(theme, l10n.string(.mihomoSortTitle, languageCode: lang), sortDisplayName(state.sortOrder, languageCode: lang)))
         entries.append(.autoSelect(theme, l10n.string(.mihomoAutoSelect, languageCode: lang), state.autoSelect))
         if state.isConnected {
-            let measureTitle = state.isMeasuringDelays
-                ? l10n.string(.commonLoading, languageCode: lang)
-                : l10n.string(.mihomoMeasureDelays, languageCode: lang)
-            entries.append(.measureDelays(theme, measureTitle, !state.isBusy))
+            let measureTitle: String
+            if state.isMeasuringDelays && state.latencyTotal > 0 {
+                measureTitle = l10n.format(.mihomoMeasureProgressFormat, languageCode: lang, state.latencyCompleted, state.latencyTotal)
+            } else if state.isMeasuringDelays {
+                measureTitle = l10n.string(.commonLoading, languageCode: lang)
+            } else {
+                measureTitle = l10n.string(.mihomoMeasureDelays, languageCode: lang)
+            }
+            entries.append(.measureDelays(theme, measureTitle, !state.isBusy && !state.isMeasuringDelays))
         }
 
         let visibleServers = filteredAndSortedServers(state: state)
@@ -725,7 +732,8 @@ public func beyGramMihomoController(
             }
         },
         measureDelays: {
-            if stateValue.with({ $0 }).isBusy {
+            let current = stateValue.with { $0 }
+            if current.isBusy || current.isMeasuringDelays {
                 return
             }
             mutate { state in
@@ -751,9 +759,34 @@ public func beyGramMihomoController(
         }
     )
 
-    let signal = combineLatest(updatedPresentationData, statePromise.get())
+    let latencySignal = Signal<MihomoLatencyCheck, NoError> { subscriber in
+        let token = runtime.controller.addLatencyObserver { check in
+            subscriber.putNext(check)
+        }
+        return ActionDisposable {
+            runtime.controller.removeLatencyObserver(token)
+        }
+    }
+
+    let signal = combineLatest(updatedPresentationData, statePromise.get(), latencySignal)
     |> deliverOnMainQueue
-    |> map { presentationData, state -> (ItemListControllerState, (ItemListNodeState, Any)) in
+    |> map { presentationData, state, latencyCheck -> (ItemListControllerState, (ItemListNodeState, Any)) in
+        var effectiveState = state
+        if latencyCheck.phase == .running {
+            effectiveState.isMeasuringDelays = true
+            effectiveState.latencyCompleted = latencyCheck.completed
+            effectiveState.latencyTotal = latencyCheck.total
+            for (name, delay) in latencyCheck.delays {
+                effectiveState.delays[name] = delay
+            }
+        } else if latencyCheck.phase == .finished && !latencyCheck.delays.isEmpty {
+            effectiveState.isMeasuringDelays = false
+            effectiveState.latencyCompleted = latencyCheck.completed
+            effectiveState.latencyTotal = latencyCheck.total
+            for (name, delay) in latencyCheck.delays where effectiveState.delays[name] == nil {
+                effectiveState.delays[name] = delay
+            }
+        }
         let lang = presentationData.strings.primaryComponent.languageCode
         let controllerState = ItemListControllerState(
             presentationData: ItemListPresentationData(presentationData),
@@ -764,7 +797,7 @@ public func beyGramMihomoController(
         )
         let listState = ItemListNodeState(
             presentationData: ItemListPresentationData(presentationData),
-            entries: beyGramMihomoEntries(presentationData: presentationData, state: state),
+            entries: beyGramMihomoEntries(presentationData: presentationData, state: effectiveState),
             style: .blocks,
             ensureVisibleItemTag: nil
         )
