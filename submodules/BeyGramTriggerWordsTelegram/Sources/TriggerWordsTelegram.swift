@@ -110,7 +110,7 @@ public func ingestTriggerWordsFromAccount(
         let accountId = context.account.id.int64
         for messages in batches {
             for message in messages {
-                guard message.flags.contains(.Incoming), !message.id.peerId.isSecretChat else {
+                guard message.flags.contains(.Incoming), !message.id.peerId.isSecretChatNamespace else {
                     continue
                 }
                 let settings = await previewSettings(context: context, message: message, global: global)
