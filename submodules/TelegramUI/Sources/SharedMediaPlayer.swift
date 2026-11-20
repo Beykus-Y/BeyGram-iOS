@@ -262,7 +262,7 @@ final class SharedMediaPlayer {
                                     case let .telegramFile(fileReference, _, _):
                                     strongSelf.playbackItem = .audio(MediaPlayer(audioSessionManager: strongSelf.audioSession, postbox: strongSelf.engine.account.postbox, userLocation: .other,  userContentType: .audio, resourceReference: fileReference.resourceReference(fileReference.media.resource), streamable: playbackData.type == .music ? .conservative : .none, video: false, preferSoftwareDecoding: false, enableSound: true, baseRate: rateValue, fetchAutomatically: true, playAndRecord: controlPlaybackWithProximity, isAudioVideoMessage: playbackData.type == .voice))
                                     case .yandexTrack, .localFile:
-                                        // A Yandex track or a local file has no Telegram resource for MediaPlayer. BG Mix plays it (see fileURL(for:)).
+                                        // A Yandex track or a local file has no Telegram resource for MediaPlayer. BG Mix plays it (see fileResult(for:)).
                                         break
                                 }
                             case .instantVideo:
