@@ -3,6 +3,7 @@ import Foundation
 /// Why a .bgmusic manifest was refused. Only the reasons that the manifest itself can cause are here;
 /// container errors (ZIP, cover) belong to the archive reader.
 public enum BGMusicFormatError: Error, Equatable {
+    case badJson
     case badSignature
     case badField(String)
     case tooManyTracks
@@ -243,76 +244,81 @@ public struct BGMusicManifest: Equatable {
 
     // MARK: Decoding
 
-    /// Reads manifest bytes. The format name and versions are checked first (section 8), then the fields.
-    /// Unknown fields are ignored. Duplicate keys are not detected here: `JSONSerialization` keeps the last one.
-    /// That check needs a strict parser and is still open (see the BeyGram issue for .bgmusic).
+    /// Reads manifest bytes. The strict parser runs first (duplicate keys, depth and grammar are checked there).
+    /// Then the format name and versions are checked (section 8), then the fields. Unknown fields are ignored.
     public static func decode(_ data: Data) -> BGMusicDecodeResult {
-        guard let object = try? JSONSerialization.jsonObject(with: data, options: []), let root = object as? [String: Any] else {
-            return .invalid(.badField("manifest"))
+        let parsed: BGMusicJSONValue
+        switch BGMusicStrictJSON.parse(data) {
+        case let .success(value):
+            parsed = value
+        case .failure:
+            return .invalid(.badJson)
         }
-        guard let format = root["format"] as? String, format == formatName else {
+        guard case .object = parsed else {
+            return .invalid(.badJson)
+        }
+        guard stringValue(parsed["format"]) == formatName else {
             return .invalid(.badSignature)
         }
-        guard let formatVersionValue = integer(root["format_version"]), formatVersionValue >= 1,
-              let minReaderValue = integer(root["min_reader_version"]), minReaderValue >= 1, minReaderValue <= formatVersionValue else {
+        guard let formatVersionValue = integerValue(parsed["format_version"]), formatVersionValue >= 1,
+              let minReaderValue = integerValue(parsed["min_reader_version"]), minReaderValue >= 1, minReaderValue <= formatVersionValue else {
             return .invalid(.badField("format_version"))
         }
         if minReaderValue > formatVersion {
             return .unsupported(formatVersion: formatVersionValue, minReaderVersion: minReaderValue)
         }
-        guard let playlistRaw = root["playlist_id"] as? String, canonicalUUID(playlistRaw) != nil else {
+        guard let playlistRaw = stringValue(parsed["playlist_id"]), canonicalUUID(playlistRaw) != nil else {
             return .invalid(.badField("playlist_id"))
         }
-        guard let revisionValue = integer(root["revision"]), revisionValue >= 0 else {
+        guard let revisionValue = integerValue(parsed["revision"]), revisionValue >= 0 else {
             return .invalid(.badField("revision"))
         }
-        guard let titleRaw = root["title"] as? String else {
+        guard let titleRaw = stringValue(parsed["title"]) else {
             return .invalid(.badField("title"))
         }
-        let descriptionRaw = (root["description"] as? String) ?? ""
-        guard let updatedValue = integer(root["updated_at"]) else {
+        let descriptionRaw = stringValue(parsed["description"]) ?? ""
+        guard let updatedValue = integerValue(parsed["updated_at"]) else {
             return .invalid(.badField("updated_at"))
         }
         var authorName: String?
-        if let author = root["author"] as? [String: Any] {
-            authorName = author["name"] as? String
+        if case .object? = parsed["author"] {
+            authorName = stringValue(parsed["author"]?["name"])
         }
-        guard let trackObjects = root["tracks"] as? [Any] else {
+        guard case let .array(trackValues)? = parsed["tracks"] else {
             return .invalid(.badField("tracks"))
         }
-        guard trackObjects.count <= maxTracks else {
+        guard trackValues.count <= maxTracks else {
             return .invalid(.tooManyTracks)
         }
         var tracks: [BGMusicTrack] = []
-        for case let raw as [String: Any] in trackObjects {
-            guard let id = raw["id"] as? String, let title = raw["title"] as? String,
-                  let duration = integer(raw["duration_sec"]) else {
+        for raw in trackValues {
+            guard let id = stringValue(raw["id"]), let title = stringValue(raw["title"]),
+                  let duration = integerValue(raw["duration_sec"]) else {
                 return .invalid(.badField("tracks"))
             }
-            var hash: String?
-            if let rawHash = raw["audio_hash"] as? String {
-                hash = rawHash
-            }
+            let hash = stringValue(raw["audio_hash"])
             var sources: [BGMusicSource] = []
-            if let rawSources = raw["sources"] {
-                guard let list = rawSources as? [Any] else {
-                    return .invalid(.badField("tracks.sources"))
-                }
-                for case let item as [String: Any] in list {
+            switch raw["sources"] {
+            case nil, .null?:
+                break
+            case let .array(items)?:
+                for item in items {
                     // Unknown types and broken hints are dropped without touching the rest of the file.
-                    guard (item["type"] as? String) == "telegram_public",
-                          let username = item["username"] as? String,
-                          let messageId = integer(item["message_id"]) else {
+                    guard stringValue(item["type"]) == "telegram_public",
+                          let username = stringValue(item["username"]),
+                          let messageId = integerValue(item["message_id"]) else {
                         continue
                     }
                     sources.append(.telegramPublic(username: username, messageId: messageId))
                 }
+            default:
+                return .invalid(.badField("tracks.sources"))
             }
             tracks.append(BGMusicTrack(
                 id: id,
                 title: title,
-                artist: (raw["artist"] as? String) ?? "",
-                album: (raw["album"] as? String) ?? "",
+                artist: stringValue(raw["artist"]) ?? "",
+                album: stringValue(raw["album"]) ?? "",
                 durationSec: duration,
                 audioHash: hash,
                 sources: sources
@@ -336,17 +342,19 @@ public struct BGMusicManifest: Equatable {
         }
     }
 
-    /// Integer JSON number (not a boolean). Values beyond 2^53 lose precision through `Double`; acceptable for v1 ranges
-    /// except `revision`, which is still exact because `NSNumber` keeps the Int64 value.
-    private static func integer(_ value: Any?) -> Int64? {
-        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else {
+    /// A JSON integer that fits Int64. Fractions and exponents are refused, since v1 has no such fields.
+    private static func integerValue(_ value: BGMusicJSONValue?) -> Int64? {
+        guard case let .number(text)? = value else {
             return nil
         }
-        let double = number.doubleValue
-        if double != double.rounded() {
+        return Int64(text)
+    }
+
+    private static func stringValue(_ value: BGMusicJSONValue?) -> String? {
+        guard case let .string(text)? = value else {
             return nil
         }
-        return number.int64Value
+        return text
     }
 }
 
