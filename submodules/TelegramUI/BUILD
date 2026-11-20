@@ -214,6 +214,7 @@ swift_library(
         "//submodules/BeyGramKit:BeyGramKit",
         # BG Mix as the music playlist engine (Sources/SharedMediaBGMix.swift). Already linked through PeerInfo's BG Music page.
         "//submodules/BeyGramMedia:BeyGramMedia",
+        "//submodules/BeyGramYandexMusic:BeyGramYandexMusic",
         "//submodules/UrlHandling:UrlHandling",
         "//submodules/HexColor:HexColor",
         "//submodules/QrCode:QrCode",
