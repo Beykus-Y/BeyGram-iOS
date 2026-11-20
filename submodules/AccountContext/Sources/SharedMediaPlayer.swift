@@ -13,9 +13,17 @@ public enum SharedMediaPlaybackDataType {
 
 public enum SharedMediaPlaybackDataSource: Equatable {
     case telegramFile(reference: FileMediaReference, isCopyProtected: Bool, isViewOnce: Bool)
+    /// A Yandex Music track, by its `ym:` row key. It has no Telegram resource: BG Mix asks the Yandex service for the file.
+    case yandexTrack(rowKey: String)
     
     public static func ==(lhs: SharedMediaPlaybackDataSource, rhs: SharedMediaPlaybackDataSource) -> Bool {
         switch lhs {
+        case let .yandexTrack(lhsRowKey):
+            if case let .yandexTrack(rhsRowKey) = rhs {
+                return lhsRowKey == rhsRowKey
+            } else {
+                return false
+            }
         case let .telegramFile(lhsFileReference, lhsIsCopyProtected, lhsIsViewOnce):
             if case let .telegramFile(rhsFileReference, rhsIsCopyProtected, rhsIsViewOnce) = rhs {
                 if !lhsFileReference.media.isEqual(to: rhsFileReference.media) {
