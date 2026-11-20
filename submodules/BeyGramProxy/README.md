@@ -2,22 +2,21 @@
 
 Ядро Mihomo работает внутри приложения как локальный SOCKS5 на `127.0.0.1:17891`. Telegram подключается к нему через свои настройки прокси. Всё включается флагом `mihomoProxy`, который выключен по умолчанию.
 
-**Статус: не собрано и не проверено на устройстве.** В окружении разработки не было Xcode и Bazel. Go-тесты проходили локально. Swift-код не компилировался. CI не запускался.
-
 ## Состав
 
-- `core/` — Go-модуль на mihomo v1.19.32.
+- `core/` — Go-модуль на mihomo v1.19.32 (`go >= 1.24.7`).
   - `bridge/` — JSON-мост. Действия: `init`, `normalize`, `validate`, `setup`, `stop`, `status`, `proxies`, `select`, `testDelay`, `resetConnections`.
   - `normalize/` — подписка (vless, vmess, ss, trojan, hysteria2, tuic) в профиль Clash.
   - `cmd/beygram-mihomo/` — экспорт `BGMihomoInvoke` и `BGMihomoFree` для `-buildmode=c-archive`.
-- `Sources/` — Swift-модуль `BeyGramProxy` (цель Bazel, зависит только от Security).
+  - `build-bazel.sh` — воспроизводимая сборка `libbeygram-mihomo.a` для целевой архитектуры Bazel (`ios_arm64`, `ios_sim_arm64`, `ios_x86_64`, `darwin_arm64`, `darwin_x86_64`).
+- `Sources/` — Swift-модуль `BeyGramProxy`.
   - `MihomoCoreClient` — типизированный слой над драйвером ядра.
-  - `MihomoProxyController` — подписка, запуск и остановка, выбор узла, задержки.
-  - `LoopbackCredentials` — логин и пароль локального входа, хранятся в Keychain.
-  - `SubscriptionFetcher` — загрузка подписки по https.
-  - `MihomoProxyState` — состояние в `state.json`.
-- `CoreBridge/` — `MihomoCgoDriver`, заголовок `BeyGramMihomoCore.h` и `module.modulemap`. Не входит в цель Bazel.
-- `submodules/SettingsUI/Sources/BeyGramStyle/BeyGramMihomo*.swift` — экран и связка с настройками Telegram.
+  - `MihomoProxyController` — подписка, запуск и остановка, выбор узла, задержки, 20-секундный watchdog автопереключения.
+  - `LoopbackCredentials` — логин и пароль локального входа, хранятся в Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`).
+  - `SubscriptionFetcher` — загрузка подписки по https/http.
+  - `MihomoProxyState` — состояние в `state.json` (`.completeFileProtectionUntilFirstUserAuthentication`).
+- `CoreBridge/` — `MihomoCgoDriver`, заголовок `BeyGramMihomoCore.h` и `module.modulemap`. Подключены в Bazel-целях `BeyGramMihomoCore` и `BeyGramProxy`.
+- `submodules/SettingsUI/Sources/BeyGramStyle/BeyGramMihomo*.swift` — экран и связка с настройками Telegram (`MihomoCgoDriver`).
 - `submodules/SettingsUI/Sources/Data and Storage/ProxyListSettingsController.swift` — строка «Прокси Mihomo» в списке прокси. Видна только при флаге.
 
 ## Как работает
@@ -28,7 +27,8 @@
 
 ## Известные ограничения
 
-- **Перезапуск при старте.** Если приложение закрыли во время работы, при следующем запуске ядро поднимается само (хук в `AppDelegate`, только при флаге `mihomoProxy`). Подписка при этом загружается заново, если это ссылка.
+- **Фоновая работа на iOS.** Ядро работает внутри процесса приложения без `NEPacketTunnelProvider` / Network Extension. Когда iOS переводит приложение в фон и приостанавливает процесс (suspended), локальный SOCKS5-вход на `127.0.0.1:17891` останавливается вместе с процессом. При возвращении приложения на передний план сокеты переподключаются; при полном перезапуске приложения хук в `AppDelegate` перезапускает ядро (или восстанавливает исходные настройки прокси Telegram при отказе).
+- **Перезапуск при старте.** Если приложение закрыли во время работы, при следующем запуске ядро поднимается само (хук в `AppDelegate`, только при флаге `mihomoProxy`). Подписка при этом загружается заново, если это ссылка. При отказе запуска исходные настройки прокси Telegram восстанавливаются.
 - **Автопереключение узлов.** Включается переключателем в экране Mihomo. Раз в 20 секунд проверяется узел в работе; если он не отвечает, выбирается самый быстрый из ответивших. Если ядро перестаёт отвечать, оно перезапускается с тем же профилем. В отличие от Android, проверка идёт через задержку узла, а не через отдельную проверку доступа к Telegram, и узлы проверяются по очереди.
 - Подписка загружается только напрямую, без прокси.
 - Trojan всегда использует TLS, даже без `security` в ссылке. Android так не делает.
@@ -39,35 +39,22 @@
 
 Mihomo распространяется под GPL-3.0. Исходники модуля и Go-ядра лицензированы GPL-3.0; полный текст лежит в `LICENSE` этого каталога, сведения о сторонних компонентах — в `NOTICE` в корне репозитория. Файл `LICENSE` корня (GPL-2.0) не менялся: код Telegram остаётся под GPL-2.0-or-later. Совместимость объединённой сборки не проверялась юристом; решение о распространении принимает владелец.
 
-Флаг `mihomoProxy` остаётся выключенным по умолчанию. Архив ядра (`libbeygram-mihomo.a`) в сборку пока не подключён: `UnlinkedMihomoCoreDriver` отвечает «Ядро Mihomo не подключено в этой сборке».
+Флаг `mihomoProxy` остаётся выключенным по умолчанию.
 
-## Сборка (не проверено)
+## Сборка
 
 Go-тесты:
 
     cd submodules/BeyGramProxy/core
     go test ./...
 
-Архив для iOS, предположительно:
+Сборка в Bazel (штатный путь через `Make.py` и в CI):
 
-    GOOS=ios GOARCH=arm64 CGO_ENABLED=1 CC=<clang из Xcode для iOS SDK> \
-      go build -buildmode=c-archive -o libbeygram-mihomo.a ./cmd/beygram-mihomo
+- Цель `//submodules/BeyGramProxy:beygram_mihomo_archive` запускает `core/build-bazel.sh` с текущим `$(TARGET_CPU)`, формируя `libbeygram-mihomo.a` (deployment target iOS `15.0`) без сохранения бинарника в Git.
+- Результат кешируется Bazel (`--disk_cache`) по исходникам `core/` и `$(TARGET_CPU)`, поэтому без изменений в Go-коде ядро не пересобирается.
+- `//submodules/BeyGramProxy:BeyGramMihomoCore` экспортирует C-модуль `BeyGramMihomoCore` и линкует `CoreFoundation`, `Security` и `libresolv`.
+- `//submodules/BeyGramProxy:BeyGramProxy` компилирует `Sources/` и `CoreBridge/MihomoCgoDriver.swift`.
 
-Готовый скрипт (нужен macOS с Xcode и Go 1.24):
+Ручная сборка архива (при необходимости отдельной проверки):
 
     ./submodules/BeyGramProxy/core/build-ios-archive.sh
-
-Скрипт кладёт `libbeygram-mihomo.a` в `CoreBridge/lib` (git игнорирует). Что проверено и что нет:
-
-- Проверено в Linux: `go test ./...` проходит; `go build -buildmode=c-archive` собирает архив, экспорт `BGMihomoInvoke` и `BGMihomoFree` совпадает с `CoreBridge/include/BeyGramMihomoCore.h`. Размер архива для Linux со `-s -w` около 66 МБ.
-- Не проверено: сборка под `GOOS=ios` (нужен Xcode), минимальная версия iOS в скрипте (`MIN_IOS`, по умолчанию 15.0, поставить реальный deployment target), размер в IPA.
-
-Bazel пока не подключён: нет цели для архива и заголовка, `MihomoCgoDriver` не входит в `swift_library`, `BeyGramMihomoRuntime` использует `UnlinkedMihomoCoreDriver`. Эти три шага делаются вместе и проверяются только на Mac.
-
-## Перед включением флага
-
-1. Скомпилировать модуль `BeyGramProxy` и экран (в окружении без Xcode не проверено).
-2. Подключить архив ядра через `MihomoCgoDriver` и проверить подключение Telegram через локальный вход.
-3. Проверить восстановление настроек при отключении.
-4. Проверить перезапуск при старте и автопереключение на устройстве.
-5. Решить вопрос распространения объединённой сборки (см. выше).

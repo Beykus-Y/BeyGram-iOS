@@ -16,6 +16,7 @@
 - **Xcode**: 26.x / 27.x (проверено на Xcode 26.3 с iOS SDK 26.2 / Swift 6.2.4, а также в CI на `xcode-27`).
 - **Bazel**: версия из `versions.json` (текущая: `9.2.0`).
 - **Python**: Python 3.10+ (рекомендуется Python 3.13 через MacPorts или Homebrew).
+- **Go**: Go `1.24.7+` (для сборки нативного C-архива ядра Mihomo в `submodules/BeyGramProxy/core/`).
 - **Git** с поддержкой рекурсивных подмодулей.
 
 ---
@@ -63,16 +64,16 @@ chmod +x ~/bin/bazel
 ~/bin/bazel --version
 ```
 
-### Установка Python 3.13
+### Установка Python 3.13 и Go
 - **Apple Silicon (Homebrew)**:
   ```bash
-  brew install python@3.13
+  brew install python@3.13 go
   ```
 - **Intel / MacPorts**:
   ```bash
-  sudo port install python313
+  sudo port install python313 go
   ```
-Убедитесь, что `python3.13` доступен в `PATH`.
+Убедитесь, что `python3.13` и `go` (>= 1.24.7) доступны в `PATH` (или в `/opt/local/bin`, `/usr/local/go/bin`, `/opt/homebrew/bin`). При первом запуске Bazel автоматически соберёт `libbeygram-mihomo.a` через `submodules/BeyGramProxy/core/build-bazel.sh` и закеширует результат в `--disk_cache`.
 
 ### Клонирование репозитория и подмодулей
 ```bash
