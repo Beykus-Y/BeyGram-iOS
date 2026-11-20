@@ -150,9 +150,10 @@ public func beyGramUpdatesController(context: AccountContext) -> ViewController 
     }
     let info = Bundle.main.infoDictionary ?? [:]
     let installedBuild = Int(info["CFBundleVersion"] as? String ?? "") ?? 0
-    let shortVersion = info["CFBundleShortVersionString"] as? String ?? "—"
+    let shortVersion = info["CFBundleShortVersionString"] as? String ?? "0.0.1"
     let channelRaw = (info["BeyGramBuildChannel"] as? String)?.lowercased()
     let isDev = channelRaw == "dev" || (info["CFBundleIdentifier"] as? String)?.lowercased().contains("dev") == true
+    let channel: UpdateChannel = isDev ? .dev : .release
     let commitSha = (info["BeyGramGitCommit"] as? String) ?? (info["GitCommit"] as? String)
 
     let arguments = UpdatesArguments(
@@ -162,7 +163,11 @@ public func beyGramUpdatesController(context: AccountContext) -> ViewController 
             state.result = nil
             bump()
             Task { @MainActor in
-                state.result = await UpdateCheck.check(installedVersionCode: installedBuild)
+                state.result = await UpdateCheck.check(
+                    installedVersionName: shortVersion,
+                    installedBuildNumber: installedBuild,
+                    channel: channel
+                )
                 state.isChecking = false
                 bump()
             }
@@ -199,12 +204,19 @@ public func beyGramUpdatesController(context: AccountContext) -> ViewController 
             switch state.result {
             case nil:
                 break
-            case .upToDate?:
+            case .upToDate?, .noReleases?:
                 entries.append(.status(theme, l10n.string(.updatesUpToDate, languageCode: lang)))
-            case let .available(versionName, releaseURL)?:
+            case let .available(updateInfo)?:
                 entries.append(.availableHeader(theme, l10n.string(.updatesAvailableTitle, languageCode: lang).uppercased()))
-                entries.append(.availableVersion(theme, l10n.format(.updatesAvailableVersion, languageCode: lang, versionName)))
-                entries.append(.release(theme, l10n.string(.updatesOpenRelease, languageCode: lang), releaseURL))
+                var versionSummary = l10n.format(.updatesAvailableVersion, languageCode: lang, "\(updateInfo.versionName) (\(updateInfo.buildNumber))")
+                if let sha = updateInfo.commitSha, !sha.isEmpty {
+                    versionSummary += " · \(String(sha.prefix(8)))"
+                }
+                if let changelog = updateInfo.changelog, !changelog.isEmpty {
+                    versionSummary += "\n\n\(changelog)"
+                }
+                entries.append(.availableVersion(theme, versionSummary))
+                entries.append(.release(theme, l10n.string(.updatesOpenRelease, languageCode: lang), updateInfo.releaseURL))
             case .failed?:
                 entries.append(.status(theme, l10n.format(.updatesErrorPrefix, languageCode: lang, l10n.string(.commonError, languageCode: lang))))
             }
