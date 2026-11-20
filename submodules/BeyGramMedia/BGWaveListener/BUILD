@@ -42,3 +42,52 @@ cc_test(
         "//submodules/BeyGramMedia:BGWaveWebRtcAdapter",
     ],
 )
+
+# The BG Wave runtime for one listener session: the Opus codec, the libdatachannel transport and BGWaveSession. It is
+# plain C++20 with no ObjC, so the Objective-C++ facade below only forwards calls.
+cc_library(
+    name = "BGWaveRuntime",
+    srcs = ["Sources/BGWaveRuntime.cpp"],
+    hdrs = ["Sources/BGWaveRuntime.hpp"],
+    copts = ["-std=c++20"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":BGWavePcmTap",
+        "//submodules/BeyGramMedia:BGMediaCore",
+        "//submodules/BeyGramMedia:BGWaveOpusAdapter",
+        "//submodules/BeyGramMedia:BGWaveWebRtcAdapter",
+        "//submodules/BeyGramMedia/BGWaveCore:BGWaveCore",
+    ],
+)
+
+# The listener session for the BG Wave screen. It runs the timer and the audio output, and every control call goes
+# through one serial queue. The audio render block calls the runtime's real-time pull and nothing else.
+objc_library(
+    name = "BGWaveListenerSession",
+    srcs = ["Sources/BGWaveListenerSession.mm"],
+    hdrs = ["PublicHeaders/BGWaveListener/BGWaveListenerSession.h"],
+    includes = ["PublicHeaders"],
+    copts = [
+        "-fobjc-arc",
+        "-std=c++20",
+    ],
+    sdk_frameworks = [
+        "AVFoundation",
+        "Foundation",
+        "QuartzCore",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":BGWaveListenerOutput",
+        ":BGWaveRuntime",
+    ],
+)
+
+# Host test, no codesigning. Failure classification and a runtime without signal. No network.
+#   ./build-input/bazel-9.2.0-darwin-arm64 test //submodules/BeyGramMedia/BGWaveListener:BGWaveRuntimeTests --test_output=all
+cc_test(
+    name = "BGWaveRuntimeTests",
+    srcs = ["Tests/BGWaveRuntimeTests.cpp"],
+    copts = ["-std=c++20"],
+    deps = [":BGWaveRuntime"],
+)
