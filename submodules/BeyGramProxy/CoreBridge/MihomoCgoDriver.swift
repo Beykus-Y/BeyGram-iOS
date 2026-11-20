@@ -2,10 +2,6 @@
 // See submodules/BeyGramProxy/LICENSE and the NOTICE file at the repository root.
 
 // Mihomo core driver over the C archive built from core/cmd/beygram-mihomo.
-//
-// This file is not part of the Bazel target, which globs Sources/ only. It is compiled only
-// in the build that links libbeygram-mihomo.a, and that build waits for the owner's license
-// decision (see ../README.md). Until then the app uses UnlinkedMihomoCoreDriver.
 
 import Foundation
 import BeyGramMihomoCore
