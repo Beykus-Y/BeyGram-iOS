@@ -90,7 +90,7 @@ their settings.
 
 ## 6. Limits the UI must respect
 
-- Thread and topic reads (`readDiscussion`, `readSavedHistory`) are not gated yet. They come in the next block.
+- Thread and topic reads (`readDiscussion`, `readSavedHistory`) follow the read-receipt rule of the chat they belong to. With the rule on, nothing is sent, and the local read state still changes. The UI shows nothing new for this.
 - The local delay queue is not built. The UI must not offer a delay that happens on the device.
 - Secret chats and paid messages are refused, not scheduled. View-once media and live locations are not refused yet (Android
   refuses them). Channel direct messages (monoforums) are not refused yet.
