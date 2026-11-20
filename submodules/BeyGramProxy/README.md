@@ -11,9 +11,12 @@
   - `build-bazel.sh` — воспроизводимая сборка `libbeygram-mihomo.a` для целевой архитектуры Bazel (`ios_arm64`, `ios_sim_arm64`, `ios_x86_64`, `darwin_arm64`, `darwin_x86_64`).
 - `Sources/` — Swift-модуль `BeyGramProxy`.
   - `MihomoCoreClient` — типизированный слой над драйвером ядра.
-  - `MihomoProxyController` — подписка, запуск и остановка, выбор узла, задержки, 20-секундный watchdog автопереключения.
+  - `MihomoProxyController` — подписка, запуск и остановка, выбор узла, задержки, 20-секундный watchdog автопереключения и восстановление после смены сети.
+  - `MihomoNetworkMonitor` — `NWPathMonitor`: сообщает о смене сети (интерфейсы или доступность). Контроллер ждёт 2 секунды тишины, проверяет выбранный узел и при отказе перезапускает ядро с тем же узлом.
   - `LoopbackCredentials` — логин и пароль локального входа, хранятся в Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`).
-  - `SubscriptionFetcher` — загрузка подписки по https/http.
+  - `SubscriptionFetcher` — загрузка подписки по https/http с заголовком `X-BeyGram-HWID`. Переадресация на другой сайт останавливает загрузку, идентификатор туда не уходит.
+  - `InstallationIdentifierStore` — случайный идентификатор установки для `X-BeyGram-HWID`: файл в Application Support, исключён из бэкапа.
+  - `MihomoProxyController.refreshSubscription` — ручное обновление сохранённой подписки. Работающее ядро перезапускается, только если профиль изменился.
   - `MihomoProxyState` — состояние в `state.json` (`.completeFileProtectionUntilFirstUserAuthentication`).
 - `CoreBridge/` — `MihomoCgoDriver`, заголовок `BeyGramMihomoCore.h` и `module.modulemap`. Подключены в Bazel-целях `BeyGramMihomoCore` и `BeyGramProxy`.
 - `submodules/SettingsUI/Sources/BeyGramStyle/BeyGramMihomo*.swift` — экран и связка с настройками Telegram (`MihomoCgoDriver`).
