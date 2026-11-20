@@ -60,6 +60,7 @@ import ChatInputContextPanelNode
 import RasterizedCompositionComponent
 import RichTextEditorUIKit
 import RichTextEditorCore
+import BeyGramAppearance
 
 /// The chat composer's inline custom-emoji view already exposes `dynamicColor` (forwarding to its backing
 /// `InlineStickerItemLayer`), so it satisfies the editor's emoji-view contract as-is. Declared here (the one
@@ -3346,7 +3347,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         
         let textInputContainerBackgroundTransition = ComponentTransition(transition)
         let isTextInputGlassInteractive = !(isAgentLayout && self.isAgentMenuActive)
-        self.textInputContainerBackgroundView.update(size: textInputContainerBackgroundFrame.size, cornerRadius: isAgentLayout ? 20.0 : floor(minimalInputHeight * 0.5), isDark: interfaceState.theme.overallDarkAppearance, tintColor: defaultGlassTintColor, isInteractive: isTextInputGlassInteractive, transition: textInputContainerBackgroundTransition)
+        self.textInputContainerBackgroundView.update(size: textInputContainerBackgroundFrame.size, cornerRadius: isAgentLayout ? 20.0 : BeyGramAppearance.shared.composerCornerRadius(defaultRadius: floor(minimalInputHeight * 0.5)), isDark: interfaceState.theme.overallDarkAppearance, tintColor: defaultGlassTintColor, isInteractive: isTextInputGlassInteractive, transition: textInputContainerBackgroundTransition)
         if isTextInputGlassInteractive != self.isTextInputGlassInteractive {
             self.isTextInputGlassInteractive = isTextInputGlassInteractive
             // UIKit's stretch (`_UIFlexInteraction`) follows neither change of the effect on an effect view: it stays

@@ -23,6 +23,7 @@ import ThemeAccentColorScreen
 import WallpaperGridScreen
 import PeerNameColorItem
 import DeviceModel
+import BeyGramAppearance
 
 private final class ThemeSettingsControllerArguments {
     let context: AccountContext
@@ -37,6 +38,7 @@ private final class ThemeSettingsControllerArguments {
     let openAutoNightTheme: () -> Void
     let openTextSize: () -> Void
     let openBubbleSettings: () -> Void
+    let openBeyGramStyle: () -> Void
     let openPowerSavingSettings: () -> Void
     let openStickersAndEmoji: () -> Void
     let toggleSendWithCmdEnter: (Bool) -> Void
@@ -59,6 +61,7 @@ private final class ThemeSettingsControllerArguments {
         openAutoNightTheme: @escaping () -> Void,
         openTextSize: @escaping () -> Void,
         openBubbleSettings: @escaping () -> Void,
+        openBeyGramStyle: @escaping () -> Void,
         openPowerSavingSettings: @escaping () -> Void,
         openStickersAndEmoji: @escaping () -> Void,
         toggleSendWithCmdEnter: @escaping (Bool) -> Void,
@@ -80,6 +83,7 @@ private final class ThemeSettingsControllerArguments {
         self.openAutoNightTheme = openAutoNightTheme
         self.openTextSize = openTextSize
         self.openBubbleSettings = openBubbleSettings
+        self.openBeyGramStyle = openBeyGramStyle
         self.openPowerSavingSettings = openPowerSavingSettings
         self.openStickersAndEmoji = openStickersAndEmoji
         self.toggleSendWithCmdEnter = toggleSendWithCmdEnter
@@ -135,6 +139,7 @@ private enum ThemeSettingsControllerEntry: ItemListNodeEntry {
     case autoNightTheme(PresentationTheme, String, String)
     case textSize(PresentationTheme, String, String)
     case bubbleSettings(PresentationTheme, String, String)
+    case beyGramStyle(PresentationTheme, String, String)
     case iconHeader(PresentationTheme, String)
     case iconItem(PresentationTheme, PresentationStrings, [PresentationAppIcon], Bool, String?)
     case powerSaving
@@ -150,7 +155,7 @@ private enum ThemeSettingsControllerEntry: ItemListNodeEntry {
                 return ThemeSettingsControllerSection.chatPreview.rawValue
             case .bubbleMode, .autoNight, .autoNightTheme:
                 return ThemeSettingsControllerSection.nightMode.rawValue
-            case .textSize, .bubbleSettings:
+            case .textSize, .bubbleSettings, .beyGramStyle:
                 return ThemeSettingsControllerSection.message.rawValue
             case .iconHeader, .iconItem:
                 return ThemeSettingsControllerSection.icon.rawValue
@@ -185,6 +190,8 @@ private enum ThemeSettingsControllerEntry: ItemListNodeEntry {
             return 9
         case .bubbleSettings:
             return 10
+        case .beyGramStyle:
+            return 19
         case .powerSaving:
             return 11
         case .stickersAndEmoji:
@@ -256,6 +263,12 @@ private enum ThemeSettingsControllerEntry: ItemListNodeEntry {
                 }
             case let .textSize(lhsTheme, lhsText, lhsValue):
                 if case let .textSize(rhsTheme, rhsText, rhsValue) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsValue == rhsValue {
+                    return true
+                } else {
+                    return false
+                }
+            case let .beyGramStyle(lhsTheme, lhsText, lhsValue):
+                if case let .beyGramStyle(rhsTheme, rhsText, rhsValue) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsValue == rhsValue {
                     return true
                 } else {
                     return false
@@ -377,6 +390,10 @@ private enum ThemeSettingsControllerEntry: ItemListNodeEntry {
             case let .textSize(_, text, value):
                 return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: text, label: value, labelStyle: .text, sectionId: self.section, style: .blocks, disclosureStyle: .arrow, action: {
                     arguments.openTextSize()
+                })
+            case let .beyGramStyle(_, text, value):
+                return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: text, label: value, labelStyle: .text, sectionId: self.section, style: .blocks, disclosureStyle: .arrow, action: {
+                    arguments.openBeyGramStyle()
                 })
             case let .bubbleSettings(_, text, value):
                 return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: text, label: value, labelStyle: .text, sectionId: self.section, style: .blocks, disclosureStyle: .arrow, action: {
@@ -503,6 +520,7 @@ private func themeSettingsControllerEntries(
     }
     entries.append(.textSize(presentationData.theme, strings.Appearance_TextSizeSetting, textSizeValue))
     entries.append(.bubbleSettings(presentationData.theme, strings.Appearance_BubbleCornersSetting, ""))
+    entries.append(.beyGramStyle(presentationData.theme, "BeyGram Style", BeyGramAppearance.shared.isEnabled ? "BeyGram" : "Telegram"))
     entries.append(.powerSaving)
     entries.append(.stickersAndEmoji)
     
@@ -634,6 +652,8 @@ public func themeSettingsController(context: AccountContext, focusOnItemTag: The
             let settings = view.entries[ApplicationSpecificSharedDataKeys.presentationThemeSettings]?.get(PresentationThemeSettings.self) ?? PresentationThemeSettings.defaultSettings
             pushControllerImpl?(BubbleSettingsController(context: context, presentationThemeSettings: settings))
         })
+    }, openBeyGramStyle: {
+        pushControllerImpl?(beyGramStyleController(context: context))
     }, openPowerSavingSettings: {
         pushControllerImpl?(energySavingSettingsScreen(context: context))
     }, openStickersAndEmoji: {

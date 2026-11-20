@@ -29,6 +29,7 @@ import MultilineTextComponent
 import MultilineTextWithEntitiesComponent
 import ShimmerEffect
 import GlassBackgroundComponent
+import BeyGramAppearance
 
 public enum ChatListItemContent {
     public final class ThreadInfo: Equatable {
@@ -2157,7 +2158,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 }
             }
             
-            var avatarDiameter = min(60.0, floor(item.presentationData.fontSize.baseDisplaySize * 60.0 / 17.0))
+            var avatarDiameter = min(BeyGramAppearance.shared.chatListAvatarMaxDiameter, floor(item.presentationData.fontSize.baseDisplaySize * 60.0 / 17.0))
             
             if case let .peer(peerData) = item.content, let customMessageListData = peerData.customMessageListData, customMessageListData.commandPrefix != nil {
                 avatarDiameter = 40.0
@@ -2725,7 +2726,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             let enableChatListPhotos = true
             
             // if changed, adjust setupItem accordingly
-            var avatarDiameter = min(60.0, floor(item.presentationData.fontSize.baseDisplaySize * 60.0 / 17.0))
+            var avatarDiameter = min(BeyGramAppearance.shared.chatListAvatarMaxDiameter, floor(item.presentationData.fontSize.baseDisplaySize * 60.0 / 17.0))
             let avatarLeftEdgeInset: CGFloat = item.useCommunityViewLayout ? 10.0 : 16.0
             let avatarLeftInset: CGFloat
             

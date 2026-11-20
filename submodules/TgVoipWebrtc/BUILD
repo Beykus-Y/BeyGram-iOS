@@ -70,19 +70,11 @@ genrule(
     name = "reference_core_wasm",
     srcs = _WASM_CORE_COMMON_SRCS + [
         "tgcalls/tgcalls/v2wasm/reference_core_factory.cpp",
-    ] + select({
-        "@platforms//os:linux": ["@wasi_sdk_linux//:all_files"],
-        "//conditions:default": ["@wasi_sdk_macos//:all_files"],
-    }),
+        "@wasi_sdk//:all_files",
+    ],
     outs = ["reference-core-abi1.wasm"],
-    cmd_bash = select({
-        "@platforms//os:linux": _WASM_CORE_CMD.format(sdk = "@wasi_sdk_linux", extra_srcs = _WASM_REFERENCE_EXTRA_SRCS),
-        "//conditions:default": _WASM_CORE_CMD.format(sdk = "@wasi_sdk_macos", extra_srcs = _WASM_REFERENCE_EXTRA_SRCS),
-    }),
-    tools = select({
-        "@platforms//os:linux": ["@wasi_sdk_linux//:bin/clang++"],
-        "//conditions:default": ["@wasi_sdk_macos//:bin/clang++"],
-    }),
+    cmd_bash = _WASM_CORE_CMD.format(sdk = "@wasi_sdk", extra_srcs = _WASM_REFERENCE_EXTRA_SRCS),
+    tools = ["@wasi_sdk//:bin/clang++"],
     visibility = ["//visibility:public"],
 )
 
@@ -96,19 +88,11 @@ genrule(
         "tgcalls/tgcalls/v2wasm/VariantCallCore.cpp",
         "tgcalls/tgcalls/v2wasm/VariantCallCore.h",
         "tgcalls/tgcalls/v2wasm/variant_core_factory.cpp",
-    ] + select({
-        "@platforms//os:linux": ["@wasi_sdk_linux//:all_files"],
-        "//conditions:default": ["@wasi_sdk_macos//:all_files"],
-    }),
+        "@wasi_sdk//:all_files",
+    ],
     outs = ["variant-core-abi1.wasm"],
-    cmd_bash = select({
-        "@platforms//os:linux": _WASM_CORE_CMD.format(sdk = "@wasi_sdk_linux", extra_srcs = _WASM_VARIANT_EXTRA_SRCS),
-        "//conditions:default": _WASM_CORE_CMD.format(sdk = "@wasi_sdk_macos", extra_srcs = _WASM_VARIANT_EXTRA_SRCS),
-    }),
-    tools = select({
-        "@platforms//os:linux": ["@wasi_sdk_linux//:bin/clang++"],
-        "//conditions:default": ["@wasi_sdk_macos//:bin/clang++"],
-    }),
+    cmd_bash = _WASM_CORE_CMD.format(sdk = "@wasi_sdk", extra_srcs = _WASM_VARIANT_EXTRA_SRCS),
+    tools = ["@wasi_sdk//:bin/clang++"],
     visibility = ["//visibility:public"],
 )
 

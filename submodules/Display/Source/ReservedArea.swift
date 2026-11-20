@@ -160,9 +160,11 @@ var iPhoneDuoSystemReportIsSettled: Bool {
 /// The frames of the occlusion regions the system reports as active in `view` (iPhone Duo's status corner and its
 /// camera), in the view's coordinates. Empty before iOS 27.1.
 func activeOcclusionFrames(in view: UIView) -> [CGRect] {
+    #if BEYGRAM_ENABLE_RESERVED_REGIONS
     if #available(iOS 27.1, *) {
         return view.reservedRegions(kind: .occlusion).filter(\.isActive).map(\.frame)
     }
+    #endif
     return []
 }
 

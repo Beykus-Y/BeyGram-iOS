@@ -22,6 +22,7 @@ swift_library(
         "//submodules/Display",
         "//submodules/AsyncDisplayKit",
         "//submodules/SSignalKit/SwiftSignalKit",
+        "//submodules/BeyGramAppearance",
         "//submodules/TelegramCore",
         "//submodules/TelegramPresentationData",
         "//submodules/TextFormat",

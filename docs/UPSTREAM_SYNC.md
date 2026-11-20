@@ -41,3 +41,15 @@
    - `.github/workflows/build.yml`, `build-system/beygram-*.json`, `build-system/verify-ipa.sh`: сохраните конфигурацию CI BeyGram.
 
 6. Отправьте ветку, запустите workflow **Build BeyGram iOS** вручную (`workflow_dispatch`) и убедитесь, что IPA собирается и проходит `verify-ipa.sh`, после чего откройте PR в `DEV`.
+
+## Хуки BeyGram в файлах Telegram-iOS
+
+Код BeyGram живёт в модулях `submodules/BeyGram*`. В файлы апстрима вставлены только короткие вызовы этих модулей. При слиянии с upstream эти строки нужно сохранить. Правила и список хуков по модулям: `submodules/BeyGramStealth/CLAUDE.md`, `submodules/BeyGramKit/CLAUDE.md`.
+
+| Файл | Что добавлено | Модуль |
+|---|---|---|
+| `submodules/TelegramCore/BUILD` | зависимость `//submodules/BeyGramStealth:BeyGramStealth` | BeyGramStealth |
+| `submodules/TelegramCore/Sources/State/ManagedAccountPresence.swift` | `updatePresence`: скрытый онлайн; параметр `accountPeerId` в `AccountPresenceManager` | BeyGramStealth |
+| `submodules/TelegramCore/Sources/Account/Account.swift` | передача `accountPeerId` в `AccountPresenceManager` | BeyGramStealth |
+| `submodules/TelegramCore/Sources/State/ManagedLocalInputActivities.swift` | `requestActivity`: скрытый набор текста и другие действия в чате | BeyGramStealth |
+| `submodules/TelegramCore/Sources/State/SynchronizePeerReadState.swift` | `pushPeerReadState`: скрытые отчёты о прочтении | BeyGramStealth |

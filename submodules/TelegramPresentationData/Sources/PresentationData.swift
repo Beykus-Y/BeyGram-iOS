@@ -9,6 +9,7 @@ import TelegramUIPreferences
 import AppBundle
 import Sunrise
 import PresentationStrings
+import BeyGramAppearance
 
 public struct PresentationDateTimeFormat: Equatable {
     public let timeFormat: PresentationTimeFormat
@@ -86,7 +87,8 @@ public struct PresentationChatBubbleCorners: Equatable, Hashable {
     
     /// The corners the app's presentation data takes from the stored settings.
     public init(settings: PresentationChatBubbleSettings) {
-        self.init(mainRadius: CGFloat(settings.mainRadius), auxiliaryRadius: CGFloat(settings.auxiliaryRadius), mergeBubbleCorners: settings.mergeBubbleCorners, bubbleMode: settings.bubbleMode, serifMessageText: settings.serifMessageFont)
+        let corners = BeyGramAppearance.shared.bubbleCorners(mainRadius: CGFloat(settings.mainRadius), auxiliaryRadius: CGFloat(settings.auxiliaryRadius))
+        self.init(mainRadius: corners.main, auxiliaryRadius: corners.auxiliary, mergeBubbleCorners: settings.mergeBubbleCorners, bubbleMode: settings.bubbleMode, serifMessageText: settings.serifMessageFont)
     }
 }
 
@@ -741,8 +743,8 @@ public func chatServiceBackgroundColor(wallpaper: TelegramWallpaper, mediaBox: M
 }
 
 public func updatedPresentationData(accountManager: AccountManager<TelegramAccountManagerTypes>, applicationInForeground: Signal<Bool, NoError>, systemUserInterfaceStyle: Signal<WindowUserInterfaceStyle, NoError>) -> Signal<PresentationData, NoError> {
-    return combineLatest(accountManager.sharedData(keys: [SharedDataKeys.localizationSettings, ApplicationSpecificSharedDataKeys.presentationThemeSettings, ApplicationSpecificSharedDataKeys.contactSynchronizationSettings]), systemUserInterfaceStyle)
-    |> mapToSignal { sharedData, systemUserInterfaceStyle -> Signal<PresentationData, NoError> in
+    return combineLatest(accountManager.sharedData(keys: [SharedDataKeys.localizationSettings, ApplicationSpecificSharedDataKeys.presentationThemeSettings, ApplicationSpecificSharedDataKeys.contactSynchronizationSettings]), systemUserInterfaceStyle, BeyGramAppearance.shared.styleSignal)
+    |> mapToSignal { sharedData, systemUserInterfaceStyle, _ -> Signal<PresentationData, NoError> in
         let themeSettings: PresentationThemeSettings
         if let current = sharedData.entries[ApplicationSpecificSharedDataKeys.presentationThemeSettings]?.get(PresentationThemeSettings.self) {
             themeSettings = current

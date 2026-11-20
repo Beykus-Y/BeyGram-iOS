@@ -1,4 +1,5 @@
 import Foundation
+import BeyGramTriggerWordsTelegram
 import UIKit
 import Intents
 import TelegramPresentationData
@@ -322,6 +323,13 @@ final class AuthorizedApplicationContext {
             if messageList.isEmpty {
                 return
             }
+
+            ingestTriggerWordsFromAccount(context: context, batches: messageList.map { batch in batch.0.map { EngineMessage($0) } }, isChatOpen: { [weak self] peerId in
+                guard let controller = self?.rootController.topViewController as? ChatControllerImpl else {
+                    return false
+                }
+                return controller.chatLocation.peerId == peerId
+            })
 
             if let strongSelf = self, let (messages, _, notify, threadData) = messageList.last, let firstMessage = messages.first {
                 if UIApplication.shared.applicationState == .active {
