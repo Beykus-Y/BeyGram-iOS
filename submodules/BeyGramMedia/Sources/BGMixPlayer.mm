@@ -20,46 +20,73 @@ namespace {
 constexpr uint32_t kSampleRate = 48000;
 constexpr AVAudioFrameCount kScratchFrames = 4096;
 
-// Decodes any file AVFoundation can read (MP3, AAC/M4A, FLAC, WAV, ALAC) into
-// interleaved float PCM. Runs on the MixSession worker thread.
-bool decodeWithAVFoundation(const std::filesystem::path &path,
+// Decodes any file AVFoundation can read (MP3, AAC/M4A, FLAC, WAV, ALAC) into interleaved float PCM.
+// Runs on the MixSession worker thread. The decoded size is known from the file length, so a track
+// that would not fit the in-memory limit is refused before anything is allocated. The file is read in
+// chunks into storage reserved once (no second full-length copy), and the checkpoint runs between
+// chunks: a cancelled job throws out of here.
+bool decodeWithAVFoundation(const std::filesystem::path &path, std::uint64_t maxDecodedBytes,
+                            const beygram::media::MixCheckpoint &checkpoint,
                             bgmedia::AudioData &out, std::string &error) {
-    @autoreleasepool {
-        NSString *filePath = [NSString stringWithUTF8String:path.c_str()];
-        if (filePath == nil) {
-            error = "Invalid file path.";
-            return false;
-        }
-        NSError *nsError = nil;
-        AVAudioFile *file = [[AVAudioFile alloc] initForReading:[NSURL fileURLWithPath:filePath] error:&nsError];
-        if (file == nil) {
-            error = nsError.localizedDescription.UTF8String ?: "Could not open audio file.";
-            return false;
-        }
-        AVAudioFormat *format = file.processingFormat; // float32, non-interleaved
-        const AVAudioFramePosition length = file.length;
-        if (length <= 0 || format.channelCount == 0) {
-            error = "Audio file is empty.";
-            return false;
-        }
-        AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:format
-                                                                 frameCapacity:(AVAudioFrameCount)length];
-        if (buffer == nil || ![file readIntoBuffer:buffer error:&nsError]) {
-            error = nsError.localizedDescription.UTF8String ?: "Could not decode audio file.";
-            return false;
-        }
-        const uint32_t channels = (uint32_t)format.channelCount;
-        const size_t frames = (size_t)buffer.frameLength;
-        out.channels = channels;
-        out.sampleRate = (uint32_t)format.sampleRate;
-        out.samples.assign(frames * channels, 0.0f);
-        for (uint32_t ch = 0; ch < channels; ++ch) {
-            const float *src = buffer.floatChannelData[ch];
-            for (size_t i = 0; i < frames; ++i) {
-                out.samples[i * channels + ch] = src[i];
+    constexpr AVAudioFrameCount kChunkFrames = 65536;
+    AVAudioFile *file = nil;
+    AVAudioPCMBuffer *buffer = nil;
+    try {
+        // The worker thread has no autorelease pool of its own. The pool is popped on the way out
+        // of a C++ exception too, so the checkpoint may throw from inside it.
+        @autoreleasepool {
+            NSString *filePath = [NSString stringWithUTF8String:path.c_str()];
+            if (filePath == nil) {
+                error = "Invalid file path.";
+                return false;
             }
+            NSError *nsError = nil;
+            file = [[AVAudioFile alloc] initForReading:[NSURL fileURLWithPath:filePath] error:&nsError];
+            if (file == nil) {
+                error = nsError.localizedDescription.UTF8String ?: "Could not open audio file.";
+                return false;
+            }
+            AVAudioFormat *format = file.processingFormat; // float32, non-interleaved
+            const AVAudioFramePosition length = file.length;
+            if (length <= 0 || format.channelCount == 0) {
+                error = "Audio file is empty.";
+                return false;
+            }
+            const auto channels = static_cast<std::uint32_t>(format.channelCount);
+            if (beygram::media::interleavedFloatBytes(static_cast<std::uint64_t>(length), channels) >
+                maxDecodedBytes) {
+                error = "decoded PCM exceeds the in-memory limit";
+                return false;
+            }
+            buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:format frameCapacity:kChunkFrames];
+            if (buffer == nil) {
+                error = "Could not decode audio file.";
+                return false;
+            }
+            beygram::media::InterleavedPcmBuilder builder(channels, static_cast<std::uint64_t>(length),
+                                                          maxDecodedBytes);
+            for (;;) {
+                if (![file readIntoBuffer:buffer frameCount:kChunkFrames error:&nsError]) {
+                    error = nsError.localizedDescription.UTF8String ?: "Could not decode audio file.";
+                    return false;
+                }
+                const AVAudioFrameCount frames = buffer.frameLength;
+                if (frames == 0) {
+                    break;
+                }
+                builder.appendPlanar(buffer.floatChannelData, frames);
+                checkpoint();
+            }
+            out.channels = channels;
+            out.sampleRate = (uint32_t)format.sampleRate;
+            out.samples = builder.take();
+            return out.valid();
         }
-        return out.valid();
+    } catch (...) {
+        // C++ exceptions do not release ARC references in this file, so drop them before rethrowing.
+        buffer = nil;
+        file = nil;
+        throw;
     }
 }
 
@@ -92,12 +119,17 @@ bool decodeWithAVFoundation(const std::filesystem::path &path,
     options.cacheDirectory = std::filesystem::path(cacheDirectory.UTF8String ?: "");
     options.useCache = !options.cacheDirectory.empty();
     options.targetSampleRate = kSampleRate;
+    // Same admission budget as the Android bridge: a track, one preparation, and their session total.
     _session = std::make_unique<bgmedia::mix::MixSession>(
         *_engine,
         [options](const std::filesystem::path &path, bgmedia::mix::PreparedMixTrack &out,
                   std::string &error, std::function<void(float, std::string_view)> progress) {
             return beygram::media::prepareMixTrack(path, decodeWithAVFoundation, options, out, error, progress);
-        });
+        },
+        bgmedia::mix::MixPlanner{},
+        bgmedia::mix::MixPcmBudget{beygram::media::kMixMaxTrackPcmBytes,
+                                   beygram::media::kMixPreparationPcmReserve,
+                                   beygram::media::kMixSessionPcmBudget});
 
     AVAudioFormat *format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:kSampleRate channels:2];
     bgmedia::mix::MixEngine *engine = _engine.get();
