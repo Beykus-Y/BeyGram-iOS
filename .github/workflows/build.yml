@@ -35,11 +35,16 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Checkout repository with submodules
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           fetch-depth: 0
+
+      - name: Fetch submodules without the workflow token
+        # GITHUB_TOKEN действует только на этот репозиторий. С ним публичный BG-Media не клонируется
+        # ("Repository not found"). Все сабмодули публичные, поэтому тянем их без токена.
+        run: |
+          git -c http.https://github.com/.extraheader= submodule update --init --recursive
 
       - name: Read versions and determine build channel
         id: meta
