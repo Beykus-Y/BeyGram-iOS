@@ -428,10 +428,27 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
         return true
     }
 
-    /// A file BG Mix can read, or nil for a track that cannot be played (BG Mix then skips it). A Yandex track gives the
-    /// file its service keeps in the app's folder. A Telegram audio file gives an app-private copy, made once; it is
-    /// downloaded first if it is not on disk yet.
+    /// A file BG Mix can read, or nil for a track that cannot be played (BG Mix then skips it). A local file is read from
+    /// the BG Mix folder. A Yandex track gives the file its service keeps in the app's folder. A Telegram audio file gives
+    /// an app-private copy, made once; it is downloaded first if it is not on disk yet.
     private func fileURL(for item: SharedMediaPlaylistItem) -> Signal<URL?, NoError> {
+        if let playbackData = item.playbackData, case let .localFile(rowKey) = playbackData.source {
+            // The row key is `local:` followed by the file name in the BG Mix folder. A name that is not a plain file name
+            // (a path, a hidden file) is refused, so the key cannot reach outside that folder.
+            guard rowKey.hasPrefix("local:") else {
+                return .single(nil)
+            }
+            let fileName = String(rowKey.dropFirst("local:".count))
+            guard !fileName.isEmpty, !fileName.hasPrefix("."), (fileName as NSString).lastPathComponent == fileName else {
+                return .single(nil)
+            }
+            let url = BGMixPlayer.mixDirectory().appendingPathComponent(fileName)
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue {
+                return .single(url)
+            }
+            return .single(nil)
+        }
         if let playbackData = item.playbackData, case let .yandexTrack(rowKey) = playbackData.source {
             // Emits once: the file when it is on disk, or nil when the track cannot be played. Nothing is emitted while it downloads.
             return Signal<URL?, NoError> { subscriber in

@@ -253,8 +253,8 @@ final class SharedMediaPlayer {
                                 switch playbackData.source {
                                     case let .telegramFile(fileReference, _, _):
                                     strongSelf.playbackItem = .audio(MediaPlayer(audioSessionManager: strongSelf.audioSession, postbox: strongSelf.engine.account.postbox, userLocation: .other,  userContentType: .audio, resourceReference: fileReference.resourceReference(fileReference.media.resource), streamable: playbackData.type == .music ? .conservative : .none, video: false, preferSoftwareDecoding: false, enableSound: true, baseRate: rateValue, fetchAutomatically: true, playAndRecord: controlPlaybackWithProximity, isAudioVideoMessage: playbackData.type == .voice))
-                                    case .yandexTrack:
-                                        // A Yandex track has no Telegram resource for MediaPlayer. BG Mix plays it (see fileURL(for:)).
+                                    case .yandexTrack, .localFile:
+                                        // A Yandex track or a local file has no Telegram resource for MediaPlayer. BG Mix plays it (see fileURL(for:)).
                                         break
                                 }
                             case .instantVideo:
@@ -267,7 +267,7 @@ final class SharedMediaPlayer {
                                             strongSelf.playbackItem = .instantVideo(videoNode)
                                             videoNode.setSoundEnabled(true)
                                         videoNode.setBaseRate(rateValue)
-                                    case .yandexTrack:
+                                    case .yandexTrack, .localFile:
                                         break
                                     }
                                 }
@@ -641,8 +641,8 @@ final class SharedMediaPlayer {
                         }
                         |> take(1)
                         |> ignoreValues
-                    case .yandexTrack:
-                        // A Yandex track has no Telegram resource to fetch. BG Mix asks for its file when it needs it.
+                    case .yandexTrack, .localFile:
+                        // A Yandex track or a local file has no Telegram resource to fetch. BG Mix asks for its file when it needs it.
                         fetchedCurrentSignal = .complete()
                 }
                 switch next {
@@ -652,7 +652,7 @@ final class SharedMediaPlayer {
                         |> `catch` { _ -> Signal<Never, NoError> in
                             return .complete()
                         }
-                    case .yandexTrack:
+                    case .yandexTrack, .localFile:
                         // Same as the current track: the file is asked for when BG Mix needs it.
                         fetchedNextSignal = .complete()
                 }
