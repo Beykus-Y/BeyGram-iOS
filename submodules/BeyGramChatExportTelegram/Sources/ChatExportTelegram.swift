@@ -104,18 +104,33 @@ private func fileKind(_ file: TelegramMediaFile) -> ChatExportMediaKind {
 }
 
 /// The file of a message, for the JSON `media` object. Photos and files are described; other media is not.
+/// The sizes are the ones Telegram reports. A photo is described by its largest representation.
 private func chatExportAttachment(_ media: EngineMedia) -> ChatExportAttachment? {
     switch media {
     case let .image(image):
-        // Telegram photos are always JPEG, and their size is not read here, so it stays zero.
-        return ChatExportAttachment(id: image.imageId.id, kind: .photo, mimeType: "image/jpeg")
+        // Telegram photos are always JPEG.
+        let largest = image.representations.max { lhs, rhs in
+            Int64(lhs.dimensions.width) * Int64(lhs.dimensions.height) < Int64(rhs.dimensions.width) * Int64(rhs.dimensions.height)
+        }
+        return ChatExportAttachment(
+            id: image.imageId.id,
+            kind: .photo,
+            mimeType: "image/jpeg",
+            size: (largest?.resource as? CloudPhotoSizeMediaResource)?.size ?? 0,
+            width: Int(largest?.dimensions.width ?? 0),
+            height: Int(largest?.dimensions.height ?? 0)
+        )
     case let .file(file):
+        let dimensions = file.dimensions
         return ChatExportAttachment(
             id: file.fileId.id,
             kind: fileKind(file),
             fileName: file.fileName ?? "",
             mimeType: file.mimeType,
-            size: file.size ?? 0
+            size: file.size ?? 0,
+            durationSeconds: Int(file.duration ?? 0),
+            width: Int(dimensions?.width ?? 0),
+            height: Int(dimensions?.height ?? 0)
         )
     default:
         return nil
