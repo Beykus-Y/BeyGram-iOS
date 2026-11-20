@@ -10,6 +10,7 @@ swift_library(
     ]),
     copts = [
         "-warnings-as-errors",
+        "-Onone",
     ],
     deps = [
         "//submodules/AsyncDisplayKit",

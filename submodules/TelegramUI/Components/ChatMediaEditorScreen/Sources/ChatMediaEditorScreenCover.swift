@@ -151,7 +151,9 @@ extension ChatMediaEditorScreen.Node {
     }
 
     private func clampedCoverPosition(_ position: Double) -> Double {
-        let duration = self.playerState?.tracks.first(where: { $0.id == 0 })?.duration ?? self.subject.duration
+        let playerDuration: Double? = self.playerState?.tracks.first(where: { $0.id == 0 })?.duration
+        let subjectDuration: Double? = self.subject.duration
+        let duration: Double = playerDuration ?? subjectDuration ?? 0.0
         return chatMediaEditorCoverClampedPosition(position, trimRange: self.mediaEditor.values.videoTrimRange, duration: duration)
     }
 

@@ -194,6 +194,7 @@ swift_library(
     ], allow_empty = False),
     copts = [
         "-warnings-as-errors",
+        "-Onone",
     ],
     deps = [
         ":RichTextEditorCore",

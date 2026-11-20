@@ -534,8 +534,13 @@ public final class ButtonComponent: Component {
                     let t = CGFloat(index) / 8
                     return UIColor.black.withAlphaComponent(1 - t * t * (3 - 2 * t)).cgColor
                 }
-                mask.locations = (0...8).map { index in
-                    NSNumber(value: Double(max(0, 1 - 18 / r) + min(1, 18 / r) * CGFloat(index) / 8))
+                let ratio: CGFloat = 18 / r
+                let start: CGFloat = max(0, 1 - ratio)
+                let span: CGFloat = min(1, ratio)
+                mask.locations = (0...8).map { index -> NSNumber in
+                    let offset: CGFloat = span * CGFloat(index) / 8
+                    let location: CGFloat = start + offset
+                    return NSNumber(value: Double(location))
                 }
                 layer.mask = mask
             }
