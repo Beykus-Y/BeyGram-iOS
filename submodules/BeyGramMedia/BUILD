@@ -124,6 +124,21 @@ cc_test(
     deps = [":BGMediaMixState"],
 )
 
+# Realtime handoff of the host tap into BGMixPlayer's render block. Host test as above; the header also
+# sits in the BeyGramMedia srcs glob, so the Objective-C++ file includes it from Sources/.
+cc_library(
+    name = "BGMixPcmTapSlot",
+    hdrs = ["Sources/BGMixPcmTapSlot.hpp"],
+    visibility = ["//visibility:private"],
+)
+
+cc_test(
+    name = "BGMixPcmTapSlotTests",
+    srcs = ["Tests/BGMixPcmTapSlotTests.cpp"],
+    copts = ["-std=c++20"],
+    deps = [":BGMixPcmTapSlot"],
+)
+
 cc_library(
     name = "BGMediaMixPreparation",
     srcs = ["Sources/BGMediaMixPreparation.cpp"],

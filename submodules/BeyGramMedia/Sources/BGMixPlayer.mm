@@ -13,11 +13,13 @@
 #include <string_view>
 
 #include "bgmedia/audio/AudioData.hpp"
+#include "bgmedia/audio/IPcmOutputTap.hpp"
 #include "bgmedia/mix/MixEngine.hpp"
 #include "bgmedia/mix/MixSession.hpp"
 #include "BGMediaAVFoundationDecoder.hpp"
 #include "BGMediaMixPreparation.hpp"
 #include "BGMediaMixState.hpp"
+#include "BGMixPcmTapSlot.hpp"
 
 NSNotificationName const BGMixPlayerDidStartPlaybackNotification = @"BGMixPlayerDidStartPlaybackNotification";
 NSNotificationName const BGMixPlayerDidStopForExternalAudioNotification = @"BGMixPlayerDidStopForExternalAudioNotification";
@@ -29,6 +31,8 @@ constexpr AVAudioFrameCount kScratchFrames = 4096;
 // While the mix plays, observers get a new snapshot at most this often. In the background the timer that
 // runs the update loop uses the same interval, because the display link does not fire there.
 constexpr CFTimeInterval kObserverInterval = 0.1;
+// The host tap (BG Wave). Attached and detached on the main thread, entered on the render thread.
+using HostTapSlot = beygram::media::PcmTapSlot<bgmedia::IPcmOutputTap>;
 
 NSString *stringFromUTF8(const std::string &text) {
     NSString *value = [NSString stringWithUTF8String:text.c_str()];
@@ -147,6 +151,7 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     // Declaration order matters: the session must be destroyed before the engine.
     std::unique_ptr<bgmedia::mix::MixEngine> _engine;
     std::unique_ptr<bgmedia::mix::MixSession> _session;
+    std::unique_ptr<HostTapSlot> _hostTap;
     float *_scratch;
 }
 @property (nonatomic, strong) AVAudioEngine *audioEngine;
@@ -209,6 +214,7 @@ static BGMixPlayer *sSharedPlayer = nil;
 
     _scratch = (float *)calloc((size_t)kScratchFrames * 2, sizeof(float));
     _engine = std::make_unique<bgmedia::mix::MixEngine>(kSampleRate);
+    _hostTap = std::make_unique<HostTapSlot>();
     self.observers = [NSHashTable weakObjectsHashTable];
     self.notificationTokens = [NSMutableArray array];
     self.managesAudioSession = YES;
@@ -233,6 +239,7 @@ static BGMixPlayer *sSharedPlayer = nil;
     AVAudioFormat *format = self.renderFormat;
     bgmedia::mix::MixEngine *engine = _engine.get();
     float *scratch = _scratch;
+    HostTapSlot *hostTap = _hostTap.get();
     // The render block must not capture self: it runs on the realtime thread.
     // It only touches the engine and the preallocated scratch buffer.
     self.sourceNode = [[AVAudioSourceNode alloc] initWithFormat:format
@@ -245,6 +252,11 @@ static BGMixPlayer *sSharedPlayer = nil;
         while (done < frameCount) {
             const AVAudioFrameCount chunk = MIN(frameCount - done, kScratchFrames);
             engine->render(scratch, (size_t)chunk);
+            // The host tap gets the mix as it is rendered: the same interleaved buffer that goes to the output.
+            if (bgmedia::IPcmOutputTap *tap = hostTap->enter()) {
+                tap->onPcmRendered(scratch, (size_t)chunk, kSampleRate);
+            }
+            hostTap->leave();
             if (outputData->mNumberBuffers >= 2) {
                 float *left = (float *)outputData->mBuffers[0].mData + done;
                 float *right = (float *)outputData->mBuffers[1].mData + done;
@@ -564,6 +576,12 @@ static BGMixPlayer *sSharedPlayer = nil;
     _session->update();
 }
 
+- (void)setPcmTap:(nullable void *)tap {
+    if (_hostTap) {
+        _hostTap->set(static_cast<bgmedia::IPcmOutputTap *>(tap));
+    }
+}
+
 - (uint64_t)addTrackAtURL:(NSURL *)url {
     const char *utf8Path = url.path.UTF8String;
     if (!url.isFileURL || utf8Path == nullptr || !_session) {
@@ -720,6 +738,8 @@ static BGMixPlayer *sSharedPlayer = nil;
 }
 
 - (void)invalidate {
+    // Detach first: once the engine stops, no render call can reach the tap any more.
+    [self setPcmTap:NULL];
     [self.displayLink invalidate];
     self.displayLink = nil;
     [self stopBackgroundTimer];
