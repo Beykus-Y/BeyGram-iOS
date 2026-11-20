@@ -26,6 +26,8 @@ public enum BGYandexPlaybackError: Error, Equatable {
     case rateLimited
     /// There is no connection, or the download failed on the way.
     case network
+    /// The file Yandex sent is not a readable track: an error page, a text body or a cut-off file. Nothing is kept; the next try downloads it again.
+    case invalidFile
 }
 
 /// The playback side of the Yandex source: row keys and the file the player reads.
@@ -54,6 +56,8 @@ public enum BGYandexPlayback {
             return .rateLimited
         case .network:
             return .network
+        case .invalidFile:
+            return .invalidFile
         case .unavailable, .notFound, .serviceChanged, .unknown:
             return .unavailable
         }

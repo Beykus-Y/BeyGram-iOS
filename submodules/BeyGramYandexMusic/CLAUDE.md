@@ -15,6 +15,11 @@ Off by default: needs the `yandexMusic` flag, a configured OAuth pair, and the a
 - Track rows use `ym:<trackId>[:<albumId>]` (`BGMusicTrackKey`). A row holds no file until it is played; the signed link is
   requested each time and never stored. Files live in the folder the service is given; the screens pass `Application Support/beygram/yandex`. Full tracks need an account
   with a subscription (`hasPlus`); previews are never played as full tracks.
+- Downloads are checked before they are kept (`BGYandexAudioCheck`): a 2xx answer must start with an ID3 tag or an MPEG
+  frame, carry no text, JSON, XML or HTML type, be at least 8 KB, and match its Content-Length (not compared when the body
+  was encoded). A refused body is deleted and reported to `BGYandexTrackResolver.onRejectedDownload`, which gets sizes, the
+  first bytes and the media type, never the link, token or path. The track gets one fresh link, then `invalidFile`. A
+  cached file gets the same check (size and start only) before it plays; one that fails is downloaded again.
 - Public surface for the screens (Gemini owns the screens): `search`, `likedTracks`, `likedTrackIds`, `setLiked`,
   `setDisliked`, `playlists`, `likedPlaylists`, `playlistTracks`, `playlistByUuid`, `likedAlbums`, `album`, `lyrics`
   (`BGYandexLyrics`, kept 10 minutes when found, 1 minute when it failed), `localFile` (the resolver), and
@@ -23,7 +28,7 @@ Off by default: needs the `yandexMusic` flag, a configured OAuth pair, and the a
   Music address opens natively (album, track, track in album, playlist); any other address stays a web link. `BGYandexRuntime.shared` is the one service of the app: playback and the screens must use
   it, and the new controller still builds its own instance. `BGYandexService.playableFile(rowKey:)` gives the player a local
   file for a `ym:` row, or a `BGYandexPlaybackError` (`notSignedIn`, `subscriptionRequired`, `unavailable`, `rateLimited`,
-  `network`).
+  `network`, `invalidFile`).
 - Radio: calls run one at a time; the queue hint is the last 50 tracks; two empty batches in a row stop a request for now;
   a session the service forgets or ends is replaced by a new one with the same seeds. The seed `user:onyourwave` is the one
   verified against the service. The diversity seeds and the `track:`, `artist:`, `album:` and `playlist:` formats are
@@ -32,4 +37,4 @@ Off by default: needs the `yandexMusic` flag, a configured OAuth pair, and the a
   album search. Yandex tracks cannot be forwarded, added to a profile or exported to `.bgmusic`.
 - Status: written and statically checked (delimiter balance, cross-file references, a line-by-line trace of the unit
   tests against the code). Not compiled: the authoring environment has no Swift toolchain. Not run on the live service and
-  not device-verified. Unit tests: `Tests/BGYandexTests.swift`, host `swift_test` target `BeyGramYandexMusicTests`.
+  not device-verified. Unit tests: `Tests/BGYandexTests.swift` and `Tests/BGYandexAudioCheckTests.swift`, host `swift_test` target `BeyGramYandexMusicTests`.
