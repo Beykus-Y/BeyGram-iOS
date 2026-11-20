@@ -7,9 +7,9 @@ enum BeyGramStealthBatch {
     /// The batch goes out as prepared: unchanged, or every message carries the server-side schedule date. `stealthDelays` has
     /// one entry per message: the delay of a message decided as a server-scheduled send, nil for a message sent as before.
     case send([EnqueueMessage], stealthDelays: [Int32?])
-    /// Stealth scheduling is on, but a message cannot be scheduled. Nothing goes out and nothing is dropped: the caller
-    /// stores the batch as failed messages, so the user sees it and decides (resend as it was, or delete it).
-    case refused
+    /// Stealth scheduling is on, but a message cannot be scheduled, for the reason given. Nothing goes out and nothing is dropped:
+    /// the caller stores the batch as failed messages, each with the reason, so the user sees it and decides.
+    case refused(BeyGramStealthRefusal)
 }
 
 /// BeyGram stealth sending. With the account's "scheduled send" setting on, a message that the user did not schedule
@@ -26,18 +26,18 @@ func beyGramStealthBatch(accountPeerId: PeerId, peerId: PeerId, nowSeconds: Int3
     let chatCanBeScheduled = peerId.namespace != Namespaces.Peer.SecretChat
     for message in messages {
         var explicitScheduleTime: Int32? = nil
-        var isSchedulable = chatCanBeScheduled
+        var unschedulableReason: BeyGramStealthRefusal? = chatCanBeScheduled ? nil : BeyGramStealthRefusal.secretChat
         for attribute in message.attributes {
             if let scheduleAttribute = attribute as? OutgoingScheduleInfoMessageAttribute {
                 explicitScheduleTime = scheduleAttribute.scheduleTime
-            } else if attribute is PaidStarsMessageAttribute {
-                isSchedulable = false
+            } else if attribute is PaidStarsMessageAttribute, unschedulableReason == nil {
+                unschedulableReason = .paidStars
             }
         }
         let decision = BeyGramStealthHooks.sendDecision(
             accountPeerId: accountPeerId.toInt64(),
             explicitScheduleTime: explicitScheduleTime,
-            isSchedulable: isSchedulable,
+            unschedulableReason: unschedulableReason,
             nowSeconds: nowSeconds
         )
         switch decision {
@@ -51,8 +51,8 @@ func beyGramStealthBatch(accountPeerId: PeerId, peerId: PeerId, nowSeconds: Int3
                 return updated
             })
             stealthDelays.append(scheduleTime - nowSeconds)
-        case .refused:
-            return .refused
+        case let .refused(refusal):
+            return .refused(refusal)
         }
     }
     return .send(result, stealthDelays: stealthDelays)
@@ -72,7 +72,7 @@ func beyGramStealthMarkFailed(transaction: Transaction, id: MessageId) {
     })
 }
 
-/// The key under which the stealth registry keeps a message. A message keeps its local id from the store until the server
+/// The key under which the stealth registries keep a message. A message keeps its local id from the store until the server
 /// acknowledges it, and the upload does not change that id, so the key is the same from the store to the request.
 func beyGramStealthMessageKey(_ id: MessageId) -> String {
     return "\(id.peerId.toInt64()):\(id.namespace):\(id.id)"
@@ -81,18 +81,23 @@ func beyGramStealthMessageKey(_ id: MessageId) -> String {
 /// Records, in the caller's transaction, the stored messages that were decided as server-scheduled sends, so that their date is
 /// set when their request is built (`beyGramStealthAtDispatch`). A message that cannot be recorded is stored as failed instead: it
 /// would otherwise keep its enqueue-time date, which can pass before its request is sent. The ids in `refusedIds` (ephemeral sends,
-/// which take another path that does not know the date) are refused the same way. Returns the ids that were stored as failed.
+/// which take another path that does not know the date) are refused the same way. Each refused message keeps its reason in
+/// `BeyGramStealthRefusalRegistry`. Returns the ids that were stored as failed.
 @discardableResult
 func beyGramStealthRecordScheduled(transaction: Transaction, accountPeerId: PeerId, ids: [MessageId?], stealthDelays: [Int32?], nowSeconds: Int32, refusedIds: Set<MessageId>) -> Set<MessageId> {
     var failedIds = Set<MessageId>()
+    let accountId = accountPeerId.toInt64()
     for index in 0 ..< min(ids.count, stealthDelays.count) {
         guard let delaySeconds = stealthDelays[index], let id = ids[index] else {
             continue
         }
         if !refusedIds.contains(id), let scheduleTime = transaction.getMessage(id)?.scheduleTime {
-            BeyGramStealthScheduleRegistry.shared.register(accountPeerId: accountPeerId.toInt64(), messageKey: beyGramStealthMessageKey(id), delaySeconds: delaySeconds, scheduleTime: scheduleTime, nowSeconds: nowSeconds)
+            BeyGramStealthScheduleRegistry.shared.register(accountPeerId: accountId, messageKey: beyGramStealthMessageKey(id), delaySeconds: delaySeconds, scheduleTime: scheduleTime, nowSeconds: nowSeconds)
         } else {
+            // An ephemeral send is refused as such. A message whose date could not be recorded is refused as not recorded.
+            let refusal: BeyGramStealthRefusal = refusedIds.contains(id) ? .ephemeral : .notRecorded
             beyGramStealthMarkFailed(transaction: transaction, id: id)
+            BeyGramStealthRefusalRegistry.shared.record(accountPeerId: accountId, messageKey: beyGramStealthMessageKey(id), refusal: refusal, nowSeconds: nowSeconds)
             failedIds.insert(id)
         }
     }
@@ -135,4 +140,10 @@ func beyGramStealthAtDispatch(transaction: Transaction, accountPeerId: PeerId, m
         updatedAttributes[index] = updatedSchedule
     }
     return message.withUpdatedAttributes(updatedAttributes)
+}
+
+/// The reason BeyGram stealth sending refused a message, or nil when it did not refuse it. A chat uses it to say why a failed
+/// message failed; the dialog texts are in docs/stealth-ui-contract.md.
+public func beyGramStealthRefusal(accountPeerId: PeerId, messageId: MessageId) -> BeyGramStealthRefusal? {
+    return BeyGramStealthRefusalRegistry.shared.refusal(accountPeerId: accountPeerId.toInt64(), messageKey: beyGramStealthMessageKey(messageId))
 }
