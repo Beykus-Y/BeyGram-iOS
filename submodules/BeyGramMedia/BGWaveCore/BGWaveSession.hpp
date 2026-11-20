@@ -38,8 +38,11 @@ public:
     BGWaveSession(const BGWaveSession&) = delete;
     BGWaveSession& operator=(const BGWaveSession&) = delete;
 
-    // Host only: starts the session and queues its Offer invite (see pollOutboundInvite).
+    // Host only: starts the session and queues its Offer invite (see pollOutboundInvite). The Offer lives for
+    // Options.offerTtlSeconds.
     [[nodiscard]] bool startOffer(std::int64_t nowUnixSeconds);
+    // The same, with the Offer's lifetime given per call (1 to 600 seconds). The controller uses this for each offer.
+    [[nodiscard]] bool startOffer(std::int64_t nowUnixSeconds, std::int64_t offerTtlSeconds);
 
     // Routes one invite from the peer: Offer, Answer, Cancel or End, in either link form. A Listener accepts an Offer
     // and queues its Answer. A Host accepts an Answer. Cancel and End end the session.
