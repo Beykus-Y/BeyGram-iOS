@@ -11,8 +11,8 @@ relying on it, run:
 
     ./build-input/bazel-9.2.0-darwin-arm64 test //submodules/BeyGramMusicLibrary:BeyGramMusicLibraryTests
 
-This module needs `BeyGramMusicFormat` from PR #68 (`feature/ios-functional-parity-bgmusic`). The stack is #68, then this
-PR. The app target does not link this module yet, so the app build does not change until the UI links it.
+This module needs `BeyGramMusicFormat`, which has been in DEV since PR #68 merged. The app target does not link this
+module yet, so the app build does not change until the UI links it.
 
 ## Files
 
@@ -38,7 +38,8 @@ PR. The app target does not link this module yet, so the app build does not chan
   - `newPlaylist` and `sameRevision`: add as a new playlist, or cancel.
   - `newerRevision`: update the copy that the preview names, add a separate copy, or cancel.
   - `olderRevision`: add a separate copy, or cancel. A file that is not newer never updates anything.
-  A playlist made in the app is never overwritten by a file. Only a copy can be updated.
+  A playlist made in the app is never overwritten by a file. Only a copy can be updated, and an update replaces that
+  copy's content and cover, local edits included. The UI must say so before it applies an update.
 - **Favorites** never take part in matching (the planner ignores them), and they cannot be deleted.
 - **Refused files change nothing.** Unsupported (section 8), invalid, oversized and unreadable files throw before any
   save.
@@ -46,6 +47,8 @@ PR. The app target does not link this module yet, so the app build does not chan
   full, and it checks the size again after the read.
 - **Ids.** Local ids are ASCII letters, digits, `-` and `_`, at most 64 characters, because each one is a folder name.
   `BGMusicLibrary` makes new ids as lowercase UUIDs.
+- **Export.** The manifest refuses a playlist title or a track title that is empty after cleaning, so `exportFile` throws
+  for that playlist. The UI must check both fields before it exports.
 
 ## Threading
 
