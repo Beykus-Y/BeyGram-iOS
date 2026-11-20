@@ -3,7 +3,6 @@ import UIKit
 import Display
 import SwiftSignalKit
 import TelegramCore
-import Postbox
 import TelegramPresentationData
 import ItemListUI
 import PresentationDataUtils
@@ -109,7 +108,7 @@ private final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
 
 /// Export screen for one chat. Opens a folder picker, writes `<chat>-<date>.<ext>` into the chosen folder,
 /// and shows progress with a cancel action. On failure or cancel the file is removed; if removal fails it is truncated.
-public func chatExportController(context: AccountContext, peerId: PeerId, chatTitle: String, accountLabel: String, hasProtectedContent: Bool) -> ViewController {
+public func chatExportController(context: AccountContext, peerId: EnginePeer.Id, chatTitle: String, accountLabel: String, hasProtectedContent: Bool) -> ViewController {
     let run = ChatExportRun()
     let revision = ValuePromise<Int>(0, ignoreRepeated: false)
     var counter = 0

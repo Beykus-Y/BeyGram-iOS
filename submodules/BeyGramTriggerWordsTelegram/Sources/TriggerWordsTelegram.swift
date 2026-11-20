@@ -1,6 +1,5 @@
 import Foundation
 import UserNotifications
-import Postbox
 import SwiftSignalKit
 import TelegramCore
 import AccountContext
@@ -24,32 +23,33 @@ private func firstValue<T>(_ signal: Signal<T, NoError>) async -> T {
     }
 }
 
-private func senderName(_ peer: Peer?) -> String {
-    if let user = peer as? TelegramUser {
+private func senderName(_ peer: EnginePeer?) -> String {
+    switch peer {
+    case let .user(user)?:
         return [user.firstName, user.lastName].compactMap { $0 }.joined(separator: " ")
-    }
-    if let channel = peer as? TelegramChannel {
+    case let .channel(channel)?:
         return channel.title
-    }
-    if let group = peer as? TelegramGroup {
+    case let .legacyGroup(group)?:
         return group.title
+    default:
+        return ""
     }
-    return ""
 }
 
 /// Whether previews are shown for this message: the chat's own setting wins; the default follows the global
 /// setting for the chat's category. Returns the category's `enabled` too, since a disabled category posts no alerts.
-private func previewSettings(context: AccountContext, message: Message, global: EngineGlobalNotificationSettings) async -> (previews: Bool, enabled: Bool, muted: Bool) {
+private func previewSettings(context: AccountContext, message: EngineMessage, global: EngineGlobalNotificationSettings) async -> (previews: Bool, enabled: Bool, muted: Bool) {
     let category: EngineGlobalNotificationSettings.CategorySettings
-    if let channel = message.peers[message.id.peerId] as? TelegramChannel {
+    switch message.enginePeers[message.id.peerId] {
+    case let .channel(channel)?:
         if case .broadcast = channel.info {
             category = global.channels
         } else {
             category = global.groupChats
         }
-    } else if message.peers[message.id.peerId] is TelegramGroup {
+    case .legacyGroup?:
         category = global.groupChats
-    } else {
+    default:
         category = global.privateChats
     }
     let peerSettings = await firstValue(context.engine.data.get(TelegramEngine.EngineData.Item.Peer.NotificationSettings(id: message.id.peerId)))
@@ -98,7 +98,7 @@ private func postTriggerAlert(identifier: String, title: String, body: String, d
 /// Preview and category settings come from the engine, so a hidden preview keeps no text in the feed and in the alert.
 public func ingestTriggerWordsFromAccount(
     context: AccountContext,
-    batches: [([Message], PeerGroupId, Bool, MessageHistoryThreadData?)],
+    batches: [[EngineMessage]],
     isChatOpen: @escaping (EnginePeer.Id) -> Bool
 ) {
     guard BeyGramSettings.shared.isEnabled(.triggerWords), !TriggerWordsStore.shared.state.rules.isEmpty else {
@@ -108,9 +108,9 @@ public func ingestTriggerWordsFromAccount(
         let global = await firstValue(context.engine.data.get(TelegramEngine.EngineData.Item.NotificationSettings.Global()))
         let store = TriggerWordsStore.shared
         let accountId = context.account.id.int64
-        for (messages, _, _, _) in batches {
+        for messages in batches {
             for message in messages {
-                guard message.flags.contains(.Incoming), message.id.peerId.namespace != Namespaces.Peer.SecretChat else {
+                guard message.flags.contains(.Incoming), !message.id.peerId.isSecretChat else {
                     continue
                 }
                 let settings = await previewSettings(context: context, message: message, global: global)
