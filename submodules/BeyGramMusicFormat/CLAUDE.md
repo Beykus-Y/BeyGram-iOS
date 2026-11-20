@@ -56,10 +56,10 @@ pipeline tests build ZIP files byte by byte, so they can declare sizes that do n
 - Implemented as pure functions: reading a file, the import decision (`newPlaylist`, `sameRevision`, `newerRevision`,
   `olderRevision`), matching against a library of `BGMusicLocalPlaylistRef`, export identity, file names, writing, and
   an export summary for the sheet that shows what the file carries (section 9).
-- Not implemented: there is no local playlist store in the iOS app. DEV has no library model for BeyGram playlists to
-  import into or export from. Import and export screens, and the "Open in" / share-sheet entry points (a UTI and a
-  document type for `application/vnd.beygram.music+zip`, `.bgmusic`), need that library first. They belong to the music
-  core work and to the UI work that Gemini is doing.
+- The local library and the import and export layers over this module live in `submodules/BeyGramMusicLibrary`. That
+  module is Foundation only and has no UI. The import and export screens and the Open in / share-sheet entry points are
+  not wired yet. Gemini connects them. The type is declared in the app's `Info.plist` (`.bgmusic`, MIME
+  `application/vnd.beygram.music+zip`).
 - The Yandex Music bridge (`BeyGramYandexMusic`) is separate. Its track rows use the `ym:` keys from `BGMusicTrackKey`.
 
 ## Profile music (audit, no code changes in this module)
