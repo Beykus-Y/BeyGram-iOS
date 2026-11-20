@@ -47,7 +47,10 @@ public final class ChatExportArchiveJob {
         onProgress: @escaping (ChatExportProgress) -> Void
     ) {
         self.format = format
-        self.header = header
+        var archiveHeader = header
+        // An archive holds media, so its document says so, as the Android export does.
+        archiveHeader.mediaRequested = true
+        self.header = archiveHeader
         self.range = range
         self.history = history
         self.files = files
@@ -76,10 +79,12 @@ public final class ChatExportArchiveJob {
         let renderWriter = ChatExportWriter(format: format, header: header, range: range, sink: rendered)
         try renderWriter.begin()
         try await walk(writer: renderWriter, archive: archive)
-        var summary = try renderWriter.finish()
+        // The media counts are final once the first pass has copied every file, so the document carries them.
+        let summary = try renderWriter.finish(mediaFiles: mediaFiles, skippedMedia: skippedMedia)
 
         // The document entry follows the media entries, as on Android.
-        try archive.beginEntry(name: "messages.\(format.fileExtension)", modified: header.exportedAt)
+        // Android stamps every entry with the time it is written, so the document takes the current time too.
+        try archive.beginEntry(name: "messages.\(format.fileExtension)", modified: Date())
         if rendered.overflowed {
             // Too large to keep in memory: walk the history again and write the document into its entry.
             // The media is already archived, so nothing is copied again.
@@ -92,15 +97,13 @@ public final class ChatExportArchiveJob {
             )
             try entryWriter.begin()
             try await walk(writer: entryWriter, archive: nil)
-            _ = try entryWriter.finish()
+            _ = try entryWriter.finish(mediaFiles: mediaFiles, skippedMedia: skippedMedia)
         } else {
             try rendered.writeKept(to: ChatExportZipEntrySink(zip: archive))
         }
         try archive.endEntry()
         try archive.finish()
 
-        summary.mediaFiles = mediaFiles
-        summary.skippedMedia = skippedMedia
         return summary
     }
 
@@ -128,7 +131,6 @@ public final class ChatExportArchiveJob {
                         mediaPath = try await copyMedia(
                             attachment,
                             messageId: message.id,
-                            modified: message.date,
                             into: archive
                         )
                     } else {
@@ -150,7 +152,6 @@ public final class ChatExportArchiveJob {
     private func copyMedia(
         _ attachment: ChatExportAttachment,
         messageId: Int64,
-        modified: Date,
         into archive: ChatExportZipWriter
     ) async throws -> String? {
         guard budget.hasRoomForAnotherFile else {
@@ -165,7 +166,8 @@ public final class ChatExportArchiveJob {
             stream.close()
         }
         let entryName = ChatExportFileName.mediaEntryName(messageId: messageId, attachment: attachment)
-        try archive.beginEntry(name: entryName, modified: modified)
+        // Each media entry takes the time it is written, as on Android.
+        try archive.beginEntry(name: entryName, modified: Date())
         while let chunk = try await stream.readChunk() {
             try Task.checkCancellation()
             try archive.write(chunk)

@@ -11,10 +11,13 @@ final class ChatExportJobTests: XCTestCase {
         ChatExportMessage(id: id, date: Date(timeIntervalSince1970: 1_700_000_000 + Double(id)), senderName: "A", text: "m\(id)")
     }
 
+    private var header: ChatExportHeader {
+        ChatExportHeader(accountLabel: "a", chat: ChatExportChat(id: 1, title: "c", kind: "private"), exportedAt: Date())
+    }
+
     func testRunsAllPagesAndReportsProgress() async throws {
         let sink = CountingSink()
-        let writer = ChatExportWriter(format: .json, header: ChatExportHeader(accountLabel: "a", chatTitle: "c", exportedAt: Date()),
-                                      range: ChatExportRange(), sink: sink)
+        let writer = ChatExportWriter(format: .json, header: header, range: ChatExportRange(), sink: sink)
         var pages: [[ChatExportMessage]] = [[message(1), message(2)], [message(3)], []]
         var lastProgress: ChatExportProgress?
         var cleaned = false
@@ -26,8 +29,7 @@ final class ChatExportJobTests: XCTestCase {
     }
 
     func testErrorRunsCleanupAndRethrows() async {
-        let writer = ChatExportWriter(format: .html, header: ChatExportHeader(accountLabel: "a", chatTitle: "c", exportedAt: Date()),
-                                      range: ChatExportRange(), sink: CountingSink())
+        let writer = ChatExportWriter(format: .html, header: header, range: ChatExportRange(), sink: CountingSink())
         var cleaned = false
         let job = ChatExportJob(writer: writer, cleanup: { cleaned = true }, onProgress: { _ in })
         struct Boom: Error {}

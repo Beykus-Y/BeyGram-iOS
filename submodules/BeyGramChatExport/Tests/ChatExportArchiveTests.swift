@@ -109,7 +109,11 @@ final class ChatExportArchiveTests: XCTestCase {
     }
 
     private var header: ChatExportHeader {
-        ChatExportHeader(accountLabel: "Account A", chatTitle: "Chat", exportedAt: date("2026-11-19T10:00:00Z"))
+        ChatExportHeader(
+            accountLabel: "Account A",
+            chat: ChatExportChat(id: 1, title: "Chat", kind: "private"),
+            exportedAt: date("2026-11-19T10:00:00Z")
+        )
     }
 
     private func photo(_ id: Int64, size: Int64 = 3, fileName: String = "pic.jpg") -> ChatExportAttachment {
@@ -122,7 +126,6 @@ final class ChatExportArchiveTests: XCTestCase {
             date: date("2026-11-01T12:00:00Z"),
             senderName: "Ann",
             text: text,
-            mediaKind: attachment == nil ? nil : "photo",
             attachment: attachment
         )
     }
@@ -169,6 +172,7 @@ final class ChatExportArchiveTests: XCTestCase {
         XCTAssertTrue(result.archive.text.contains("\"exportedPath\":\"media/10_pic.jpg\""))
         XCTAssertTrue(result.archive.text.contains("\"durationSeconds\":0"))
         XCTAssertTrue(result.archive.text.contains("\"width\":0"))
+        XCTAssertTrue(result.archive.text.contains("\"mediaRequested\":true"))
     }
 
     func testUnknownSizeFailedOpenAndMissingFilesAreSkipped() async throws {
