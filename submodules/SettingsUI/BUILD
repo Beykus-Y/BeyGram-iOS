@@ -5,9 +5,10 @@ load("@build_bazel_rules_apple//apple/testing/default_runner:ios_test_runner.bzl
 swift_library(
     name = "SettingsUI",
     module_name = "SettingsUI",
-    srcs = glob([
-		"Sources/**/*.swift",
-    ]),
+    srcs = glob(
+        ["Sources/**/*.swift"],
+        exclude = ["Sources/BeyGramStyle/BeyGramMihomo*.swift"],
+    ),
     copts = [
         "-warnings-as-errors",
     ],
@@ -15,7 +16,6 @@ swift_library(
         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
         "//submodules/BeyGramAppearance",
         "//submodules/BeyGramKit:BeyGramKit",
-        "//submodules/BeyGramProxy:BeyGramProxy",
         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
         "//submodules/Display:Display",
         "//submodules/TelegramCore:TelegramCore",
