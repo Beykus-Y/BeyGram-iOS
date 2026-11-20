@@ -1,7 +1,7 @@
 import Foundation
 
 /// Gives a local MP3 for a `ym:` row. Only the file is kept. A link is asked for each time it is needed, because it expires.
-/// Files live in `beygram/yandex` under the given folder, excluded from iCloud and device backups: the tracks may not leave the device.
+/// Files live in the folder the service is given, excluded from iCloud and device backups: the tracks may not leave the device.
 public final class BGYandexTrackResolver {
     /// Gives a fresh link for a track: the service checks the session and the subscription. Not on the main queue.
     public typealias LinkProvider = (String, @escaping (Result<BGYandexAudio, BGYandexError>) -> Void) -> Void
@@ -13,18 +13,17 @@ public final class BGYandexTrackResolver {
     private let session: URLSession
     private let fileManager = FileManager.default
 
+    /// The folder the tracks live in, used as given. It is excluded from backups in full, so it must be a folder of its own:
+    /// the screens pass `Application Support/beygram/yandex`.
     public init(cacheDirectory: URL) {
-        // The given folder holds `beygram/yandex`, where the tracks live.
-        let folder = cacheDirectory.appendingPathComponent("beygram", isDirectory: true)
-            .appendingPathComponent("yandex", isDirectory: true)
-        self.cacheDirectory = folder
+        self.cacheDirectory = cacheDirectory
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]
         configuration.timeoutIntervalForRequest = BGYandexConfig.readTimeout
         configuration.urlCache = nil
         self.session = URLSession(configuration: configuration)
-        try? fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
-        BGYandexTrackResolver.excludeFromBackup(folder)
+        try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        BGYandexTrackResolver.excludeFromBackup(cacheDirectory)
     }
 
     /// Keeps one folder out of iCloud and device backups. Application Support is backed up unless a folder says otherwise.
