@@ -9,6 +9,7 @@ import AccountContext
 import TelegramUniversalVideoContent
 import DeviceProximity
 import PeerMessagesMediaPlaylist
+import BeyGramKit
 
 private enum SharedMediaPlaybackItem: Equatable {
     case audio(MediaPlayer)
@@ -179,6 +180,8 @@ final class SharedMediaPlayer {
     private let prefetchDisposable = MetaDisposable()
     
     let type: MediaManagerPlayerType
+    // BG Mix as the engine of a music playlist, when the music library feature is on (SharedMediaBGMix.swift).
+    private var bgMix: SharedMediaBGMixBackend?
     
     init(context: AccountContext, mediaManager: MediaManager, inForeground: Signal<Bool, NoError>, engine: TelegramEngine, audioSession: ManagedAudioSession, overlayMediaManager: OverlayMediaManager, playlist: SharedMediaPlaylist, initialOrder: MusicPlaybackSettingsOrder, initialLooping: MusicPlaybackSettingsLooping, initialPlaybackRate: AudioPlaybackRate, playerIndex: Int32, controlPlaybackWithProximity: Bool, type: MediaManagerPlayerType, continueInstantVideoLoopAfterFinish: Bool) {
         self.context = context
@@ -204,11 +207,28 @@ final class SharedMediaPlayer {
             self?.cancelled?()
         }
         
+        // BG Mix plays the music playlist when its feature is on. It is set up before the playlist state is first
+        // read, so that the first item already goes to BG Mix.
+        if type == .music && BeyGramSettings.shared.isEnabled(.musicLibrary) {
+            let backend = SharedMediaBGMixBackend(engine: engine, audioSession: audioSession)
+            backend.onItemEnded = { [weak self] in
+                self?.handleBGMixItemEnded()
+            }
+            backend.onAdvanceRequested = { [weak self] in
+                self?.playlist.control(.next)
+            }
+            self.bgMix = backend
+        }
+
         self.stateDisposable = (playlist.state
         |> deliverOnMainQueue).startStrict(next: { [weak self] state in
             if let strongSelf = self {
                 let previousPlaybackItem = strongSelf.playbackItem
                 strongSelf.updatePrefetchItems(item: state.item, previousItem: state.previousItem, nextItem: state.nextItem, ordering: state.order)
+                if let bgMix = strongSelf.bgMix {
+                    strongSelf.applyBGMixState(state, bgMix: bgMix)
+                    return
+                }
                 if state.item?.playbackData != strongSelf.stateValue?.item?.playbackData {
                     if let playbackItem = strongSelf.playbackItem {
                         switch playbackItem {
@@ -404,6 +424,7 @@ final class SharedMediaPlayer {
     }
     
     deinit {
+        self.bgMix?.shutdown()
         self.stateDisposable?.dispose()
         self.markItemAsPlayedDisposable.dispose()
         self.inForegroundDisposable?.dispose()
@@ -427,6 +448,38 @@ final class SharedMediaPlayer {
     }
     
     func control(_ action: SharedMediaPlayerControlAction) {
+        if let bgMix = self.bgMix {
+            switch action {
+                case .next:
+                    bgMix.play()
+                    self.playlist.control(.next)
+                    return
+                case .previous:
+                    let threshold: Double = 5.0
+                    if let playbackStateValue = self._playbackStateValue, case let .item(item) = playbackStateValue, item.status.duration > threshold, item.status.timestamp > threshold {
+                        bgMix.seek(0.0)
+                    } else {
+                        bgMix.play()
+                        self.playlist.control(.previous)
+                    }
+                    return
+                case let .playback(playbackAction):
+                    switch playbackAction {
+                        case .play:
+                            bgMix.play()
+                        case .pause:
+                            bgMix.pause()
+                        case .togglePlayPause:
+                            bgMix.togglePlayPause()
+                    }
+                    return
+                case let .seek(timestamp):
+                    bgMix.seek(timestamp)
+                    return
+                default:
+                    break
+            }
+        }
         switch action {
             case .next:
                 self.scheduledPlaybackAction = .play
@@ -478,6 +531,10 @@ final class SharedMediaPlayer {
     }
     
     func stop() {
+        if let bgMix = self.bgMix {
+            bgMix.pause()
+            return
+        }
         if let playbackItem = self.playbackItem {
             switch playbackItem {
                 case let .audio(player):
@@ -488,6 +545,64 @@ final class SharedMediaPlayer {
         }
     }
     
+    /// A BG Mix track has finished. As on the MediaPlayer path, a repeated item plays again, and anything else moves
+    /// the playlist on.
+    private func handleBGMixItemEnded() {
+        switch self.playlist.looping {
+            case .item:
+                self.bgMix?.restartCurrent()
+            default:
+                self.playlist.control(.next)
+        }
+    }
+
+    /// Publishes the playlist state while BG Mix plays it. The item's status comes from BG Mix in the same shape
+    /// MediaPlayer gives, so the lock screen and the player UI see no difference.
+    private func applyBGMixState(_ state: SharedMediaPlaylistState, bgMix: SharedMediaBGMixBackend) {
+        if self.currentPlayedToEnd != state.playedToEnd {
+            self.currentPlayedToEnd = state.playedToEnd
+            if state.playedToEnd {
+                bgMix.pause()
+                self.playedToEnd?()
+            }
+        }
+        let stateChanged = self.stateValue != state
+        self.stateValue = state
+        guard stateChanged else {
+            return
+        }
+        // Repeat-one queues only the current item, so AutoMix cannot crossfade on into another track.
+        bgMix.update(current: state.item, next: state.looping == .item ? nil : state.nextItem)
+
+        let playlistId = self.playlist.id
+        let playlistLocation = self.playlist.location
+        let playerIndex = self.playerIndex
+        if let item = state.item {
+            self.playbackStateValue.set(bgMix.status(for: item)
+            |> map { itemStatus in
+                return .item(SharedMediaPlayerItemPlaybackState(playlistId: playlistId, playlistLocation: playlistLocation, item: item, previousItem: state.previousItem, nextItem: state.nextItem, status: itemStatus, order: state.order, looping: state.looping, playerIndex: playerIndex))
+            })
+            self.markItemAsPlayedDisposable.set((bgMix.status(for: item)
+            |> filter { status in
+                if case .playing = status.status {
+                    return true
+                } else {
+                    return false
+                }
+            }
+            |> take(1)
+            |> deliverOnMainQueue).startStrict(next: { [weak self] _ in
+                self?.playlist.onItemPlaybackStarted(item)
+            }))
+        } else {
+            if state.loading {
+                self.playbackStateValue.set(.single(.loading))
+            } else {
+                self.playbackStateValue.set(.single(nil))
+            }
+        }
+    }
+
     private func updatePrefetchItems(item: SharedMediaPlaylistItem?, previousItem: SharedMediaPlaylistItem?, nextItem: SharedMediaPlaylistItem?, ordering: MusicPlaybackSettingsOrder) {
         var prefetchItems: (SharedMediaPlaybackDataSource, SharedMediaPlaybackDataSource)?
         if let playbackData = item?.playbackData {
