@@ -32,7 +32,7 @@ jobs:
   build-ios:
     name: Build BeyGram IPA (ios-arm64)
     runs-on: xcode-27
-    timeout-minutes: 120
+    timeout-minutes: 240
 
     steps:
       - name: Checkout repository
@@ -116,15 +116,31 @@ jobs:
           python3 --version
           df -h
 
-      - name: Restore Bazel caches
-        uses: actions/cache@v4
+      - name: Locate Bazel repository cache
+        id: bazel-paths
+        run: |
+          # Only the Bazel repository cache is saved. It holds files downloaded from URLs with checksums,
+          # never the generated build configuration. The Bazel disk cache is not saved, because compiled
+          # outputs contain TELEGRAM_API_ID and TELEGRAM_API_HASH.
+          # The location depends on the Bazel output root, so the known macOS and Linux locations are listed.
+          user="$(id -un)"
+          {
+            echo 'paths<<BAZEL_PATHS_EOF'
+            echo "/private/var/tmp/_bazel_${user}/cache/repos/v1"
+            echo "$HOME/Library/Caches/bazel/_bazel_${user}/cache/repos/v1"
+            echo "$HOME/.cache/bazel/_bazel_${user}/cache/repos/v1"
+            echo 'BAZEL_PATHS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore Bazel repository cache
+        id: bazel-restore
+        continue-on-error: true
+        uses: actions/cache/restore@v4
         with:
-          path: |
-            ~/telegram-bazel-cache
-            ~/.cache/bazel
-          key: bazel-ios-${{ runner.os }}-${{ runner.arch }}-xcode-${{ steps.meta.outputs.xcode }}-bazel-${{ steps.meta.outputs.bazel }}-${{ hashFiles('versions.json', 'MODULE.bazel', 'MODULE.bazel.lock') }}
+          path: ${{ steps.bazel-paths.outputs.paths }}
+          key: bazel-repo-ios-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'WORKSPACE') }}
           restore-keys: |
-            bazel-ios-${{ runner.os }}-${{ runner.arch }}-xcode-${{ steps.meta.outputs.xcode }}-bazel-${{ steps.meta.outputs.bazel }}-
+            bazel-repo-ios-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Prepare temporary build configuration
         env:
@@ -166,6 +182,25 @@ jobs:
             --disableExtensions \
             --configuration=release_arm64 \
             --buildNumber="${{ steps.meta.outputs.build_number }}" 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      - name: Report Bazel repository cache
+        if: always()
+        env:
+          CACHE_PATHS: ${{ steps.bazel-paths.outputs.paths }}
+        run: |
+          while IFS= read -r dir; do
+            if [ -n "$dir" ] && [ -d "$dir" ]; then
+              echo "Bazel repository cache: $(du -sh "$dir" | cut -f1) at $dir"
+            fi
+          done <<< "$CACHE_PATHS"
+
+      - name: Save Bazel repository cache
+        if: always() && steps.bazel-restore.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.bazel-paths.outputs.paths }}
+          key: bazel-repo-ios-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'WORKSPACE') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Cleanup temporary configuration
         if: always()
