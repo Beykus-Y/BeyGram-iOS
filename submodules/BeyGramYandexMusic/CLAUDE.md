@@ -19,7 +19,8 @@ Off by default: needs the `yandexMusic` flag, a configured OAuth pair, and the a
   `setDisliked`, `playlists`, `likedPlaylists`, `playlistTracks`, `playlistByUuid`, `likedAlbums`, `album`, `lyrics`
   (`BGYandexLyrics`, kept 10 minutes when found, 1 minute when it failed), `localFile` (the resolver), and
   `makeWave(seeds:)`, which returns a `BGYandexWaveSession` (`first`, `more`, `sendFeedback`, `feedbackEvent(for:)`,
-  `likeFeedback`, `givenIds`, `restore`). `BGYandexListenTracker` turns player states into radio listening events.
+  `likeFeedback`, `givenIds`, `restore`). `BGYandexListenTracker` turns player states into radio listening events. `BGYandexLink.target(from:)` gives what a Yandex
+  Music address opens natively (album, track, track in album, playlist); any other address stays a web link.
 - Radio: calls run one at a time; the queue hint is the last 50 tracks; two empty batches in a row stop a request for now;
   a session the service forgets or ends is replaced by a new one with the same seeds. The seed `user:onyourwave` is the one
   verified against the service. The diversity seeds and the `track:`, `artist:`, `album:` and `playlist:` formats are

@@ -261,4 +261,39 @@ final class BGYandexTests: XCTestCase {
         XCTAssertTrue(tracker.closed)
         XCTAssertEqual(tracker.onState(snapshot("ym:2", position: 20_000, duration: 180_000)), [])
     }
+
+    // MARK: Yandex Music links
+
+    func testAlbumAndTrackLinksOpenNatively() {
+        XCTAssertEqual(BGYandexLink.target(from: "https://music.yandex.ru/album/12345"), .album(albumId: "12345"))
+        XCTAssertEqual(BGYandexLink.target(from: "https://music.yandex.ru/album/12345/track/67890"),
+                       .track(trackId: "67890", albumId: "12345"))
+        XCTAssertEqual(BGYandexLink.target(from: "music.yandex.ru/track/67890?utm_source=share#x"),
+                       .track(trackId: "67890", albumId: nil))
+    }
+
+    func testLinkHostsAndSchemeAreCheckedLikeAndroid() {
+        XCTAssertEqual(BGYandexLink.target(from: "  https://WWW.Music.Yandex.KZ/track/1  "), .track(trackId: "1", albumId: nil))
+        XCTAssertEqual(BGYandexLink.target(from: "http://music.yandex.uz/album/2"), .album(albumId: "2"))
+        XCTAssertNil(BGYandexLink.target(from: "ftp://music.yandex.ru/track/1"))
+        XCTAssertNil(BGYandexLink.target(from: "https://example.com/track/1"))
+        XCTAssertNil(BGYandexLink.target(from: "https://user@music.yandex.ru/track/1"))
+    }
+
+    func testPlaylistUuidKeepsItsPrefixAndLowercasesTheRest() {
+        XCTAssertEqual(BGYandexLink.target(from: "https://music.yandex.ru/playlists/LK.AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"),
+                       .playlist(uuid: "lk.aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"))
+        XCTAssertEqual(BGYandexLink.target(from: "https://music.yandex.ru/playlists/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee#share"),
+                       .playlist(uuid: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"))
+        XCTAssertNil(BGYandexLink.target(from: "https://music.yandex.ru/playlists/lk.lk.aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"))
+    }
+
+    func testUnsupportedAddressesStayInTheBrowser() {
+        XCTAssertNil(BGYandexLink.target(from: ""))
+        XCTAssertNil(BGYandexLink.target(from: "https://music.yandex.ru/artist/123"))
+        XCTAssertNil(BGYandexLink.target(from: "https://music.yandex.ru/users/someone/playlists/3"))
+        XCTAssertNil(BGYandexLink.target(from: "https://music.yandex.ru/track/abc"))
+        XCTAssertNil(BGYandexLink.target(from: "https://music.yandex.ru/track/123456789012345678901"))
+        XCTAssertNil(BGYandexLink.target(from: "https://music.yandex.ru/album/1/track/"))
+    }
 }
