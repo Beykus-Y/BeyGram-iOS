@@ -5,14 +5,14 @@
 // Written by BeyGramSettings (BeyGramKit) as "beygram.feature." + BeyGramFeature.musicLibrary.rawValue.
 static NSString *const BGMixFeatureKey = @"beygram.feature.musicLibrary";
 
-@interface BGMixViewController () <UIDocumentPickerDelegate, UITableViewDataSource>
+@interface BGMixViewController () <UIDocumentPickerDelegate, UITableViewDataSource, BGMixPlayerObserver>
+// The app's shared player. The screen observes it and never stops it: leaving the screen does not stop the mix.
 @property (nonatomic, strong) BGMixPlayer *player;
-@property (nonatomic, strong) NSMutableArray<NSDictionary *> *tracks; // {id: NSNumber, name: NSString}
+// The latest state the player published while the screen was on screen. Nil before the first one.
+@property (nonatomic, strong, nullable) BGMixSnapshot *latestSnapshot;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UIToolbar *toolbar;
 @property (nonatomic, strong) UIBarButtonItem *playButton;
-@property (nonatomic, strong) NSURL *mixDirectory;
-@property (nonatomic) BOOL playing;
 @end
 
 BOOL BGMixFeatureEnabled(void) {
@@ -23,6 +23,18 @@ BOOL BGMixFeatureEnabled(void) {
     return [defaults boolForKey:BGMixFeatureKey];
 }
 
+static NSString *BGMixTitleForTrackState(BGMixTrackState state) {
+    switch (state) {
+        case BGMixTrackStatePending: return @"waiting";
+        case BGMixTrackStatePreparing: return @"preparing";
+        case BGMixTrackStateReady: return @"ready";
+        case BGMixTrackStatePlaying: return @"playing";
+        case BGMixTrackStatePlayed: return @"played";
+        case BGMixTrackStateFailed: return @"failed";
+    }
+    return @"";
+}
+
 @implementation BGMixViewController
 
 - (instancetype)init {
@@ -31,18 +43,24 @@ BOOL BGMixFeatureEnabled(void) {
         return nil;
     }
     self.title = @"BG Mix";
-    self.tracks = [NSMutableArray array];
-
-    NSArray<NSURL *> *docs = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask];
-    self.mixDirectory = [docs.firstObject URLByAppendingPathComponent:@"bgmix" isDirectory:YES];
-    NSURL *cacheDir = [self.mixDirectory URLByAppendingPathComponent:@"cache" isDirectory:YES];
-    [[NSFileManager defaultManager] createDirectoryAtURL:cacheDir withIntermediateDirectories:YES attributes:nil error:nil];
-    self.player = [[BGMixPlayer alloc] initWithCacheDirectory:cacheDir.path];
+    self.player = [BGMixPlayer sharedPlayer];
     return self;
 }
 
 - (void)dealloc {
-    [self.player invalidate];
+    [self.player removeObserver:self];
+}
+
+// The screen listens only while it is on screen. The player belongs to the app, so leaving the screen
+// does not stop the mix.
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self.player addObserver:self];
+}
+
+- (void)viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];
+    [self.player removeObserver:self];
 }
 
 // The screen is hosted inside a Telegram ViewController, which has its own navigation bar.
@@ -88,38 +106,30 @@ BOOL BGMixFeatureEnabled(void) {
     [self presentViewController:picker animated:YES completion:nil];
 }
 
-// Copies each picked file into the app's own folder, then queues the copy.
+// Copies each picked file into the app's own folder, then queues the copy. The queue itself comes back
+// through the observer.
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    NSURL *mixDirectory = [BGMixPlayer mixDirectory];
     NSFileManager *fm = NSFileManager.defaultManager;
-    [fm createDirectoryAtURL:self.mixDirectory withIntermediateDirectories:YES attributes:nil error:nil];
     for (NSURL *source in urls) {
         BOOL scoped = [source startAccessingSecurityScopedResource];
-        NSURL *target = [self.mixDirectory URLByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@", NSUUID.UUID.UUIDString, source.lastPathComponent]];
+        NSURL *target = [mixDirectory URLByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@", NSUUID.UUID.UUIDString, source.lastPathComponent]];
         NSError *error = nil;
         BOOL copied = [fm copyItemAtURL:source toURL:target error:&error];
         if (scoped) {
             [source stopAccessingSecurityScopedResource];
         }
-        if (!copied) {
-            continue;
-        }
-        uint64_t identifier = [self.player addTrackAtURL:target];
-        if (identifier != 0) {
-            [self.tracks addObject:@{@"id": @(identifier), @"name": source.lastPathComponent}];
+        if (copied) {
+            [self.player addTrackAtURL:target];
         }
     }
-    [self.tableView reloadData];
 }
 
 - (void)playTapped {
-    if (self.playing) {
+    if (self.latestSnapshot.transport == BGMixTransportPlaying) {
         [self.player pause];
-        self.playing = NO;
-        self.playButton.title = @"Play";
     } else {
         [self.player play];
-        self.playing = YES;
-        self.playButton.title = @"Pause";
     }
 }
 
@@ -130,14 +140,24 @@ BOOL BGMixFeatureEnabled(void) {
 - (void)clearTapped {
     [self.player stopAll];
     [self.player clearQueue];
-    [self.tracks removeAllObjects];
-    self.playing = NO;
-    self.playButton.title = @"Play";
-    [self.tableView reloadData];
 }
 
+#pragma mark - BGMixPlayerObserver
+
+- (void)mixPlayer:(BGMixPlayer *)player didUpdateSnapshot:(BGMixSnapshot *)snapshot {
+    // Rows are reloaded only when the queue changed, not on every transport update.
+    const BOOL queueChanged = ![self.latestSnapshot.queue isEqualToArray:snapshot.queue];
+    self.latestSnapshot = snapshot;
+    self.playButton.title = snapshot.transport == BGMixTransportPlaying ? @"Pause" : @"Play";
+    if (queueChanged) {
+        [self.tableView reloadData];
+    }
+}
+
+#pragma mark - UITableViewDataSource
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return (NSInteger)self.tracks.count;
+    return (NSInteger)self.latestSnapshot.queue.count;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -145,7 +165,8 @@ BOOL BGMixFeatureEnabled(void) {
     if (cell == nil) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"track"];
     }
-    cell.textLabel.text = self.tracks[(NSUInteger)indexPath.row][@"name"];
+    BGMixTrack *track = self.latestSnapshot.queue[(NSUInteger)indexPath.row];
+    cell.textLabel.text = [NSString stringWithFormat:@"%@ (%@)", track.name, BGMixTitleForTrackState(track.state)];
     return cell;
 }
 

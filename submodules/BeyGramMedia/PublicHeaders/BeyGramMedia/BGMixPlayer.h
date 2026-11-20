@@ -54,7 +54,7 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 @property (nonatomic, readonly) BOOL preparingNext;
 // The queue in the order the tracks were added.
 @property (nonatomic, readonly, copy) NSArray<BGMixTrack *> *queue;
-// The engine's last error, or nil.
+// The engine's last error, or the system's last refusal to start audio, or nil.
 @property (nonatomic, readonly, nullable, copy) NSString *lastError;
 @end
 
@@ -68,6 +68,13 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 // All methods and all observer callbacks run on the main thread. The contract is in
 // docs/bg-mix-player-api.md.
 @interface BGMixPlayer : NSObject
+
+// The app's player. It belongs to the app, not to the BG Mix screen, so closing the screen does not stop
+// the mix. Created on first use.
++ (BGMixPlayer *)sharedPlayer;
+
+// Documents/bgmix: the queued copies and the analysis caches. Created on first use.
++ (NSURL *)mixDirectory;
 
 // cacheDirectory: app-private folder for analysis (.bgm) and feature (.bgf) caches.
 - (instancetype)initWithCacheDirectory:(NSString *)cacheDirectory;
@@ -101,6 +108,7 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 - (void)removeObserver:(id<BGMixPlayerObserver>)observer;
 
 // Stops the audio engine and the update loop, and drops the observers. Call before releasing the player.
+// The shared player is not invalidated in normal use.
 - (void)invalidate;
 
 @end
