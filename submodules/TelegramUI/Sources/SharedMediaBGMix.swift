@@ -6,6 +6,7 @@ import UniversalMediaPlayer
 import TelegramAudio
 import AccountContext
 import BeyGramMedia
+import BeyGramYandexMusic
 
 /// BG Mix as the engine of the `.music` playlist in `SharedMediaPlayer`.
 ///
@@ -427,9 +428,25 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
         return true
     }
 
-    /// A file BG Mix can read: an app-private copy of the Telegram audio, made once. The copy is downloaded first
-    /// if the file is not on disk yet.
+    /// A file BG Mix can read, or nil for a track that cannot be played (BG Mix then skips it). A Yandex track gives the
+    /// file its service keeps in the app's folder. A Telegram audio file gives an app-private copy, made once; it is
+    /// downloaded first if it is not on disk yet.
     private func fileURL(for item: SharedMediaPlaylistItem) -> Signal<URL?, NoError> {
+        if let playbackData = item.playbackData, case let .yandexTrack(rowKey) = playbackData.source {
+            // Emits once: the file when it is on disk, or nil when the track cannot be played. Nothing is emitted while it downloads.
+            return Signal<URL?, NoError> { subscriber in
+                BGYandexRuntime.shared.playableFile(rowKey: rowKey) { result in
+                    switch result {
+                    case let .success(url):
+                        subscriber.putNext(url)
+                    case .failure:
+                        subscriber.putNext(nil)
+                    }
+                    subscriber.putCompletion()
+                }
+                return EmptyDisposable
+            }
+        }
         guard let playbackData = item.playbackData, case let .telegramFile(reference, _, _) = playbackData.source else {
             return .single(nil)
         }
