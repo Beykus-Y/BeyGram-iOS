@@ -755,7 +755,7 @@ public extension EngineGlobalNotificationSettings {
 extension EnginePeer.Id {
     /// Whether this id names a secret chat. Lets modules outside TelegramCore tell secret chats apart
     /// without Postbox's namespace constants.
-    public var isSecretChat: Bool {
+    public var isSecretChatNamespace: Bool {
         return self.namespace == Namespaces.Peer.SecretChat
     }
 }
