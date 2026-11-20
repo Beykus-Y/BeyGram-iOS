@@ -95,6 +95,21 @@ cc_test(
     deps = [":BGMediaPcmLimits"],
 )
 
+# Pure mapping from the MixSession snapshot to the player's published state. Host test as above.
+cc_library(
+    name = "BGMediaMixState",
+    hdrs = ["Sources/BGMediaMixState.hpp"],
+    deps = [":BGMediaCore"],
+    visibility = ["//visibility:private"],
+)
+
+cc_test(
+    name = "BGMediaMixStateTests",
+    srcs = ["Tests/BGMediaMixStateTests.cpp"],
+    copts = ["-std=c++20"],
+    deps = [":BGMediaMixState"],
+)
+
 objc_library(
     name = "BeyGramMedia",
     enable_modules = True,
