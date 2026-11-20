@@ -296,4 +296,25 @@ final class BGYandexTests: XCTestCase {
         XCTAssertNil(BGYandexLink.target(from: "https://music.yandex.ru/track/123456789012345678901"))
         XCTAssertNil(BGYandexLink.target(from: "https://music.yandex.ru/album/1/track/"))
     }
+
+    // MARK: Yandex playback
+
+    func testRowKeyGivesTrackIdOnlyForYandexRows() {
+        XCTAssertEqual(BGYandexPlayback.trackId(rowKey: "ym:12345"), "12345")
+        XCTAssertEqual(BGYandexPlayback.trackId(rowKey: "ym:12345:678"), "12345")
+        XCTAssertNil(BGYandexPlayback.trackId(rowKey: "tg:12345"))
+        XCTAssertNil(BGYandexPlayback.trackId(rowKey: "ym:abc"))
+        XCTAssertNil(BGYandexPlayback.trackId(rowKey: "ym:12345:x"))
+        XCTAssertNil(BGYandexPlayback.trackId(rowKey: "ym:1:2:3"))
+        XCTAssertNil(BGYandexPlayback.trackId(rowKey: "ym:"))
+    }
+
+    func testServiceErrorsMapToPlayerErrors() {
+        XCTAssertEqual(BGYandexPlayback.error(for: .sessionExpired), .notSignedIn)
+        XCTAssertEqual(BGYandexPlayback.error(for: .subscriptionRequired), .subscriptionRequired)
+        XCTAssertEqual(BGYandexPlayback.error(for: .rateLimited), .rateLimited)
+        XCTAssertEqual(BGYandexPlayback.error(for: .network), .network)
+        XCTAssertEqual(BGYandexPlayback.error(for: .notFound), .unavailable)
+        XCTAssertEqual(BGYandexPlayback.error(for: .unknown), .unavailable)
+    }
 }
