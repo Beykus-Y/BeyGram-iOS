@@ -8,7 +8,7 @@ final class BeyGramStealthTests: XCTestCase {
         XCTAssertTrue(settings.allows(.readHistory, chatPeerId: 1))
         XCTAssertTrue(settings.allows(.typing, chatPeerId: 1))
         XCTAssertTrue(settings.allows(.onlinePresence, chatPeerId: nil))
-        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, isSchedulable: true, nowSeconds: 1000), .unchanged)
+        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: nil, nowSeconds: 1000), .unchanged)
     }
 
     func testAccountSwitchesHideOnlyTheirEffect() {
@@ -37,22 +37,33 @@ final class BeyGramStealthTests: XCTestCase {
 
     func testScheduledSendLeadsFromNow() {
         let settings = BeyGramStealthSettings(serverScheduledSend: true, scheduledSendDelaySeconds: 30)
-        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, isSchedulable: true, nowSeconds: 1000), .scheduled(1030))
+        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: nil, nowSeconds: 1000), .scheduled(1030))
     }
 
     func testDateChosenByTheUserIsLeftAlone() {
         let settings = BeyGramStealthSettings(serverScheduledSend: true, scheduledSendDelaySeconds: 30)
-        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: 5000, isSchedulable: false, nowSeconds: 1000), .unchanged)
+        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: 5000, unschedulableReason: .secretChat, nowSeconds: 1000), .unchanged)
     }
 
-    func testUnschedulableSendIsRefusedNotSentAtOnce() {
+    func testSecretChatIsRefusedAndNamesItsReason() {
         let settings = BeyGramStealthSettings(serverScheduledSend: true, scheduledSendDelaySeconds: 30)
-        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, isSchedulable: false, nowSeconds: 1000), .refused)
+        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: .secretChat, nowSeconds: 1000), .refused(.secretChat))
     }
 
-    func testShortLeadIsRefused() {
+    func testPaidMessageIsRefusedAndNamesItsReason() {
+        let settings = BeyGramStealthSettings(serverScheduledSend: true, scheduledSendDelaySeconds: 30)
+        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: .paidStars, nowSeconds: 1000), .refused(.paidStars))
+    }
+
+    func testShortLeadIsRefusedAndNamesItsReason() {
         let settings = BeyGramStealthSettings(serverScheduledSend: true, scheduledSendDelaySeconds: 10)
-        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, isSchedulable: true, nowSeconds: 1000), .refused)
+        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: nil, nowSeconds: 1000), .refused(.leadTooShort))
+    }
+
+    func testEveryRefusalHasItsOwnLocalizationKey() {
+        let keys = BeyGramStealthRefusal.allCases.map { $0.localizationKey }
+        XCTAssertEqual(Set(keys).count, BeyGramStealthRefusal.allCases.count)
+        XCTAssertTrue(keys.allSatisfy { $0.hasPrefix("BeyGram.Stealth.Refusal.") })
     }
 
     func testSettingsSurviveEncoding() throws {
@@ -60,5 +71,74 @@ final class BeyGramStealthTests: XCTestCase {
         let data = try JSONEncoder().encode(settings)
         let decoded = try JSONDecoder().decode(BeyGramStealthSettings.self, from: data)
         XCTAssertEqual(decoded, settings)
+    }
+
+    private func temporaryDefaults() throws -> (defaults: UserDefaults, suite: String) {
+        let suite = "BeyGramStealthTests.\(UUID().uuidString)"
+        return (try XCTUnwrap(UserDefaults(suiteName: suite)), suite)
+    }
+
+    func testScheduleTimeNeverLeadsLessThanTheMinimum() {
+        XCTAssertEqual(beyGramStealthScheduleTime(nowSeconds: 1000, delaySeconds: 5), 1000 + BeyGramStealthSettings.minimumServerLeadSeconds)
+        XCTAssertEqual(beyGramStealthScheduleTime(nowSeconds: 1000, delaySeconds: 60), 1060)
+    }
+
+    func testScheduleRegistryKeepsEachAccountsEntriesAcrossARestart() throws {
+        let (defaults, suite) = try temporaryDefaults()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        BeyGramStealthScheduleRegistry(defaults: defaults).register(accountPeerId: 1, messageKey: "a", delaySeconds: 60, scheduleTime: 1060, nowSeconds: 1000)
+        let restarted = BeyGramStealthScheduleRegistry(defaults: defaults)
+        XCTAssertEqual(restarted.scheduledSend(accountPeerId: 1, messageKey: "a"), BeyGramStealthScheduledSend(delaySeconds: 60, scheduleTime: 1060, registeredAt: 1000))
+        XCTAssertNil(restarted.scheduledSend(accountPeerId: 2, messageKey: "a"))
+        XCTAssertNil(restarted.scheduledSend(accountPeerId: 1, messageKey: "b"))
+    }
+
+    func testScheduleRegistryHoldsTheDateItWasRewrittenWith() throws {
+        let (defaults, suite) = try temporaryDefaults()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        let registry = BeyGramStealthScheduleRegistry(defaults: defaults)
+        registry.register(accountPeerId: 1, messageKey: "a", delaySeconds: 60, scheduleTime: 1060, nowSeconds: 1000)
+        registry.register(accountPeerId: 1, messageKey: "a", delaySeconds: 60, scheduleTime: 1100, nowSeconds: 1040)
+        XCTAssertEqual(registry.scheduledSend(accountPeerId: 1, messageKey: "a"), BeyGramStealthScheduledSend(delaySeconds: 60, scheduleTime: 1100, registeredAt: 1040))
+    }
+
+    func testScheduleRegistryDropsEntriesOlderThanTheRetention() throws {
+        let (defaults, suite) = try temporaryDefaults()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        let registry = BeyGramStealthScheduleRegistry(defaults: defaults)
+        let later = 1000 + BeyGramStealthScheduleRegistry.retentionSeconds + 1
+        registry.register(accountPeerId: 1, messageKey: "old", delaySeconds: 30, scheduleTime: 1030, nowSeconds: 1000)
+        registry.register(accountPeerId: 1, messageKey: "new", delaySeconds: 30, scheduleTime: later + 30, nowSeconds: later)
+        XCTAssertNil(registry.scheduledSend(accountPeerId: 1, messageKey: "old"))
+        XCTAssertNotNil(registry.scheduledSend(accountPeerId: 1, messageKey: "new"))
+    }
+
+    func testRefusalRegistryKeepsEachAccountsReasonsAcrossARestart() throws {
+        let (defaults, suite) = try temporaryDefaults()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        BeyGramStealthRefusalRegistry(defaults: defaults).record(accountPeerId: 1, messageKey: "a", refusal: .paidStars, nowSeconds: 1000)
+        let restarted = BeyGramStealthRefusalRegistry(defaults: defaults)
+        XCTAssertEqual(restarted.refusal(accountPeerId: 1, messageKey: "a"), BeyGramStealthRefusal.paidStars)
+        XCTAssertNil(restarted.refusal(accountPeerId: 2, messageKey: "a"))
+        XCTAssertNil(restarted.refusal(accountPeerId: 1, messageKey: "b"))
+    }
+
+    func testRefusalRegistryKeepsTheLatestReason() throws {
+        let (defaults, suite) = try temporaryDefaults()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        let registry = BeyGramStealthRefusalRegistry(defaults: defaults)
+        registry.record(accountPeerId: 1, messageKey: "a", refusal: .paidStars, nowSeconds: 1000)
+        registry.record(accountPeerId: 1, messageKey: "a", refusal: .notRecorded, nowSeconds: 1010)
+        XCTAssertEqual(registry.refusal(accountPeerId: 1, messageKey: "a"), BeyGramStealthRefusal.notRecorded)
     }
 }
