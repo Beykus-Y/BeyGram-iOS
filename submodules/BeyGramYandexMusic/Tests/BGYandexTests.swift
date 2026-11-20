@@ -84,6 +84,25 @@ final class BGYandexTests: XCTestCase {
         XCTAssertEqual(BGYandexAPI.parseAccount(root), BGYandexAccount(uid: "42", displayName: "user", hasPlus: true))
     }
 
+    func testRefreshRequestUsesRefreshGrant() {
+        let request = BGYandexTokenRefresh.request(refreshToken: "r+1", credentials: credentials)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(String(decoding: request.httpBody ?? Data(), as: UTF8.self),
+                       "grant_type=refresh_token&refresh_token=r%2B1&client_id=id&client_secret=secret")
+    }
+
+    func testRefreshOutcomes() {
+        XCTAssertEqual(BGYandexTokenRefresh.outcome(statusCode: 200, body: Data(#"{"access_token":"t","expires_in":3600}"#.utf8)),
+                       .tokens(BGYandexTokens(accessToken: "t", refreshToken: nil, expiresIn: 3600)))
+        XCTAssertEqual(BGYandexTokenRefresh.outcome(statusCode: 200, body: Data(#"{"access_token":"t","refresh_token":"n","expires_in":60}"#.utf8)),
+                       .tokens(BGYandexTokens(accessToken: "t", refreshToken: "n", expiresIn: 60)))
+        XCTAssertEqual(BGYandexTokenRefresh.outcome(statusCode: 400, body: Data(#"{"error":"invalid_grant"}"#.utf8)), .sessionExpired)
+        XCTAssertEqual(BGYandexTokenRefresh.outcome(statusCode: 403, body: nil), .sessionExpired)
+        XCTAssertEqual(BGYandexTokenRefresh.outcome(statusCode: 500, body: Data()), .unavailable)
+        XCTAssertEqual(BGYandexTokenRefresh.outcome(statusCode: 200, body: Data(#"{"expires_in":3600}"#.utf8)), .unavailable)
+        XCTAssertEqual(BGYandexTokenRefresh.outcome(statusCode: nil, body: nil), .unavailable)
+    }
+
     func testFileNameIsSafe() {
         XCTAssertEqual(BGYandexTrackResolver.fileName(trackId: "../12/3"), "ym-123.mp3")
     }

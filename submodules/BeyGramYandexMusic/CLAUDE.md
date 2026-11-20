@@ -9,5 +9,8 @@ Off by default: needs the `yandexMusic` flag, a configured OAuth pair, and the a
   ignores system proxies, because Android sends Yandex requests directly.
 - Track rows use `ym:<trackId>[:<albumId>]` (`BGMusicTrackKey`). A row holds no file until it is played; the signed link is
   requested each time and never stored. Files live in `Application Support/beygram/yandex`.
-- Tokens are in the Keychain (`BGYandexTokenStore`). Refresh is not implemented: an expired token means signing in again.
+- Tokens are in the Keychain (`BGYandexTokenStore`). `BGYandexService.accessToken(completion:)` refreshes five minutes
+  before expiry (`grant_type=refresh_token`, as `YandexAuth.refresh` on Android), one request at a time, and keeps the old
+  refresh token when the answer omits one. HTTP 400 to 403 clears the tokens (sign in again); no answer or a server error
+  keeps them. Sign-in and sign-out bump a session generation, so a refresh started before them cannot write tokens back.
 - Not implemented: likes, playlists, waves, lyrics. Not verified against the live service: nothing here has been run.
