@@ -100,7 +100,15 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 - (void)addObserver:(id<BGMixPlayerObserver>)observer;
 - (void)removeObserver:(id<BGMixPlayerObserver>)observer;
 
-// Stops the audio engine and the update loop, and drops the observers. Call before releasing the player.
+// Host tap for BG Wave. `tap` is a `bgmedia::IPcmOutputTap *`, passed as an opaque pointer so that this
+// header stays plain Objective-C. The realtime render thread calls its onPcmRendered after each rendered
+// chunk (up to 4096 frames): interleaved stereo float at 48 kHz, no allocation. Pass NULL to detach. The
+// call returns only after the render thread has left any call into the previous tap, so the owner may
+// destroy that tap afterwards. Main thread only.
+- (void)setPcmTap:(nullable void *)tap;
+
+// Stops the audio engine and the update loop, detaches the host tap, and drops the observers. Call before
+// releasing the player.
 - (void)invalidate;
 
 @end
