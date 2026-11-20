@@ -1,5 +1,4 @@
 import Foundation
-import Postbox
 import SwiftSignalKit
 import TelegramCore
 import AccountContext
@@ -35,20 +34,20 @@ private func firstValue<T>(_ signal: Signal<T, NoError>) async -> T {
     }
 }
 
-private func senderName(_ peer: Peer?) -> String {
-    if let user = peer as? TelegramUser {
+private func senderName(_ peer: EnginePeer?) -> String {
+    switch peer {
+    case let .user(user)?:
         return [user.firstName, user.lastName].compactMap { $0 }.joined(separator: " ")
-    }
-    if let channel = peer as? TelegramChannel {
+    case let .channel(channel)?:
         return channel.title
-    }
-    if let group = peer as? TelegramGroup {
+    case let .legacyGroup(group)?:
         return group.title
+    default:
+        return ""
     }
-    return ""
 }
 
-func chatExportMessage(_ message: Message) -> ChatExportMessage {
+func chatExportMessage(_ message: EngineMessage) -> ChatExportMessage {
     var isEdited = false
     var replyTo: Int64?
     for attribute in message.attributes {
@@ -59,11 +58,17 @@ func chatExportMessage(_ message: Message) -> ChatExportMessage {
         }
     }
     var mediaKind: String?
-    for media in message.media {
-        if media is TelegramMediaImage {
+    var isService = false
+    for media in message.engineMedia {
+        switch media {
+        case .image:
             mediaKind = "photo"
-        } else if media is TelegramMediaFile {
+        case .file:
             mediaKind = "file"
+        case .action:
+            isService = true
+        default:
+            break
         }
     }
     return ChatExportMessage(
@@ -71,7 +76,7 @@ func chatExportMessage(_ message: Message) -> ChatExportMessage {
         date: Date(timeIntervalSince1970: TimeInterval(message.timestamp)),
         senderName: senderName(message.author),
         text: message.text,
-        isService: message.media.contains { $0 is TelegramMediaAction },
+        isService: isService,
         isEdited: isEdited,
         replyToMessageId: replyTo,
         mediaKind: mediaKind,
@@ -84,7 +89,7 @@ func chatExportMessage(_ message: Message) -> ChatExportMessage {
 /// Cancelling the calling task stops the export and runs `cleanup`.
 public func runChatExport(
     context: AccountContext,
-    peerId: PeerId,
+    peerId: EnginePeer.Id,
     chatTitle: String,
     accountLabel: String,
     hasProtectedContent: Bool,
@@ -94,7 +99,7 @@ public func runChatExport(
     cleanup: @escaping () -> Void,
     onProgress: @escaping (ChatExportProgress) -> Void
 ) async throws -> ChatExportSummary {
-    try ChatExportWriter.checkTarget(isSecretChat: peerId.namespace == Namespaces.Peer.SecretChat, hasProtectedContent: hasProtectedContent)
+    try ChatExportWriter.checkTarget(isSecretChat: peerId.isSecretChat, hasProtectedContent: hasProtectedContent)
 
     let writer = ChatExportWriter(
         format: format,
@@ -119,6 +124,6 @@ public func runChatExport(
         if result.completed || result.messages.isEmpty {
             isFinished = true
         }
-        return result.messages.map(chatExportMessage)
+        return result.messages.map { chatExportMessage(EngineMessage($0)) }
     }
 }
