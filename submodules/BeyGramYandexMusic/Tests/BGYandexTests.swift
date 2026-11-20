@@ -67,4 +67,24 @@ final class BGYandexTests: XCTestCase {
         XCTAssertEqual(BGYandexDeviceFlow.parseDeviceCode(body),
                        BGYandexDeviceCode(deviceCode: "dc", userCode: "UC", verificationUrl: "https://ya.ru/device", expiresIn: 300, interval: 5))
     }
+
+    func testDownloadInfoIsParsedAndSigned() {
+        let xml = "<?xml version=\"1.0\"?><download-info><host>s1.example</host><path>/get/track.mp3</path><ts>123</ts><s>abc</s></download-info>"
+        let info = BGYandexAPI.parseDownloadInfo(xml)
+        XCTAssertEqual(info, BGYandexAPI.DownloadInfo(host: "s1.example", path: "/get/track.mp3", ts: "123", s: "abc"))
+        XCTAssertEqual(BGYandexAPI.directLink(info!)?.absoluteString, "https://s1.example/get-mp3/397e3ab8dde222691699f60954c292a3/123/get/track.mp3")
+    }
+
+    func testDoctypeIsRefused() {
+        XCTAssertNil(BGYandexAPI.parseDownloadInfo("<!DOCTYPE x [<!ENTITY e \"y\">]><download-info><host>h</host><path>/p</path><ts>1</ts><s>s</s></download-info>"))
+    }
+
+    func testAccountParsesUidAndPlus() {
+        let root: [String: Any] = ["result": ["account": ["uid": 42, "login": "user"], "plus": ["has_plus": true]]]
+        XCTAssertEqual(BGYandexAPI.parseAccount(root), BGYandexAccount(uid: "42", displayName: "user", hasPlus: true))
+    }
+
+    func testFileNameIsSafe() {
+        XCTAssertEqual(BGYandexTrackResolver.fileName(trackId: "../12/3"), "ym-123.mp3")
+    }
 }

@@ -15,11 +15,13 @@ private final class BeyGramMusicArguments {
     let setEnabled: (BeyGramFeature, Bool) -> Void
     let openMix: () -> Void
     let openWave: () -> Void
+    let openYandex: () -> Void
 
-    init(setEnabled: @escaping (BeyGramFeature, Bool) -> Void, openMix: @escaping () -> Void, openWave: @escaping () -> Void) {
+    init(setEnabled: @escaping (BeyGramFeature, Bool) -> Void, openMix: @escaping () -> Void, openWave: @escaping () -> Void, openYandex: @escaping () -> Void) {
         self.setEnabled = setEnabled
         self.openMix = openMix
         self.openWave = openWave
+        self.openYandex = openYandex
     }
 }
 
@@ -34,13 +36,14 @@ private enum BeyGramMusicEntry: ItemListNodeEntry {
     case flag(BeyGramFeature, String, Bool)
     case openMix(String)
     case openWave(String)
+    case openYandex(String)
     case info(String)
 
     var section: ItemListSectionId {
         switch self {
         case .flagsHeader, .flag:
             return BeyGramMusicSection.flags.rawValue
-        case .openMix, .openWave:
+        case .openMix, .openWave, .openYandex:
             return BeyGramMusicSection.screens.rawValue
         case .info:
             return BeyGramMusicSection.info.rawValue
@@ -52,11 +55,17 @@ private enum BeyGramMusicEntry: ItemListNodeEntry {
         case .flagsHeader:
             return 0
         case let .flag(feature, _, _):
-            return feature == .musicLibrary ? 1 : 2
+            switch feature {
+            case .musicLibrary: return 1
+            case .yandexMusic: return 7
+            default: return 2
+            }
         case .openMix:
             return 3
         case .openWave:
             return 4
+        case .openYandex:
+            return 6
         case .info:
             return 5
         }
@@ -71,6 +80,8 @@ private enum BeyGramMusicEntry: ItemListNodeEntry {
         case let (.openMix(lhsText), .openMix(rhsText)):
             return lhsText == rhsText
         case let (.openWave(lhsText), .openWave(rhsText)):
+            return lhsText == rhsText
+        case let (.openYandex(lhsText), .openYandex(rhsText)):
             return lhsText == rhsText
         case let (.info(lhsText), .info(rhsText)):
             return lhsText == rhsText
@@ -100,6 +111,10 @@ private enum BeyGramMusicEntry: ItemListNodeEntry {
             return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: text, label: "", sectionId: self.section, style: .blocks, action: {
                 arguments.openWave()
             })
+        case let .openYandex(text):
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: text, label: "", sectionId: self.section, style: .blocks, action: {
+                arguments.openYandex()
+            })
         case let .info(text):
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         }
@@ -113,11 +128,15 @@ private func beyGramMusicEntries(presentationData: PresentationData) -> [BeyGram
     entries.append(.flagsHeader(languageCode == "ru" ? "Функции" : "Features"))
     entries.append(.flag(.musicLibrary, BeyGramFeature.musicLibrary.title(languageCode: languageCode), settings.isEnabled(.musicLibrary)))
     entries.append(.flag(.bgMedia, BeyGramFeature.bgMedia.title(languageCode: languageCode), settings.isEnabled(.bgMedia)))
+    entries.append(.flag(.yandexMusic, BeyGramFeature.yandexMusic.title(languageCode: languageCode), settings.isEnabled(.yandexMusic)))
     if settings.isEnabled(.musicLibrary) {
         entries.append(.openMix("BG Mix"))
     }
     if settings.isEnabled(.bgMedia) {
         entries.append(.openWave("BG Wave"))
+    }
+    if settings.isEnabled(.yandexMusic) {
+        entries.append(.openYandex(languageCode == "ru" ? "Яндекс Музыка" : "Yandex Music"))
     }
     entries.append(.info(languageCode == "ru"
         ? "Все функции выключены по умолчанию. BG Mix сводит локальные аудиофайлы с автоматическими переходами. BG Wave на iOS пока умеет только проверять ссылки-приглашения: совместное прослушивание ещё не реализовано."
@@ -139,6 +158,8 @@ public func beyGramMusicSettingsController(context: AccountContext) -> ViewContr
         pushControllerImpl?(BeyGramHostedViewController(title: "BG Mix", hosted: BGMixViewController()))
     }, openWave: {
         pushControllerImpl?(BeyGramHostedViewController(title: "BG Wave", hosted: BGWaveViewController()))
+    }, openYandex: {
+        pushControllerImpl?(beyGramYandexMusicController(context: context))
     })
 
     let signal = combineLatest(context.sharedContext.presentationData, refresh.get())

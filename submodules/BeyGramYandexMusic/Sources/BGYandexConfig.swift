@@ -11,6 +11,14 @@ public struct BGYandexCredentials: Equatable {
         self.clientSecret = clientSecret
     }
 
+    /// Reads the pair from the app's Info.plist keys `BGYandexClientId` and `BGYandexClientSecret`, which the build fills in
+    /// from a local secrets file. Nothing is committed. Missing keys give an unconfigured pair.
+    public static func fromBundle(_ bundle: Bundle = .main) -> BGYandexCredentials {
+        let id = bundle.object(forInfoDictionaryKey: "BGYandexClientId") as? String ?? ""
+        let secret = bundle.object(forInfoDictionaryKey: "BGYandexClientSecret") as? String ?? ""
+        return BGYandexCredentials(clientId: id, clientSecret: secret)
+    }
+
     public var isConfigured: Bool {
         return !clientId.trimmingCharacters(in: .whitespaces).isEmpty && !clientSecret.trimmingCharacters(in: .whitespaces).isEmpty
     }
@@ -27,4 +35,9 @@ public enum BGYandexConfig {
     public static let defaultRetryAfter: TimeInterval = 5
     /// Name shown to Yandex during device sign-in.
     public static let deviceName = "BeyGram"
+    /// Salt of the legacy download link signature (download-info XML). Public protocol constant, as on Android.
+    public static let downloadSignSalt = "XGRlBW9FXlekgbPrRHuSiA"
+    /// Timeouts, as on Android.
+    public static let connectTimeout: TimeInterval = 10
+    public static let readTimeout: TimeInterval = 15
 }
