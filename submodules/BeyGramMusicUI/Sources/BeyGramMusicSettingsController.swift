@@ -9,6 +9,7 @@ import AccountContext
 import BeyGramKit
 import BeyGramMedia
 import BeyGramMusicFormat
+import BeyGramYandexMusic
 
 private final class BeyGramMusicArguments {
     let setEnabled: (BeyGramFeature, Bool) -> Void
