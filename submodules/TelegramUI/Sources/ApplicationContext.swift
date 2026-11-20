@@ -324,7 +324,7 @@ final class AuthorizedApplicationContext {
                 return
             }
 
-            ingestTriggerWordsFromAccount(context: context, batches: messageList, isChatOpen: { [weak self] peerId in
+            ingestTriggerWordsFromAccount(context: context, batches: messageList.map { batch in batch.0.map { EngineMessage($0) } }, isChatOpen: { [weak self] peerId in
                 guard let controller = self?.rootController.topViewController as? ChatControllerImpl else {
                     return false
                 }
