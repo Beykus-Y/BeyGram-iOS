@@ -1,3 +1,6 @@
+// This file is part of BeyGram and is distributed under the GNU General Public License v3.0.
+// See submodules/BeyGramProxy/LICENSE and the NOTICE file at the repository root.
+
 package bridge
 
 import (

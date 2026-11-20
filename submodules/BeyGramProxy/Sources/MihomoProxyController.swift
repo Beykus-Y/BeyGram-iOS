@@ -1,3 +1,6 @@
+// This file is part of BeyGram and is distributed under the GNU General Public License v3.0.
+// See submodules/BeyGramProxy/LICENSE and the NOTICE file at the repository root.
+
 import Foundation
 
 public enum MihomoProxyError: Error, Equatable {
@@ -34,6 +37,13 @@ public final class MihomoProxyController {
     private let queue = DispatchQueue(label: "org.beygram.mihomo.controller")
     private let lock = NSLock()
     private var state: MihomoProxyState
+    /// The profile of the running core, kept in memory only: it holds the loopback password.
+    /// A restart of the core reuses it without fetching the subscription again.
+    private var profileYAML: String?
+    /// Bumped on every watchdog start and stop, so a tick scheduled earlier does nothing.
+    private var watchdogGeneration = 0
+    private static let watchdogIntervalSeconds = 20
+    private static let probeTimeoutMilliseconds = 5000
 
     public init(client: MihomoCoreClient, store: MihomoProxyStateStore, homeDirectory: URL) {
         self.client = client
@@ -101,12 +111,15 @@ public final class MihomoProxyController {
                         selected[MihomoProxyController.groupName] = node
                     }
                     try self.client.setup(config: profile.yaml, selected: selected)
+                    self.profileYAML = profile.yaml
                     self.update { state in
                         state.isRunning = true
                         state.serverNames = profile.serverNames
                     }
+                    self.startWatchdogIfEnabled()
                     self.deliver(.success(()), to: completion)
                 } catch {
+                    self.stopWatchdog()
                     self.update { $0.isRunning = false }
                     self.deliver(.failure(error), to: completion)
                 }
@@ -118,6 +131,8 @@ public final class MihomoProxyController {
     public func stop(completion: @escaping (Result<Void, Error>) -> Void) {
         queue.async {
             var result: Result<Void, Error> = .success(())
+            self.stopWatchdog()
+            self.profileYAML = nil
             do {
                 try self.client.stop()
             } catch {
@@ -143,6 +158,28 @@ public final class MihomoProxyController {
         }
     }
 
+    /// Called at app launch. When the core was running at the last exit, starts it again.
+    /// Telegram keeps pointing at the loopback inlet, so only the core needs to come back.
+    public func resumeIfNeeded(completion: @escaping (Result<Void, Error>) -> Void) {
+        guard currentState.isRunning, currentState.subscriptionSource != nil else {
+            deliver(.success(()), to: completion)
+            return
+        }
+        start(completion: completion)
+    }
+
+    /// Turns the automatic node switch on or off. It takes effect at once while the core runs.
+    public func setAutoSelect(_ enabled: Bool) {
+        queue.async {
+            self.update { $0.autoSelectEnabled = enabled }
+            if enabled && self.currentState.isRunning {
+                self.startWatchdogIfEnabled()
+            } else {
+                self.stopWatchdog()
+            }
+        }
+    }
+
     /// Measures every node of the group. Needs a running core. Returns node name to delay in ms (-1 when it failed).
     public func measureDelays(completion: @escaping (Result<[String: Int], Error>) -> Void) {
         queue.async {
@@ -161,6 +198,100 @@ public final class MihomoProxyController {
             } catch {
                 self.deliver(.failure(error), to: completion)
             }
+        }
+    }
+
+    // MARK: - Watchdog
+
+    /// Runs on `queue`. Starts the periodic check when the core runs and the automatic switch is on.
+    private func startWatchdogIfEnabled() {
+        stopWatchdog()
+        guard currentState.isRunning, currentState.autoSelectEnabled else {
+            return
+        }
+        scheduleWatchdogTick(generation: watchdogGeneration)
+    }
+
+    /// Runs on `queue`. Any tick already scheduled becomes a no-op.
+    private func stopWatchdog() {
+        watchdogGeneration += 1
+    }
+
+    private func scheduleWatchdogTick(generation: Int) {
+        queue.asyncAfter(deadline: .now() + .seconds(MihomoProxyController.watchdogIntervalSeconds)) {
+            self.watchdogTick(generation: generation)
+        }
+    }
+
+    /// Runs on `queue`. One check: if the core stops answering it is restarted; if the node in use
+    /// does not answer, the fastest node that does is selected. Then the next check is scheduled.
+    private func watchdogTick(generation: Int) {
+        guard generation == watchdogGeneration, currentState.isRunning, currentState.autoSelectEnabled else {
+            return
+        }
+        let group: MihomoGroupState
+        do {
+            group = try client.proxies(group: MihomoProxyController.groupName)
+        } catch {
+            restartCore()
+            scheduleNextTickIfActive(generation: generation)
+            return
+        }
+        // The delay stored in the group can be stale, so the node in use is probed directly.
+        let inUseDelay = (try? client.testDelay(proxy: group.now, timeoutMilliseconds: MihomoProxyController.probeTimeoutMilliseconds)) ?? -1
+        if inUseDelay <= 0 {
+            selectFastestNode(nodes: group.nodes.map { $0.name })
+        }
+        scheduleNextTickIfActive(generation: generation)
+    }
+
+    private func scheduleNextTickIfActive(generation: Int) {
+        if generation == watchdogGeneration {
+            scheduleWatchdogTick(generation: generation)
+        }
+    }
+
+    /// Runs on `queue`. Measures the nodes one by one and selects the fastest one that answers.
+    private func selectFastestNode(nodes: [String]) {
+        var bestName: String?
+        var bestDelay = Int.max
+        for name in nodes {
+            let delay = (try? client.testDelay(proxy: name, timeoutMilliseconds: MihomoProxyController.probeTimeoutMilliseconds)) ?? -1
+            if delay > 0 && delay < bestDelay {
+                bestDelay = delay
+                bestName = name
+            }
+        }
+        guard let fastest = bestName else {
+            return
+        }
+        do {
+            try client.select(group: MihomoProxyController.groupName, proxy: fastest)
+            update { $0.selectedNode = fastest }
+        } catch {
+            // The node in use stays. The next tick tries again.
+        }
+    }
+
+    /// Runs on `queue`. Restarts the core with the profile kept in memory, and the node the user chose.
+    private func restartCore() {
+        guard let yaml = profileYAML else {
+            stopWatchdog()
+            update { $0.isRunning = false }
+            return
+        }
+        _ = try? client.stop()
+        do {
+            try client.initialize(homeDirectory: homeDirectory.path)
+            var selected: [String: String] = [:]
+            if let node = currentState.selectedNode {
+                selected[MihomoProxyController.groupName] = node
+            }
+            try client.setup(config: yaml, selected: selected)
+        } catch {
+            stopWatchdog()
+            profileYAML = nil
+            update { $0.isRunning = false }
         }
     }
 

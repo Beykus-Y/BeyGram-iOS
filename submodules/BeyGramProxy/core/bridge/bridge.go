@@ -1,3 +1,6 @@
+// This file is part of BeyGram and is distributed under the GNU General Public License v3.0.
+// See submodules/BeyGramProxy/LICENSE and the NOTICE file at the repository root.
+
 // Package bridge runs Mihomo in-process behind one JSON request and one JSON reply.
 //
 // The action names and the reply envelope follow the libmihomo-android bridge

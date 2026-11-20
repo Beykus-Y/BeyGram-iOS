@@ -50,6 +50,16 @@ public final class BeyGramMihomoRuntime {
         })
     }
 
+    /// Called at app launch when the flag is on. Starts the core again if it was running at the last exit.
+    public func resumeIfNeeded() {
+        self.controller.resumeIfNeeded(completion: { _ in })
+    }
+
+    /// Turns the automatic node switch on or off.
+    public func setAutoSelect(_ enabled: Bool) {
+        self.controller.setAutoSelect(enabled)
+    }
+
     /// Stops the core, then gives Telegram back the proxy settings it had before the connect.
     public func disconnect(accountManager: AccountManager<TelegramAccountManagerTypes>, completion: @escaping (Result<Void, Error>) -> Void) {
         self.controller.stop { result in

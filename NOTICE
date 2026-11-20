@@ -1,0 +1,21 @@
+BeyGram-iOS: notices for third-party code and the Mihomo proxy module
+=====================================================================
+
+Telegram-derived code
+    The repository's LICENSE file (GNU GPL v2) covers the code inherited from Telegram-iOS.
+    The copyright notices in the Telegram sources are unchanged.
+
+BeyGramProxy (submodules/BeyGramProxy)
+    The module's own Swift and Go sources are distributed under the GNU General Public License
+    version 3, the full text of which is in submodules/BeyGramProxy/LICENSE.
+
+Mihomo core (submodules/BeyGramProxy/core)
+    Component: Mihomo (https://github.com/MetaCubeX/mihomo), version v1.19.32, GPL-3.0.
+    The Go module core/ imports Mihomo as a library. When the core is linked into the app, the
+    combined work is distributed under GPL-3.0.
+    Source of the exact version: https://github.com/MetaCubeX/mihomo/tree/v1.19.32
+
+Compatibility
+    The Telegram-derived code is offered under GPL-2.0-or-later, which allows the combined
+    distribution under GPL-3.0. This reading has not been reviewed by a lawyer. Whether the
+    combined build may be distributed is the owner's decision.
