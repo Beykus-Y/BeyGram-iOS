@@ -45,7 +45,7 @@ a secondary licence compatible with GPL-2.0 or later. Please confirm this readin
   a comment).
 - **Crypto.** One BoringSSL. No `OPENSSL_*` prefix or second TLS library.
 - **Opus.** `//third-party/opus:opus`, the same libopus that WebRTC's targets already depend on.
-- **usrsctp, libjuice, plog.** Not in WebRTC's Bazel build (WebRTC uses dcsctp), so no clash. libjuice uses its own
+- **usrsctp, libjuice, plog.** WebRTC's tree holds a usrsctp copy under `third-party/webrtc/dependencies/third_party/usrsctp`, which WebRTC's GN build uses. No Bazel BUILD file refers to that copy, so Bazel links only this one. The Bazel build of WebRTC uses dcsctp for SCTP. libjuice uses its own
   hash code (`USE_NETTLE=0`), so it needs no TLS library.
 
 ## App rules that follow from the shared libsrtp
