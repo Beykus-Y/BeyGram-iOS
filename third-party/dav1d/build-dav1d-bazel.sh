@@ -9,18 +9,27 @@ BUILD_DIR="$2"
 MESON_OPTIONS="--buildtype=release --default-library=static -Denable_tools=false -Denable_tests=false"
 CROSSFILE=""
 
+resolve_xcode_developer_dir() {
+    local dev_dir="${DEVELOPER_DIR:-$(xcode-select -p)}"
+    echo "${dev_dir%/}"
+}
+
 if [ "$ARCH" = "arm64" ]; then
-    CROSSFILE="../package/crossfiles/arm64-iPhoneOS.meson"
+    TARGET_CROSSFILE="$BUILD_DIR/dav1d/package/crossfiles/arm64-iPhoneOS-custom.meson"
+    cp "$BUILD_DIR/dav1d/package/crossfiles/arm64-iPhoneOS.meson" "$TARGET_CROSSFILE"
+    custom_xcode_path="$(resolve_xcode_developer_dir)/"
+    sed -i '' "s|/Applications/Xcode.app/Contents/Developer/|$custom_xcode_path|g" "$TARGET_CROSSFILE"
+    CROSSFILE="../package/crossfiles/arm64-iPhoneOS-custom.meson"
 elif [ "$ARCH" = "sim_arm64" ]; then
     rm -f "arm64-iPhoneSimulator-custom.meson"
     TARGET_CROSSFILE="$BUILD_DIR/dav1d/package/crossfiles/arm64-iPhoneSimulator-custom.meson"
     cp "$BUILD_DIR/arm64-iPhoneSimulator.meson" "$TARGET_CROSSFILE"
-    custom_xcode_path="$(xcode-select -p)/"
+    custom_xcode_path="$(resolve_xcode_developer_dir)/"
     sed -i '' "s|/Applications/Xcode.app/Contents/Developer/|$custom_xcode_path|g" "$TARGET_CROSSFILE"
     CROSSFILE="../package/crossfiles/arm64-iPhoneSimulator-custom.meson"
 elif [ "$ARCH" = "macos_arm64" ]; then
     TARGET_CROSSFILE="$BUILD_DIR/dav1d/package/crossfiles/arm64-MacOSX-custom.meson"
-    custom_xcode_path="$(xcode-select -p)"
+    custom_xcode_path="$(resolve_xcode_developer_dir)"
     MACOS_SYSROOT="$custom_xcode_path/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
     cat > "$TARGET_CROSSFILE" << MESONEOF
 [binaries]

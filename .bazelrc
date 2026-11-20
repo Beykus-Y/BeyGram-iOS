@@ -15,6 +15,8 @@ build:macos --features=swift.cacheable_swiftmodules
 build:macos --features=swift.debug_prefix_map
 build:macos --features=swift.enable_vfsoverlays
 build:dbg --features=swift.emit_swiftsourceinfo
+build:macos --host_macos_minimum_os=15.0
+build:macos --macos_minimum_os=15.0
 
 # Linux-specific settings (auto-applied on Linux via --enable_platform_specific_config)
 build:linux --action_env=CC
