@@ -212,3 +212,33 @@ objc_library(
         ":BGMediaCore",
     ],
 )
+
+# BG Wave adapters for the iOS session layer (stage 3 in docs/bg-wave-ios.md). Each adapter is its own target, because
+# its header has to be in `hdrs` to be visible to //submodules/BeyGramMedia/BGWaveListener, and the filegroup above
+# cannot split headers from sources. The files are the ones BGWaveAdapterSources lists.
+cc_library(
+    name = "BGWaveOpusAdapter",
+    srcs = ["BGMediaCore/adapters/wave_opus/src/OpusWaveCodec.cpp"],
+    hdrs = ["BGMediaCore/adapters/wave_opus/include/bgmedia/wave/OpusWaveCodec.hpp"],
+    includes = ["BGMediaCore/adapters/wave_opus/include"],
+    copts = ["-std=c++20"],
+    visibility = ["//submodules/BeyGramMedia:__subpackages__"],
+    deps = [
+        ":BGMediaCore",
+        "//third-party/opus:opus",
+    ],
+)
+
+# libdatachannel sets -Drtc=bgrtc through its `defines`, so the adapter's rtc:: names resolve to bgrtc:: here too.
+cc_library(
+    name = "BGWaveWebRtcAdapter",
+    srcs = ["BGMediaCore/adapters/wave_webrtc/src/WebRtcWaveTransport.cpp"],
+    hdrs = ["BGMediaCore/adapters/wave_webrtc/include/bgmedia/wave/WebRtcWaveTransport.hpp"],
+    includes = ["BGMediaCore/adapters/wave_webrtc/include"],
+    copts = ["-std=c++20"],
+    visibility = ["//submodules/BeyGramMedia:__subpackages__"],
+    deps = [
+        ":BGMediaCore",
+        "//third-party/libdatachannel:libdatachannel",
+    ],
+)
