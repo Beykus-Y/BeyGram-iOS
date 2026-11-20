@@ -758,80 +758,76 @@ private func opportunisticallyTransformOutgoingMedia(network: Network, postbox: 
     return combineLatest(signals)
 }
 
-/// A batch that BeyGram stealth sending refuses (submodules/BeyGramStealth). It is prepared like a normal send (the same
-/// media transform), stored in the chat, and each stored message is marked failed in the same transaction. A failed
-/// message is not pending, so nothing goes out. The user resends it, which follows the stealth rules again, or deletes it.
-private func enqueueBeyGramRefusedMessages(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {
-    let transformed: Signal<[(Bool, EnqueueMessage)], NoError>
-    if let transformOutgoingMessageMedia = account.transformOutgoingMessageMedia {
-        transformed = opportunisticallyTransformOutgoingMedia(network: account.network, postbox: account.postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messages: messages, userInteractive: true)
-    } else {
-        transformed = .single(messages.map { (false, $0) })
-    }
-    return transformed
-    |> mapToSignal { transformedMessages -> Signal<[MessageId?], NoError> in
-        return account.postbox.transaction { transaction -> [MessageId?] in
-            let ids = enqueueMessages(transaction: transaction, account: account, peerId: peerId, messages: transformedMessages)
-            for case let id? in ids {
-                beyGramStealthMarkFailed(transaction: transaction, id: id)
-            }
-            return ids
+/// A batch that BeyGram stealth sending refuses (submodules/BeyGramStealth). The media is already transformed, so the batch
+/// is stored in the chat as it is, and each stored message is marked failed in the same transaction. A failed message is
+/// not pending, so nothing goes out. The user resends it, which follows the stealth rules again, or deletes it.
+private func enqueueTransformedRefusedMessages(account: Account, peerId: PeerId, messages: [(Bool, EnqueueMessage)]) -> Signal<[MessageId?], NoError> {
+    return account.postbox.transaction { transaction -> [MessageId?] in
+        let ids = enqueueMessages(transaction: transaction, account: account, peerId: peerId, messages: messages)
+        for case let id? in ids {
+            beyGramStealthMarkFailed(transaction: transaction, id: id)
         }
+        return ids
     }
 }
 
 public func enqueueMessages(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {
-    // BeyGram stealth (submodules/BeyGramStealth): a send may become a server-scheduled message. A batch that cannot be
-    // scheduled is stored as failed messages instead, so it neither goes out nor disappears.
-    let prepared: [EnqueueMessage]
-    switch beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, nowSeconds: Int32(account.network.globalTime), messages: messages) {
-    case let .send(batch):
-        prepared = batch
-    case .refused:
-        return enqueueBeyGramRefusedMessages(account: account, peerId: peerId, messages: messages)
-    }
+    // The media is transformed first (uploaded when it is not yet in the cloud). Only then does BeyGram stealth decide, so
+    // a send's delay counts from the moment its content is ready, as on Android (upload first, then the date). A batch that
+    // cannot be scheduled is stored as failed messages instead, so it neither goes out nor disappears.
     let signal: Signal<[(Bool, EnqueueMessage)], NoError>
     if let transformOutgoingMessageMedia = account.transformOutgoingMessageMedia {
-        signal = opportunisticallyTransformOutgoingMedia(network: account.network, postbox: account.postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messages: prepared, userInteractive: true)
+        signal = opportunisticallyTransformOutgoingMedia(network: account.network, postbox: account.postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messages: messages, userInteractive: true)
     } else {
-        signal = .single(prepared.map { (false, $0) })
+        signal = .single(messages.map { (false, $0) })
     }
     return signal
-    |> mapToSignal { messages -> Signal<[MessageId?], NoError> in
-        return account.postbox.transaction { transaction -> ([MessageId?], [MessageId]) in
-            var resultIds = Array<MessageId?>(repeating: nil, count: messages.count)
-            var ephemeralMessageIds: [MessageId] = []
-            var normalMessages: [(Bool, EnqueueMessage)] = []
-            var normalMessageIndices: [Int] = []
-
-            for i in 0 ..< messages.count {
-                let (transformedMedia, message) = messages[i]
-                if let botPeerId = ephemeralBotPeerIdForEnqueuedMessage(transaction: transaction, accountPeerId: account.peerId, message: message) {
-                    if let messageId = enqueueEphemeralOutgoingMessage(transaction: transaction, account: account, peerId: peerId, transformedMedia: transformedMedia, message: message, botPeerId: botPeerId) {
-                        resultIds[i] = messageId
-                        ephemeralMessageIds.append(messageId)
-                    }
-                } else {
-                    normalMessages.append((transformedMedia, message))
-                    normalMessageIndices.append(i)
-                }
-            }
-
-            if !normalMessages.isEmpty {
-                let normalIds = enqueueMessages(transaction: transaction, account: account, peerId: peerId, messages: normalMessages)
-                for i in 0 ..< min(normalIds.count, normalMessageIndices.count) {
-                    resultIds[normalMessageIndices[i]] = normalIds[i]
-                }
-            }
-
-            return (resultIds, ephemeralMessageIds)
+    |> mapToSignal { transformed -> Signal<[MessageId?], NoError> in
+        switch beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, nowSeconds: Int32(account.network.globalTime), messages: transformed.map { $0.1 }) {
+        case let .send(batch):
+            // The batch keeps the order and the count of the transformed messages, so each message keeps its media flag.
+            let prepared = zip(transformed, batch).map { pair -> (Bool, EnqueueMessage) in (pair.0.0, pair.1) }
+            return enqueueTransformedMessages(account: account, peerId: peerId, messages: prepared)
+        case .refused:
+            return enqueueTransformedRefusedMessages(account: account, peerId: peerId, messages: transformed)
         }
-        |> map { resultIds, ephemeralMessageIds -> [MessageId?] in
-            for messageId in ephemeralMessageIds {
-                let _ = _internal_sendEphemeralOutgoingMessage(account: account, messageId: messageId).startStandalone()
+    }
+}
+
+private func enqueueTransformedMessages(account: Account, peerId: PeerId, messages: [(Bool, EnqueueMessage)]) -> Signal<[MessageId?], NoError> {
+    return account.postbox.transaction { transaction -> ([MessageId?], [MessageId]) in
+        var resultIds = Array<MessageId?>(repeating: nil, count: messages.count)
+        var ephemeralMessageIds: [MessageId] = []
+        var normalMessages: [(Bool, EnqueueMessage)] = []
+        var normalMessageIndices: [Int] = []
+
+        for i in 0 ..< messages.count {
+            let (transformedMedia, message) = messages[i]
+            if let botPeerId = ephemeralBotPeerIdForEnqueuedMessage(transaction: transaction, accountPeerId: account.peerId, message: message) {
+                if let messageId = enqueueEphemeralOutgoingMessage(transaction: transaction, account: account, peerId: peerId, transformedMedia: transformedMedia, message: message, botPeerId: botPeerId) {
+                    resultIds[i] = messageId
+                    ephemeralMessageIds.append(messageId)
+                }
+            } else {
+                normalMessages.append((transformedMedia, message))
+                normalMessageIndices.append(i)
             }
-            return resultIds
         }
+
+        if !normalMessages.isEmpty {
+            let normalIds = enqueueMessages(transaction: transaction, account: account, peerId: peerId, messages: normalMessages)
+            for i in 0 ..< min(normalIds.count, normalMessageIndices.count) {
+                resultIds[normalMessageIndices[i]] = normalIds[i]
+            }
+        }
+
+        return (resultIds, ephemeralMessageIds)
+    }
+    |> map { resultIds, ephemeralMessageIds -> [MessageId?] in
+        for messageId in ephemeralMessageIds {
+            let _ = _internal_sendEphemeralOutgoingMessage(account: account, messageId: messageId).startStandalone()
+        }
+        return resultIds
     }
 }
 
