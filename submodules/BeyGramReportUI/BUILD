@@ -18,6 +18,7 @@ swift_library(
         "//submodules/PresentationDataUtils:PresentationDataUtils",
         "//submodules/AccountContext:AccountContext",
         "//submodules/BeyGramDiagnostics:BeyGramDiagnostics",
+        "//submodules/BeyGramKit:BeyGramKit",
     ],
     visibility = [
         "//visibility:public",

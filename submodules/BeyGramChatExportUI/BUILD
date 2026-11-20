@@ -20,6 +20,7 @@ swift_library(
         "//submodules/AccountContext:AccountContext",
         "//submodules/BeyGramChatExport:BeyGramChatExport",
         "//submodules/BeyGramChatExportTelegram:BeyGramChatExportTelegram",
+        "//submodules/BeyGramKit:BeyGramKit",
     ],
     visibility = [
         "//visibility:public",

@@ -1,5 +1,6 @@
 #import "BeyGramMedia/BGMixViewController.h"
 #import "BeyGramMedia/BGMixPlayer.h"
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 // Written by BeyGramSettings (BeyGramKit) as "beygram.feature." + BeyGramFeature.musicLibrary.rawValue.
 static NSString *const BGMixFeatureKey = @"beygram.feature.musicLibrary";
@@ -81,7 +82,7 @@ BOOL BGMixFeatureEnabled(void) {
 }
 
 - (void)addTapped {
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.audio"] inMode:UIDocumentPickerModeImport];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeAudio] asCopy:YES];
     picker.allowsMultipleSelection = YES;
     picker.delegate = self;
     [self presentViewController:picker animated:YES completion:nil];
