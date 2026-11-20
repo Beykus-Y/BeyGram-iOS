@@ -1,17 +1,25 @@
 import Foundation
 import Security
 
-/// Tokens of the signed-in account. Kept in the Keychain, not in UserDefaults, and never logged.
+/// Session of the signed-in account. Kept in the Keychain, not in UserDefaults, and never logged.
+/// The account fields were added later: tokens saved by an earlier build decode with them empty, and are filled once.
 public struct BGYandexStoredTokens: Codable, Equatable {
     public let accessToken: String
     public let refreshToken: String?
     /// Unix time, seconds, when the access token expires.
     public let expiresAt: TimeInterval
+    /// Provider id of the account. Only used to build the account's paths; never shown.
+    public let uid: String?
+    public let displayName: String?
+    public let hasPlus: Bool?
 
-    public init(accessToken: String, refreshToken: String?, expiresAt: TimeInterval) {
+    public init(accessToken: String, refreshToken: String?, expiresAt: TimeInterval, uid: String? = nil, displayName: String? = nil, hasPlus: Bool? = nil) {
         self.accessToken = accessToken
         self.refreshToken = refreshToken
         self.expiresAt = expiresAt
+        self.uid = uid
+        self.displayName = displayName
+        self.hasPlus = hasPlus
     }
 }
 

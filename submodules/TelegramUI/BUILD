@@ -212,6 +212,7 @@ swift_library(
         "//submodules/ShareItems/Impl:ShareItemsImpl",
         "//submodules/SettingsUI:SettingsUI",
         "//submodules/BeyGramKit:BeyGramKit",
+        "//submodules/BeyGramStealth:BeyGramStealth",
         "//submodules/UrlHandling:UrlHandling",
         "//submodules/HexColor:HexColor",
         "//submodules/QrCode:QrCode",

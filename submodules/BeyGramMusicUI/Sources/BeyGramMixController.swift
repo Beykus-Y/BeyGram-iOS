@@ -257,7 +257,9 @@ private func beyGramMixEntries(presentationData: PresentationData, state: BeyGra
     entries.append(.nowPlayingHeader(theme, l10n.string(.bgMixCurrentTrack, languageCode: lang).uppercased()))
     if let current = state.currentTrack {
         var meta: [String] = []
-        if let duration = current.duration {
+        if state.duration > 0 {
+            meta.append("\(l10n.formatDuration(state.position)) / \(l10n.formatDuration(state.duration))")
+        } else if let duration = current.duration {
             meta.append(l10n.formatDuration(duration))
         }
         if let bpm = current.bpm {
@@ -269,16 +271,27 @@ private func beyGramMixEntries(presentationData: PresentationData, state: BeyGra
     }
 
     if let next = state.nextTrack {
-        let ready = next.isPrepared
-            ? l10n.string(.musicTrackReady, languageCode: lang)
-            : l10n.string(.musicTrackPreparing, languageCode: lang)
+        let ready: String
+        switch next.status {
+        case .pending:
+            ready = l10n.string(.musicTrackPreparing, languageCode: lang)
+        case let .preparing(progress):
+            ready = "\(l10n.string(.musicTrackPreparing, languageCode: lang)) \(Int((progress * 100.0).rounded()))%"
+        case .ready, .playing, .played:
+            ready = l10n.string(.musicTrackReady, languageCode: lang)
+        case let .failed(err):
+            ready = err ?? l10n.string(.commonError, languageCode: lang)
+        }
         entries.append(.nextTrack(theme, l10n.string(.bgMixNextTrack, languageCode: lang), "\(next.title) (\(ready))"))
     } else if !state.queue.isEmpty {
         entries.append(.nextTrack(theme, l10n.string(.bgMixNextTrack, languageCode: lang), l10n.string(.bgMixNoNextTrack, languageCode: lang)))
     }
 
     if state.isTransitionActive {
-        entries.append(.transitionStatus(theme, "✦ \(l10n.string(.bgMixTransitionActive, languageCode: lang))"))
+        let pct = Int((state.transitionProgress * 100.0).rounded())
+        entries.append(.transitionStatus(theme, "✦ \(l10n.string(.bgMixTransitionActive, languageCode: lang)) (\(pct)%)"))
+    } else if let lastError = state.lastError, !lastError.isEmpty {
+        entries.append(.transitionStatus(theme, lastError))
     }
 
     let hasQueue = !state.queue.isEmpty
@@ -303,7 +316,12 @@ private func beyGramMixEntries(presentationData: PresentationData, state: BeyGra
             if let bpm = track.bpm {
                 parts.append(l10n.format(.bgMixBpmFormat, languageCode: lang, bpm))
             }
-            let isCurrent = index == state.currentIndex
+            let isCurrent = state.currentTrack?.id == track.id
+            if case let .preparing(progress) = track.status {
+                parts.append("\(Int((progress * 100.0).rounded()))%")
+            } else if case let .failed(err) = track.status {
+                parts.append(err ?? l10n.string(.commonError, languageCode: lang))
+            }
             entries.append(.trackRow(index, theme, track.id, track.title, parts.joined(separator: " • "), isCurrent))
         }
     }

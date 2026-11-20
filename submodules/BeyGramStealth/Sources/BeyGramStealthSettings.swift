@@ -20,7 +20,7 @@ public enum BeyGramStealthSendDecision: Equatable, Sendable {
     case unchanged
     /// Send as a server-side scheduled message at this Unix time. Telegram publishes it itself.
     case scheduled(Int32)
-    /// Stealth scheduling is on, but this message cannot be scheduled. It must fail, never go out at once.
+    /// Stealth scheduling is on, but this message cannot be scheduled. Nothing goes out: the batch is stored as failed messages, never sent at once and never dropped.
     case refused
 }
 

@@ -23,7 +23,8 @@ extension MihomoCoreError: LocalizedError {
     }
 }
 
-/// Runs one JSON action of the core. The caller must not run two actions at once.
+/// Runs one JSON action of the core. The caller must not run two actions at once, except `testDelay`: the core runs a
+/// probe beside the other actions, because a probe waits on the network (core/bridge/bridge.go, `run`).
 public protocol MihomoCoreDriver: AnyObject {
     /// Runs one action and returns the `data` of the reply. Throws `MihomoCoreError.refused` when the core refuses.
     func call(_ method: String, data: [String: Any]) throws -> Any?

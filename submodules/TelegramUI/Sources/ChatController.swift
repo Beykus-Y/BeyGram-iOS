@@ -33,6 +33,8 @@ import OpenInExternalAppUI
 import LegacyUI
 import InstantPageUI
 import LocationUI
+import BeyGramKit
+import BeyGramStealth
 import BotPaymentsUI
 import DeleteChatPeerActionSheetItem
 import HashtagSearchUI
@@ -4124,6 +4126,33 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                                 })
                                 f(self.presentationInterfaceState.sendPaidMessageStars == nil ? .dismissWithoutContent : .default)
                             }
+                        })))
+                    }
+                    let stealthSettings = BeyGramStealthStore.shared.settings(accountPeerId: strongSelf.context.account.peerId.toInt64())
+                    let isStealthSchedulingOn = BeyGramSettings.shared.isEnabled(.privacyPolicy) && stealthSettings.serverScheduledSend
+                    let isUnsupportedForStealth = id.peerId.namespace == Namespaces.Peer.SecretChat || topMessage.attributes.contains(where: { $0 is PaidStarsMessageAttribute })
+                    if isStealthSchedulingOn && isUnsupportedForStealth {
+                        let lang = strongSelf.presentationData.strings.primaryComponent.languageCode
+                        let l10n = BeyGramL10n.shared
+                        actions.append(.action(ContextMenuActionItem(text: l10n.string(.stealthSendNowAction, languageCode: lang), icon: { theme in
+                            return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Resend"), color: theme.actionSheet.primaryTextColor)
+                        }, action: { [weak self] _, f in
+                            f(.dismissWithoutContent)
+                            guard let self else { return }
+                            let messageIds = selectedGroup.map({ $0.id })
+                            let alert = textAlertController(
+                                context: self.context,
+                                title: l10n.string(.stealthRefusedTitle, languageCode: lang),
+                                text: l10n.string(.stealthRefusedBody, languageCode: lang),
+                                actions: [
+                                    TextAlertAction(type: .genericAction, title: self.presentationData.strings.Common_Cancel, action: {}),
+                                    TextAlertAction(type: .destructiveAction, title: l10n.string(.stealthSendNowConfirm, languageCode: lang), action: { [weak self] in
+                                        guard let self else { return }
+                                        let _ = resendMessages(account: self.context.account, messageIds: messageIds, sendNowConsent: true).startStandalone()
+                                    })
+                                ]
+                            )
+                            self.present(alert, in: .window(.root))
                         })))
                     }
                     actions.append(.action(ContextMenuActionItem(text: strongSelf.presentationData.strings.Conversation_ContextMenuDelete, textColor: .destructive, icon: { theme in
