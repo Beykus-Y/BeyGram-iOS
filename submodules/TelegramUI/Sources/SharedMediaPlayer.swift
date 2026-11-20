@@ -571,17 +571,31 @@ final class SharedMediaPlayer {
         }
     }
 
-    /// BG Mix could not play the current item. The playlist moves on. After a run of failures playback stops at the limit,
-    /// so a list of broken items does not cycle forever.
+    /// BG Mix could not play the current item. The playlist moves on. A refusal that holds for the whole Yandex account
+    /// stops playback at once, because the next Yandex track would fail the same way. After a run of other failures
+    /// playback stops at the limit, so a list of broken items does not cycle forever.
     private func handleBGMixItemFailed(_ failure: SharedMediaBGMixFailure) {
         self.bgMixFailureStreak += 1
         Logger.shared.log("SharedMediaPlayer", "BG Mix could not play the current item (\(self.bgMixFailureStreak) in a row): \(failure)")
-        if self.bgMixFailureStreak >= SharedMediaPlayer.maxBGMixFailureStreak {
+        if SharedMediaPlayer.stopsBGMixAtOnce(failure) || self.bgMixFailureStreak >= SharedMediaPlayer.maxBGMixFailureStreak {
             self.bgMixFailureStreak = 0
             self.bgMix?.pause()
             return
         }
         self.advanceBGMix()
+    }
+
+    /// A refusal that holds for the whole account: nobody is signed in to Yandex, or the account has no subscription.
+    private static func stopsBGMixAtOnce(_ failure: SharedMediaBGMixFailure) -> Bool {
+        guard case let .yandex(error) = failure else {
+            return false
+        }
+        switch error {
+        case .notSignedIn, .subscriptionRequired:
+            return true
+        default:
+            return false
+        }
     }
 
     /// Moves the playlist on and remembers the item it leaves. If the list settles on that same item, short of its end, BG Mix
