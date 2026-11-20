@@ -81,6 +81,20 @@ cc_library(
     ],
 )
 
+# BG Wave adapter sources for BGWaveCore (submodules/BeyGramMedia/BGWaveCore). They are not part of the
+# BGMediaCore library above: the WebRTC and libopus adapters have their own dependencies. The paths are listed
+# one by one, so a moved or missing file fails the build instead of exporting nothing.
+filegroup(
+    name = "BGWaveAdapterSources",
+    srcs = [
+        "BGMediaCore/adapters/wave_webrtc/include/bgmedia/wave/WebRtcWaveTransport.hpp",
+        "BGMediaCore/adapters/wave_webrtc/src/WebRtcWaveTransport.cpp",
+        "BGMediaCore/adapters/wave_opus/include/bgmedia/wave/OpusWaveCodec.hpp",
+        "BGMediaCore/adapters/wave_opus/src/OpusWaveCodec.cpp",
+    ],
+    visibility = ["//submodules/BeyGramMedia:__subpackages__"],
+)
+
 # Pure C++ PCM limits for the iOS track pipeline. The host test runs with `bazel test` on a Mac.
 cc_library(
     name = "BGMediaPcmLimits",
