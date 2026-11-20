@@ -277,6 +277,9 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
             interaction.openSettings(.triggerWords)
         }))
     }
+    items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 93, text: "Privacy", icon: PresentationResourcesSettings.security, action: {
+        interaction.openSettings(.beyGramPrivacy)
+    }))
     if BeyGramSettings.shared.isEnabled(.updateCheck) {
         items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 92, text: "Updates", icon: PresentationResourcesSettings.appearance, action: {
             interaction.openSettings(.beyGramUpdates)
