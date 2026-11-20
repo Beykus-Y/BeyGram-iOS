@@ -341,14 +341,13 @@ public final class ShareScreen: ViewControllerComponentContainer {
         self.collectibleItemInfo = collectibleItemInfo
         self.forcedActionTitle = forcedActionTitle
         self.shareStory = shareStory
-        var preferredAction = preferredAction
-        if case .default = preferredAction, let showInChat, case let .messages(messages) = subject, messages.count == 1, let message = messages.first {
-            let title = (updatedPresentationData?.initial ?? context.sharedContext.currentPresentationData.with { $0 }).strings.SharedMedia_ViewInChat
-            preferredAction = .custom(action: ShareControllerAction(title: title, action: {
-                showInChat(message)
-            }))
-        }
-        self.preferredAction = preferredAction
+        self.preferredAction = ShareScreen.resolvePreferredAction(
+            preferredAction,
+            subject: subject,
+            context: context,
+            updatedPresentationData: updatedPresentationData,
+            showInChat: showInChat
+        )
         self.externalShareSubject = externalShareSubject
         self.shareAsLink = shareAsLink
         self.model = ShareScreenState(context: context)
@@ -359,20 +358,48 @@ public final class ShareScreen: ViewControllerComponentContainer {
             contentReady.set(.single(true))
         }
         self.caption = NSAttributedString(string: presetText ?? "")
-        super.init(context: context, component: ShareScreenComponent(model: self.model, sender: self.sender, externalShare: externalShare, initialCaption: self.caption, hasStory: shareStory != nil, animateOut: self.animateOut), navigationBarAppearance: .none, statusBarStyle: .ignore, theme: forceTheme.map { .custom($0) } ?? .default, updatedPresentationData: updatedPresentationData)
+        let initialComponent = ShareScreenComponent(
+            model: self.model,
+            sender: self.sender,
+            externalShare: externalShare,
+            initialCaption: self.caption,
+            hasStory: shareStory != nil,
+            animateOut: self.animateOut
+        )
+        super.init(context: context, component: initialComponent, navigationBarAppearance: .none, statusBarStyle: .ignore, theme: forceTheme.map { .custom($0) } ?? .default, updatedPresentationData: updatedPresentationData)
         self.navigationPresentation = .flatModal
         self.configureSender()
         if let externalConfiguration {
             self.accountInUse.set(externalConfiguration.environment.setAccountUserInterfaceInUse(id: context.account.id))
         }
         if let peerId = externalConfiguration?.immediatePeerId ?? immediatePeerId {
-            self.peerDisposable.set((context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
-            |> deliverOnMainQueue).start(next: { [weak self] peer in
-                guard let self, let peer else { return }
-                self.select(peer)
-            }))
+            self.selectInitialPeer(peerId, context: context)
         }
         self.configureCopy()
+    }
+
+    private static func resolvePreferredAction(
+        _ preferredAction: ShareControllerPreferredAction,
+        subject: Subject,
+        context: AccountContext,
+        updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)?,
+        showInChat: ((EngineRawMessage) -> Void)?
+    ) -> ShareControllerPreferredAction {
+        if case .default = preferredAction, let showInChat, case let .messages(messages) = subject, messages.count == 1, let message = messages.first {
+            let title = (updatedPresentationData?.initial ?? context.sharedContext.currentPresentationData.with { $0 }).strings.SharedMedia_ViewInChat
+            return .custom(action: ShareControllerAction(title: title, action: {
+                showInChat(message)
+            }))
+        }
+        return preferredAction
+    }
+
+    private func selectInitialPeer(_ peerId: EnginePeer.Id, context: AccountContext) {
+        self.peerDisposable.set((context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
+        |> deliverOnMainQueue).start(next: { [weak self] peer in
+            guard let self, let peer else { return }
+            self.select(peer)
+        }))
     }
 
     private func configureCopy() {

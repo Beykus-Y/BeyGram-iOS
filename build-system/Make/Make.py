@@ -9,7 +9,7 @@ import subprocess
 import shutil
 import glob
 
-from BuildEnvironment import resolve_executable, call_executable, run_executable_with_output, BuildEnvironmentVersions, BuildEnvironment
+from BuildEnvironment import resolve_executable, call_executable, run_executable_with_output, run_executable_with_status, BuildEnvironmentVersions, BuildEnvironment
 from ProjectGeneration import generate
 from BazelLocation import locate_bazel
 from BuildConfiguration import CodesigningSource, GitCodesigningSource, DirectoryCodesigningSource, XcodeManagedCodesigningSource, BuildConfiguration, build_configuration_from_json
@@ -49,6 +49,7 @@ class BazelCommandLine:
         self.enable_sandbox = False
         self.disable_provisioning_profiles = False
         self.profile_swift = False
+        self.additional_args = []
         self.embed_watch_app = False
         self.watch_api_id = None
         self.watch_api_hash = None
@@ -327,6 +328,8 @@ class BazelCommandLine:
         combined_arguments += self.configuration_args
         if self.profile_swift:
             combined_arguments += ['--config=swift_profile']
+        if self.additional_args:
+            combined_arguments += self.additional_args
 
         print('TelegramBuild: running')
         print(subprocess.list2cmdline(combined_arguments))
@@ -362,6 +365,8 @@ class BazelCommandLine:
             ]
 
         combined_arguments += self.configuration_args
+        if self.additional_args:
+            combined_arguments += self.additional_args
 
         print('TelegramBuild: running')
         print(subprocess.list2cmdline(combined_arguments))
@@ -617,7 +622,34 @@ def resolve_watch_provisioning_profile(arguments, base_path):
     return None
 
 
+def verify_xcode_environment(configuration=None):
+    if sys.platform != 'darwin':
+        return
+    dev_dir = run_executable_with_output('xcode-select', ['-p']).strip()
+    if not dev_dir or not os.path.isdir(dev_dir):
+        print('Error: Active Xcode developer directory not found (xcode-select -p returned "{}").'.format(dev_dir))
+        print('Select Xcode with: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer')
+        sys.exit(1)
+
+    if run_executable_with_status(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path']) != 0:
+        print('Error: iPhoneOS SDK is not available for the selected Xcode ({}).'.format(dev_dir))
+        print('Install the iOS platform support in Xcode -> Settings -> Components.')
+        sys.exit(1)
+
+    if configuration is not None and 'sim' in configuration:
+        if run_executable_with_status(['xcrun', '--sdk', 'iphonesimulator', '--show-sdk-path']) != 0:
+            print('Error: iPhoneSimulator SDK is not available for the selected Xcode ({}).'.format(dev_dir))
+            print('Install the iOS Simulator runtime/platform in Xcode -> Settings -> Components.')
+            sys.exit(1)
+
+    if run_executable_with_status(['xcrun', '--sdk', 'iphoneos', 'metal', '--version']) != 0:
+        print('Error: Metal Toolchain is not available for the selected Xcode ({}).'.format(dev_dir))
+        print('Install it with: xcodebuild -downloadComponent MetalToolchain')
+        sys.exit(1)
+
+
 def build(bazel, arguments):
+    verify_xcode_environment(configuration=arguments.configuration)
     if PostboxImportCheck.run(os.getcwd()) != 0:
         sys.exit(1)
 
@@ -669,6 +701,8 @@ def build(bazel, arguments):
         bazel_command_line.set_disable_extensions()
 
     bazel_command_line.set_split_swiftmodules(arguments.enableParallelSwiftmoduleGeneration)
+    if arguments.bazelArguments:
+        bazel_command_line.add_additional_args(shlex.split(arguments.bazelArguments))
 
     bazel_command_line.invoke_build()
 
@@ -713,6 +747,7 @@ def build(bazel, arguments):
 
 
 def test(bazel, arguments):
+    verify_xcode_environment()
     if PostboxImportCheck.run(os.getcwd()) != 0:
         sys.exit(1)
 

@@ -1,4 +1,5 @@
 load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+load("@beygram_xcode_capabilities//:capabilities.bzl", "IOS_SDK_HAS_RESERVED_REGIONS")
 load("@build_bazel_rules_apple//apple:ios.bzl", "ios_application", "ios_unit_test")
 load("//build-system/bazel-utils:plist_fragment.bzl", "plist_fragment")
 load("@build_bazel_rules_apple//apple/testing/default_runner:ios_test_runner.bzl", "ios_test_runner")
@@ -12,7 +13,9 @@ swift_library(
     ]),
     copts = [
         "-warnings-as-errors",
-    ],
+    ] + ([
+        "-DBEYGRAM_ENABLE_RESERVED_REGIONS",
+    ] if IOS_SDK_HAS_RESERVED_REGIONS else []),
     deps = [
     	"//submodules/ObjCRuntimeUtils:ObjCRuntimeUtils",
     	"//submodules/UIKitRuntimeUtils:UIKitRuntimeUtils",
