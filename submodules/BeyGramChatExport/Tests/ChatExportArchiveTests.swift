@@ -68,18 +68,30 @@ private final class ScriptedStream: ChatExportFileStream {
 
 private final class ScriptedFiles: ChatExportFileProvider {
     var contents: [Int64: Data] = [:]
+    /// Files already on the device. They open without a download reservation, as on Android.
+    var local: Set<Int64> = []
     var failing: Set<Int64> = []
     var cancelled: Set<Int64> = []
 
-    func openFile(for attachment: ChatExportAttachment) async throws -> ChatExportFileStream? {
+    func openFile(
+        for attachment: ChatExportAttachment,
+        reserveDownload: (_ size: Int64) -> Bool
+    ) async throws -> ChatExportFileStream? {
         if cancelled.contains(attachment.id) {
             throw CancellationError()
         }
-        if failing.contains(attachment.id) {
-            throw ScriptedFailure()
-        }
+        // Not downloadable: nothing is charged, as on Android.
         guard let data = contents[attachment.id] else {
             return nil
+        }
+        if !local.contains(attachment.id) {
+            // The download is charged before its transfer starts, and stays charged when the transfer fails.
+            guard reserveDownload(attachment.size) else {
+                return nil
+            }
+        }
+        if failing.contains(attachment.id) {
+            throw ScriptedFailure()
         }
         return ScriptedStream(data)
     }
@@ -161,7 +173,7 @@ final class ChatExportArchiveTests: XCTestCase {
 
     func testUnknownSizeFailedOpenAndMissingFilesAreSkipped() async throws {
         let files = ScriptedFiles()
-        files.contents = [2: Data("xyz".utf8)]
+        files.contents = [1: Data("q".utf8), 2: Data("xyz".utf8), 3: Data("w".utf8)]
         files.failing = [3]
         let result = try await runExport(
             pages: [[
@@ -196,6 +208,28 @@ final class ChatExportArchiveTests: XCTestCase {
         XCTAssertEqual(result.summary.skippedMedia, 2)
         XCTAssertFalse(result.archive.text.contains("media/32_"))
         XCTAssertFalse(result.archive.text.contains("media/33_"))
+    }
+
+    func testFilesAlreadyOnTheDeviceAreNotChargedAgainstTheDownloadLimits() async throws {
+        // Total download limit 10 bytes. The local 50-byte file is copied anyway, as on Android, and charges nothing.
+        let files = ScriptedFiles()
+        files.contents = [1: Data("abc".utf8), 2: Data("de".utf8), 3: Data("fghijk".utf8)]
+        files.local = [1]
+        let limits = ChatExportMediaLimits(maxFiles: 10, maxSingleFileBytes: 1000, maxTotalBytes: 10)
+        let result = try await runExport(
+            pages: [[
+                message(80, attachment: photo(1, size: 50)),
+                message(81, attachment: photo(2, size: 5)),
+                message(82, attachment: photo(3, size: 6)),
+            ]],
+            files: files,
+            limits: limits
+        )
+        XCTAssertEqual(result.summary.mediaFiles, 2)
+        XCTAssertEqual(result.summary.skippedMedia, 1)
+        XCTAssertTrue(result.archive.text.contains("media/80_pic.jpg"))
+        XCTAssertTrue(result.archive.text.contains("media/81_pic.jpg"))
+        XCTAssertFalse(result.archive.text.contains("media/82_pic.jpg"))
     }
 
     func testDocumentLargerThanTheBufferIsRenderedAgainWithoutCopyingTwice() async throws {

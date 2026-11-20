@@ -153,11 +153,11 @@ public final class ChatExportArchiveJob {
         modified: Date,
         into archive: ChatExportZipWriter
     ) async throws -> String? {
-        guard budget.reserve(attachment) else {
+        guard budget.hasRoomForAnotherFile else {
             skipMedia()
             return nil
         }
-        guard let stream = try await openQuietly(attachment) else {
+        guard let stream = try await openQuietly(attachment, reserveDownload: { self.budget.reserveDownload(size: $0) }) else {
             skipMedia()
             return nil
         }
@@ -178,9 +178,12 @@ public final class ChatExportArchiveJob {
     }
 
     /// Opens a file for the archive. A nil result or any error other than cancellation skips the file, as on Android.
-    private func openQuietly(_ attachment: ChatExportAttachment) async throws -> ChatExportFileStream? {
+    private func openQuietly(
+        _ attachment: ChatExportAttachment,
+        reserveDownload: (_ size: Int64) -> Bool
+    ) async throws -> ChatExportFileStream? {
         do {
-            return try await files.openFile(for: attachment)
+            return try await files.openFile(for: attachment, reserveDownload: reserveDownload)
         } catch is CancellationError {
             throw CancellationError()
         } catch {

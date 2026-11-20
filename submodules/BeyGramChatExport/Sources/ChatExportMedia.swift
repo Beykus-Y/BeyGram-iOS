@@ -104,28 +104,30 @@ public struct ChatExportMediaLimits: Equatable {
     }
 }
 
-/// Decides which files are copied, in the Android order. A file is refused when the copy count has reached its limit,
-/// when its size is unknown or above the single-file limit, or when its size would take the total past the limit.
-/// The size is reserved before the file is opened, so a file that then fails keeps its share, as on Android.
+/// The media limits, in the Android order. The file count is checked before a file is opened. The download limits apply
+/// only to a file that has to be downloaded: the provider charges its size with `reserveDownload` before the transfer
+/// starts. A file already on the device is not charged, and a failed download stays charged, as on Android.
 struct ChatExportMediaBudget {
     let limits: ChatExportMediaLimits
     private(set) var copiedFiles = 0
-    private(set) var reservedBytes: Int64 = 0
+    private(set) var reservedDownloadBytes: Int64 = 0
 
     init(limits: ChatExportMediaLimits) {
         self.limits = limits
     }
 
-    /// Reserves the size of `attachment`. Returns false when the file must be skipped.
-    mutating func reserve(_ attachment: ChatExportAttachment) -> Bool {
-        guard copiedFiles < limits.maxFiles else {
+    /// True while another file may be copied. Checked before a file is opened.
+    var hasRoomForAnotherFile: Bool {
+        copiedFiles < limits.maxFiles
+    }
+
+    /// Charges the size of a download before its transfer starts. Returns false when the size is unknown or above the
+    /// single-file limit, or when it would take the total past the limit. A refused download is not charged.
+    mutating func reserveDownload(size: Int64) -> Bool {
+        guard size > 0, size <= limits.maxSingleFileBytes, reservedDownloadBytes + size <= limits.maxTotalBytes else {
             return false
         }
-        let size = attachment.size
-        guard size > 0, size <= limits.maxSingleFileBytes, reservedBytes + size <= limits.maxTotalBytes else {
-            return false
-        }
-        reservedBytes += size
+        reservedDownloadBytes += size
         return true
     }
 
@@ -229,12 +231,18 @@ public enum ChatExportFileName {
     }
 }
 
-/// Opens the files of attachments. The app implements this on top of its media store and download path.
+/// Opens the files of attachments. The app implements this on top of its media store and download path, and mirrors
+/// Android's `TdChatExportMediaProvider`: a file already on the device opens directly, and any other file is downloaded.
 public protocol ChatExportFileProvider: AnyObject {
-    /// Opens the file. Returns nil when it cannot be exported: not downloaded and not downloadable, or a request that timed
-    /// out. Called before the ZIP entry is created, so a nil result or any other thrown error skips the file cleanly.
-    /// Throw `CancellationError` only for cancellation, which stops the export.
-    func openFile(for attachment: ChatExportAttachment) async throws -> ChatExportFileStream?
+    /// Opens the file. Returns nil when it cannot be exported: not downloadable, refused by the download limits, or a
+    /// request that timed out. Before a download starts, call `reserveDownload` with the largest known size of the file.
+    /// It returns false when the limits refuse the download, and the provider then returns nil. A file already on the
+    /// device must not call it. Called before the ZIP entry is created, so a nil result or any other thrown error skips
+    /// the file cleanly. Throw `CancellationError` only for cancellation, which stops the export.
+    func openFile(
+        for attachment: ChatExportAttachment,
+        reserveDownload: (_ size: Int64) -> Bool
+    ) async throws -> ChatExportFileStream?
 }
 
 /// One opened file, read in order.
