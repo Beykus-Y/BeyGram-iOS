@@ -131,3 +131,14 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+# Public header of the libsrtp copy above, for //third-party/libdatachannel (BG Wave's transport). Same
+# implementation, so one copy of srtp_* in the binary: WebRTC calls and BG Wave share it. Do not add a second
+# libsrtp to the app.
+cc_library(
+    name = "srtp_public",
+    hdrs = ["third_party/libsrtp/include/srtp.h"],
+    includes = ["third_party/libsrtp/include"],
+    deps = [":libsrtp"],
+    visibility = ["//visibility:public"],
+)
