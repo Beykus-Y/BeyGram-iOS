@@ -280,6 +280,9 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
     items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 93, text: "Privacy", icon: PresentationResourcesSettings.security, action: {
         interaction.openSettings(.beyGramPrivacy)
     }))
+    items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 94, text: "BG Music", icon: PresentationResourcesSettings.appearance, action: {
+        interaction.openSettings(.beyGramMusic)
+    }))
     if BeyGramSettings.shared.isEnabled(.updateCheck) {
         items[.advanced]!.append(PeerInfoScreenDisclosureItem(id: 92, text: "Updates", icon: PresentationResourcesSettings.appearance, action: {
             interaction.openSettings(.beyGramUpdates)
