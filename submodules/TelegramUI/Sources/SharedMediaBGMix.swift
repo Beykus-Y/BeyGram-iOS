@@ -49,9 +49,13 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
     private let fillDisposable = MetaDisposable()
 
     private var endedTrackId: UInt64?
-    private var followedFromKey: AnyHashable?
+    /// The item the playlist was last asked to move to. Cleared when the playlist's current item changes, so a later
+    /// return to an earlier item is followed again.
+    private var advanceRequestedTo: AnyHashable?
     private var pendingResume: (key: AnyHashable, position: Double)?
     private var wasTransitioning = false
+    /// The transport of the last snapshot. Its change from playing to paused is the only sign of a pause by the system.
+    private var lastTransport: BGMixTransport = .stopped
 
     private var wantsPlaying = false
     private var sessionDisposable: Disposable?
@@ -101,6 +105,7 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
     func update(current: SharedMediaPlaylistItem?, next: SharedMediaPlaylistItem?) {
         if current?.stableId != self.currentItem?.stableId {
             self.pendingResume = nil
+            self.advanceRequestedTo = nil
         }
         self.currentItem = current
         self.nextItem = next
@@ -154,6 +159,8 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
     // MARK: - BGMixPlayerObserver
 
     func mixPlayer(_ mixPlayer: BGMixPlayer, didUpdateSnapshot snapshot: BGMixSnapshot) {
+        let previousTransport = self.lastTransport
+        self.lastTransport = snapshot.transport
         self.publish(snapshot)
 
         if self.wasTransitioning != snapshot.transitionActive {
@@ -166,8 +173,10 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
 
         self.checkEnded(snapshot)
 
-        if snapshot.transport == .paused, self.wantsPlaying, self.sessionActive, snapshot.currentTrack?.state != .played {
-            // Paused by the system (an interruption, or the route went away). It stays paused.
+        // Only a change from playing to paused is a pause by the system (an interruption, or the route went away). A track
+        // that is loaded and waits for its first play also reads as paused, and must not cancel a play request.
+        if previousTransport == .playing, snapshot.transport == .paused, self.wantsPlaying, self.sessionActive, snapshot.currentTrack?.state != .played {
+            // It stays paused.
             self.wantsPlaying = false
             self.releaseSession()
             return
@@ -244,7 +253,7 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
     private func checkFollow(_ snapshot: BGMixSnapshot) {
         guard let currentItem = self.currentItem, let nextItem = self.nextItem,
               nextItem.stableId != currentItem.stableId,
-              self.followedFromKey != currentItem.stableId
+              self.advanceRequestedTo != nextItem.stableId
         else {
             return
         }
@@ -253,7 +262,8 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
         guard let track = playing, self.keyByTrackId[track.identifier] == nextItem.stableId else {
             return
         }
-        self.followedFromKey = currentItem.stableId
+        // Set before the call: the playlist may answer synchronously, and that answer clears it.
+        self.advanceRequestedTo = nextItem.stableId
         self.onAdvanceRequested?()
     }
 
@@ -310,6 +320,7 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
         self.fillGeneration += 1
         self.fillDisposable.set(nil)
         self.player.stopAll()
+        self.lastTransport = .stopped
         self.player.clearQueue()
         self.forgetTracks()
         self.endedTrackId = nil
