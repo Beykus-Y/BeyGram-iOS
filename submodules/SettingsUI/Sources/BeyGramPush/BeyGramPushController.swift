@@ -276,7 +276,7 @@ private final class BeyGramPushScreenModel {
     private let client = BeyGramPushClient()
     private let registerDisposable = MetaDisposable()
     private let unregisterDisposable = MetaDisposable()
-    private var pollTimer: Timer?
+    private var pollTimer: Foundation.Timer?
     private var revisionValue = 0
     private var isPolling = false
     private var isBusy = false
@@ -601,7 +601,7 @@ private final class BeyGramPushScreenModel {
 
     private func startPolling() {
         self.pollTimer?.invalidate()
-        self.pollTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true, block: { [weak self] _ in
+        self.pollTimer = Foundation.Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true, block: { [weak self] _ in
             self?.poll()
         })
     }
