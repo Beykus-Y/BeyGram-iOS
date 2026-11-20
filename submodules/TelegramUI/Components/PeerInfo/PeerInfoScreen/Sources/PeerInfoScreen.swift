@@ -179,6 +179,7 @@ enum PeerInfoSettingsSection {
     case triggerWords
     case beyGramReport
     case beyGramUpdates
+    case beyGramPrivacy
     case language
     case stickers
     case premium

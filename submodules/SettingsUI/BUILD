@@ -16,6 +16,7 @@ swift_library(
         "//submodules/BeyGramAppearance",
         "//submodules/BeyGramKit:BeyGramKit",
         "//submodules/BeyGramProxy:BeyGramProxy",
+        "//submodules/BeyGramStealth:BeyGramStealth",
         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
         "//submodules/Display:Display",
         "//submodules/TelegramCore:TelegramCore",

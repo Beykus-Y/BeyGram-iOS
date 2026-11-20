@@ -39,6 +39,16 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
     /// Per-chat overrides keyed by the chat's peer id as a decimal string.
     public var chatModes: [String: BeyGramStealthChatMode]
 
+    /// The stored keys are the Android ones (`StealthSettingsStore.kt`), so the two apps name each setting alike.
+    private enum CodingKeys: String, CodingKey {
+        case hideReadReceipts = "no_read_receipts"
+        case hideOnline = "hide_online"
+        case hideTyping = "hide_typing"
+        case serverScheduledSend = "scheduled_send"
+        case scheduledSendDelaySeconds = "scheduled_send_delay"
+        case chatModes = "chats"
+    }
+
     public init(
         hideReadReceipts: Bool = false,
         hideOnline: Bool = false,
