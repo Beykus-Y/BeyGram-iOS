@@ -4,6 +4,10 @@ public struct ChatExportProgress: Equatable {
     public var processedMessages: Int
     public var exportedMessages: Int
     public var pagesLoaded: Int
+    /// Media files copied into the archive so far. Zero for a document export.
+    public var mediaCopied: Int = 0
+    /// Media files skipped so far, by the limits or because they could not be opened.
+    public var mediaSkipped: Int = 0
 }
 
 /// Drives a `ChatExportWriter` from a paged history source, with progress and cancellation.
