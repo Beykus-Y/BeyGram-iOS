@@ -14,7 +14,8 @@ public enum BGYandexRuntime {
     public static let shared = BGYandexService(credentials: BGYandexCredentials.fromBundle(), cacheDirectory: BGYandexRuntime.trackFolder)
 }
 
-/// Why a track cannot be played from the Yandex source. The player shows a message for it. None of these logs the user out.
+/// Why a track cannot be played from the Yandex source. None of these logs the user out. `notSignedIn` and
+/// `subscriptionRequired` concern the whole account, the others one track. The caller decides what to show.
 public enum BGYandexPlaybackError: Error, Equatable {
     /// Nobody is signed in to the Yandex source.
     case notSignedIn
