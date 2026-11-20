@@ -33,8 +33,14 @@ Off by default: needs the `yandexMusic` flag, a configured OAuth pair, and the a
   a session the service forgets or ends is replaced by a new one with the same seeds. The seed `user:onyourwave` is the one
   verified against the service. The diversity seeds and the `track:`, `artist:`, `album:` and `playlist:` formats are
   Android's and are not checked on the live service.
+- Player contract (Foundation only, no UI): `BGYandexTrackInfo` is what the player shows for a `ym:` row. Its title is nil when
+  Yandex sent none, never a file name; it also has the artists, album, duration, cover URL, availability and liked state.
+  `BGYandexWaveQueue` keeps the radio a few tracks ahead of the player: it refills when three or fewer remain, pauses 30 s
+  after a failed or empty refill, starts each track's file once in advance (`prepare`), and reports started, finished and
+  skipped tracks and likes as radio events. It takes a `BGYandexWaveSource`, which `BGYandexWaveSession` conforms to. Dislike
+  is not a radio event here: its endpoint is unverified.
 - Unverified: the dislike endpoint and form, and the answer shape of the refresh. Not in Android, so not built: artist and
   album search. Yandex tracks cannot be forwarded, added to a profile or exported to `.bgmusic`.
 - Status: written and statically checked (delimiter balance, cross-file references, a line-by-line trace of the unit
   tests against the code). Not compiled: the authoring environment has no Swift toolchain. Not run on the live service and
-  not device-verified. Unit tests: `Tests/BGYandexTests.swift` and `Tests/BGYandexAudioCheckTests.swift`, host `swift_test` target `BeyGramYandexMusicTests`.
+  not device-verified. Unit tests: `Tests/BGYandexTests.swift`, `Tests/BGYandexAudioCheckTests.swift`, `Tests/BGYandexTrackInfoTests.swift` and `Tests/BGYandexWaveQueueTests.swift`, host `swift_test` target `BeyGramYandexMusicTests`.
