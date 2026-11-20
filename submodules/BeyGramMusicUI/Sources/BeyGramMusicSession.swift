@@ -125,7 +125,7 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
     private let statePromise: ValuePromise<BeyGramMusicState>
 
     private override init() {
-        self.player = BGMixPlayer.sharedPlayer()
+        self.player = BGMixPlayer.shared()
         let initial = BeyGramMusicState()
         self.stateValue = Atomic(value: initial)
         self.statePromise = ValuePromise(initial, ignoreRepeated: true)
@@ -134,11 +134,11 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
         self.player.setTransitionDuration(initial.transitionDuration)
         self.player.setAdaptiveTransitions(initial.adaptiveTransitions)
         self.player.setBassSwap(initial.bassSwap)
-        self.player.addObserver(self)
+        self.player.add(self)
     }
 
     deinit {
-        self.player.removeObserver(self)
+        self.player.remove(self)
     }
 
     public var stateSignal: Signal<BeyGramMusicState, NoError> {

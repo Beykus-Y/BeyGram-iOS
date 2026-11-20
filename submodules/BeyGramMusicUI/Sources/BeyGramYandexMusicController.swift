@@ -677,7 +677,7 @@ private func beyGramYandexTracksController(
                 }
             }
         case .myWave:
-            waveSession?.start { result in
+            waveSession?.first { result in
                 mutate { state in
                     state.isLoading = false
                     switch result {
