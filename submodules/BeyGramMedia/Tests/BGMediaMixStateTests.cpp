@@ -20,6 +20,7 @@ int failures = 0;
 using bgmedia::mix::DeckId;
 using bgmedia::mix::DeckStatus;
 using bgmedia::mix::MixSnapshot;
+using beygram::media::BackgroundDrive;
 using beygram::media::MixTransport;
 
 // A deck holding `trackId`. A zero id leaves the deck empty.
@@ -110,6 +111,23 @@ void testNextIsNeverTheCurrentTrack() {
     CHECK_TRUE(beygram::media::nextTrackId(engine) == 0);
 }
 
+void testForegroundUsesTheDisplayLink() {
+    CHECK_TRUE(beygram::media::backgroundDriveFor(false, false) == BackgroundDrive::DisplayLink);
+    CHECK_TRUE(beygram::media::backgroundDriveFor(false, true) == BackgroundDrive::DisplayLink);
+}
+
+void testBackgroundRunsTheTimerOnlyWhileSounding() {
+    CHECK_TRUE(beygram::media::backgroundDriveFor(true, true) == BackgroundDrive::Timer);
+    CHECK_TRUE(beygram::media::backgroundDriveFor(true, false) == BackgroundDrive::StopEngine);
+}
+
+void testInterruptionResumesOnlyASoundingMixThatMayResume() {
+    CHECK_TRUE(beygram::media::resumesAfterInterruption(true, true));
+    CHECK_TRUE(!beygram::media::resumesAfterInterruption(true, false));
+    CHECK_TRUE(!beygram::media::resumesAfterInterruption(false, true));
+    CHECK_TRUE(!beygram::media::resumesAfterInterruption(false, false));
+}
+
 } // namespace
 
 int main() {
@@ -121,6 +139,9 @@ int main() {
     testFinishedOtherDeckIsNotNext();
     testHandoverMovesCurrentToTheOtherDeck();
     testNextIsNeverTheCurrentTrack();
+    testForegroundUsesTheDisplayLink();
+    testBackgroundRunsTheTimerOnlyWhileSounding();
+    testInterruptionResumesOnlyASoundingMixThatMayResume();
     if (failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failures);
         return 1;

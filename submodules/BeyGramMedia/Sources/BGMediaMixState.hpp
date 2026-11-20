@@ -1,7 +1,8 @@
 #pragma once
 
-// Pure mapping from the MixSession snapshot to the state BGMixPlayer publishes. No Foundation or
-// Apple types here, so the host test (Tests/BGMediaMixStateTests.cpp) builds it with g++ or clang.
+// Pure mapping from the MixSession snapshot to the state BGMixPlayer publishes, and the decisions the
+// player makes about its background driver and interruptions. No Foundation or Apple types here, so the
+// host test (Tests/BGMediaMixStateTests.cpp) builds it with g++ or clang.
 
 #include "bgmedia/mix/MixSession.hpp"
 #include "bgmedia/mix/MixTypes.hpp"
@@ -57,6 +58,24 @@ enum class MixTransport : std::uint8_t { Stopped = 0, Playing, Paused };
 [[nodiscard]] inline double masterDurationSeconds(const bgmedia::mix::MixSnapshot& engine) noexcept {
     const bgmedia::mix::DeckStatus& master = engine.decks[masterDeckIndex(engine)];
     return master.loaded ? master.durationSeconds : 0.0;
+}
+
+// What drives the mix. In the foreground the display link runs the update loop. In the background the
+// display link does not fire, so a timer runs it while the mix sounds. When nothing sounds the engine
+// stops too: an idle engine would keep the app alive in the background with silence.
+enum class BackgroundDrive : std::uint8_t { DisplayLink = 0, Timer, StopEngine };
+
+[[nodiscard]] inline BackgroundDrive backgroundDriveFor(bool inBackground, bool sounding) noexcept {
+    if (!inBackground) {
+        return BackgroundDrive::DisplayLink;
+    }
+    return sounding ? BackgroundDrive::Timer : BackgroundDrive::StopEngine;
+}
+
+// A mix that an interruption paused resumes when the interruption ends only if it was sounding and the
+// system allows the resume.
+[[nodiscard]] inline bool resumesAfterInterruption(bool wasSounding, bool systemAllowsResume) noexcept {
+    return wasSounding && systemAllowsResume;
 }
 
 } // namespace beygram::media
