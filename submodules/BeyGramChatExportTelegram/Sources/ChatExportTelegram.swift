@@ -99,7 +99,7 @@ public func runChatExport(
     cleanup: @escaping () -> Void,
     onProgress: @escaping (ChatExportProgress) -> Void
 ) async throws -> ChatExportSummary {
-    try ChatExportWriter.checkTarget(isSecretChat: peerId.isSecretChat, hasProtectedContent: hasProtectedContent)
+    try ChatExportWriter.checkTarget(isSecretChat: peerId.isSecretChatNamespace, hasProtectedContent: hasProtectedContent)
 
     let writer = ChatExportWriter(
         format: format,
