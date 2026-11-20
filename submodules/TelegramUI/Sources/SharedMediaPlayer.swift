@@ -10,6 +10,7 @@ import TelegramUniversalVideoContent
 import DeviceProximity
 import PeerMessagesMediaPlaylist
 import BeyGramKit
+import BeyGramYandexMusic
 
 private enum SharedMediaPlaybackItem: Equatable {
     case audio(MediaPlayer)
