@@ -219,7 +219,7 @@ enum BGMusicInflate {
                 guard distanceSymbol < 30 else {
                     throw Failure.corrupt
                 }
-                let distanceValue = try distBase[distanceSymbol] + reader.bits(distanceExtra[distanceSymbol])
+                let distanceValue = try distBase[distanceSymbol] + reader.bits(distExtra[distanceSymbol])
                 guard distanceValue <= output.count, output.count + length <= limit else {
                     throw Failure.corrupt
                 }
