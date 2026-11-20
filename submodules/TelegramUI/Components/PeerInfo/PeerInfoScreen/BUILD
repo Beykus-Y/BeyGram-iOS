@@ -89,6 +89,7 @@ swift_library(
         "//submodules/TelegramUI/Components/QrStudioScreen",
         "//submodules/PeerInfoUI",
         "//submodules/BeyGramKit:BeyGramKit",
+        "//submodules/BeyGramMusicUI:BeyGramMusicUI",
         "//submodules/BeyGramTriggerWordsUI:BeyGramTriggerWordsUI",
         "//submodules/BeyGramReportUI:BeyGramReportUI",
         "//submodules/BeyGramChatExportUI:BeyGramChatExportUI",
