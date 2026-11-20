@@ -53,7 +53,16 @@ Go-тесты:
     GOOS=ios GOARCH=arm64 CGO_ENABLED=1 CC=<clang из Xcode для iOS SDK> \
       go build -buildmode=c-archive -o libbeygram-mihomo.a ./cmd/beygram-mihomo
 
-Для этого нужны iOS SDK и подходящие теги сборки mihomo. Ни то, ни другое в окружении не проверялось. Заголовок и module map подключаются в проект вручную вместе с архивом.
+Готовый скрипт (нужен macOS с Xcode и Go 1.24):
+
+    ./submodules/BeyGramProxy/core/build-ios-archive.sh
+
+Скрипт кладёт `libbeygram-mihomo.a` в `CoreBridge/lib` (git игнорирует). Что проверено и что нет:
+
+- Проверено в Linux: `go test ./...` проходит; `go build -buildmode=c-archive` собирает архив, экспорт `BGMihomoInvoke` и `BGMihomoFree` совпадает с `CoreBridge/include/BeyGramMihomoCore.h`. Размер архива для Linux со `-s -w` около 66 МБ.
+- Не проверено: сборка под `GOOS=ios` (нужен Xcode), минимальная версия iOS в скрипте (`MIN_IOS`, по умолчанию 15.0, поставить реальный deployment target), размер в IPA.
+
+Bazel пока не подключён: нет цели для архива и заголовка, `MihomoCgoDriver` не входит в `swift_library`, `BeyGramMihomoRuntime` использует `UnlinkedMihomoCoreDriver`. Эти три шага делаются вместе и проверяются только на Mac.
 
 ## Перед включением флага
 

@@ -86,3 +86,4 @@ submodules/TelegramApi/ObjC/SwiftPMGenerated/
 submodules/TelegramApi/Tests/SwiftPMGenerated/
 /Telegram.app/
 build/accessibility/
+submodules/BeyGramProxy/CoreBridge/lib/
