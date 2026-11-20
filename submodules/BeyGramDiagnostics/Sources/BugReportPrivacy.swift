@@ -66,10 +66,15 @@ public enum BugReportPrivacy {
     /// Cleans, redacts and shortens a value. `maxLength` counts UTF-16 code units, as Android counts characters.
     /// A cut never splits a surrogate pair.
     public static func sanitize(_ text: String, maxLength: Int) -> String {
-        let cleaned = redact(stripControls(text)).trimmingCharacters(in: CharacterSet(charactersIn: "\n\r \t"))
-        let units = Array(cleaned.utf16)
+        truncate(redact(stripControls(text)).trimmingCharacters(in: CharacterSet(charactersIn: "\n\r \t")), maxLength: maxLength)
+    }
+
+    /// Shortens text to `maxLength` UTF-16 code units without redacting it. Never splits a surrogate pair.
+    /// Use it only on text that is already redacted.
+    public static func truncate(_ text: String, maxLength: Int) -> String {
+        let units = Array(text.utf16)
         guard units.count > maxLength else {
-            return cleaned
+            return text
         }
         var end = max(maxLength, 0)
         while end > 0, (0xD800 ... 0xDBFF).contains(units[end - 1]) {

@@ -18,13 +18,27 @@ public struct BugReportEvent: Codable, Equatable {
     public var code: String
     public var message: String
     public var attrs: [String: String]
+    /// Position in the process event log (`seq` on the wire). Nil for an event that did not come from the log.
+    public var seq: Int64?
+    /// Seconds since 1970 with a fraction (`at` on the wire). Nil for an event that did not come from the log.
+    public var at: Double?
 
-    public init(kind: BugReportEventKind, severity: BugReportSeverity, code: String, message: String = "", attrs: [String: String] = [:]) {
+    public init(
+        kind: BugReportEventKind,
+        severity: BugReportSeverity,
+        code: String,
+        message: String = "",
+        attrs: [String: String] = [:],
+        seq: Int64? = nil,
+        at: Double? = nil
+    ) {
         self.kind = kind
         self.severity = severity
         self.code = code
         self.message = message
         self.attrs = attrs
+        self.seq = seq
+        self.at = at
     }
 }
 
@@ -40,11 +54,13 @@ public struct BugReportClientMeta: Codable, Equatable {
     public var proxyEnabled: Bool?
     public var tdlibVersion: String?
     public var eventCountTotal: Int?
+    /// True when the event log has dropped events since launch, or this report had to drop some to fit.
+    public var bufferOverflowed: Bool?
 
     public init(
         appVersion: String? = nil, appVersionCode: Int? = nil, platform: String? = nil, osVersion: String? = nil,
         deviceModel: String? = nil, locale: String? = nil, vpnActive: Bool? = nil, proxyEnabled: Bool? = nil,
-        tdlibVersion: String? = nil, eventCountTotal: Int? = nil
+        tdlibVersion: String? = nil, eventCountTotal: Int? = nil, bufferOverflowed: Bool? = nil
     ) {
         self.appVersion = appVersion
         self.appVersionCode = appVersionCode
@@ -56,6 +72,7 @@ public struct BugReportClientMeta: Codable, Equatable {
         self.proxyEnabled = proxyEnabled
         self.tdlibVersion = tdlibVersion
         self.eventCountTotal = eventCountTotal
+        self.bufferOverflowed = bufferOverflowed
     }
 
     enum CodingKeys: String, CodingKey {
@@ -69,15 +86,20 @@ public struct BugReportClientMeta: Codable, Equatable {
         case proxyEnabled = "proxy_enabled"
         case tdlibVersion = "tdlib_version"
         case eventCountTotal = "event_count_total"
+        case bufferOverflowed = "buffer_overflowed"
     }
 }
 
 public struct BugReportBody: Codable, Equatable {
     public static let maxBodyBytes = 256 * 1024
+    /// The client's own budget for the encoded body, under the server limit (Android parity: 240 KiB).
+    public static let clientBudgetBytes = 240 * 1024
     public static let maxDescriptionCharacters = 2000
     public static let maxSummaryCharacters = 8000
     public static let maxEvents = 2000
     public static let maxEventMessageCharacters = 500
+    /// Attributes kept per event, in key order (Android parity: 24).
+    public static let maxEventAttributes = 24
     public static let maxAttrValueCharacters = 200
     public static let maxAttrKeyCharacters = 64
     public static let maxCodeCharacters = 200
@@ -97,6 +119,13 @@ public struct BugReportBody: Codable, Equatable {
         case clientMeta = "client_meta"
         case events
     }
+
+    /// The bytes that the size check measures and the upload sends. Keys are sorted, so one body always encodes the same way.
+    public func encodedJSON() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(self)
+    }
 }
 
 public enum BugReportError: Error, Equatable {
@@ -106,9 +135,11 @@ public enum BugReportError: Error, Equatable {
 }
 
 public enum BugReportBuilder {
-    /// Builds a body that respects every server limit. Text is truncated by characters, events are
-    /// kept newest first (the last events in the array are the newest), and the encoded size must fit
-    /// in 256 KB. Returns the body and whether anything was dropped.
+    /// Builds a body that respects every client limit and reports whether anything was dropped.
+    ///
+    /// Pass the events as they are: each one is redacted here, once (see `BugReportPrivacy`). Text is cut to the schema
+    /// limits, events are kept newest first (the last events in the array are the newest), and the encoded size must fit
+    /// `BugReportBody.clientBudgetBytes`, dropping the oldest events until it does.
     public static func makeBody(
         reportId: String,
         description: String,
@@ -123,7 +154,9 @@ public enum BugReportBuilder {
         let clampedSummary = summary.map { String($0.prefix(BugReportBody.maxSummaryCharacters)) }
         var kept = events.suffix(BugReportBody.maxEvents).map(sanitize)
         var meta = meta
-        meta.eventCountTotal = events.count
+        if meta.eventCountTotal == nil {
+            meta.eventCountTotal = events.count
+        }
 
         var dropped = events.count - kept.count
         while true {
@@ -134,30 +167,38 @@ public enum BugReportBuilder {
                 clientMeta: meta,
                 events: kept
             )
-            let size = try JSONEncoder().encode(body).count
-            if size <= BugReportBody.maxBodyBytes {
+            if try body.encodedJSON().count <= BugReportBody.clientBudgetBytes {
                 return (body, dropped)
             }
             if kept.isEmpty {
                 throw BugReportError.bodyTooLarge
             }
-            // Drop the oldest event and try again.
-            kept.removeFirst()
-            dropped += 1
+            // Drop the oldest quarter (at least one event) and measure again, as the Android client does.
+            let step = max(1, kept.count / 4)
+            kept.removeFirst(step)
+            dropped += step
         }
     }
 
+    /// Redacts one event and applies the schema limits. Redaction runs before each cut, so a secret never
+    /// reaches the cut as a fragment that the patterns cannot match.
     static func sanitize(_ event: BugReportEvent) -> BugReportEvent {
         var attrs: [String: String] = [:]
-        for (key, value) in event.attrs {
-            attrs[String(key.prefix(BugReportBody.maxAttrKeyCharacters))] = String(value.prefix(BugReportBody.maxAttrValueCharacters))
+        for (key, value) in event.attrs.sorted(by: { $0.key < $1.key }).prefix(BugReportBody.maxEventAttributes) {
+            let cleanKey = BugReportPrivacy.sanitize(key, maxLength: BugReportBody.maxAttrKeyCharacters)
+            guard !cleanKey.isEmpty else {
+                continue
+            }
+            attrs[cleanKey] = BugReportPrivacy.sanitize(value, maxLength: BugReportBody.maxAttrValueCharacters)
         }
         return BugReportEvent(
             kind: event.kind,
             severity: event.severity,
-            code: String(event.code.prefix(BugReportBody.maxCodeCharacters)),
-            message: String(event.message.prefix(BugReportBody.maxEventMessageCharacters)),
-            attrs: attrs
+            code: BugReportPrivacy.sanitize(event.code, maxLength: BugReportBody.maxCodeCharacters),
+            message: BugReportPrivacy.sanitize(event.message, maxLength: BugReportBody.maxEventMessageCharacters),
+            attrs: attrs,
+            seq: event.seq,
+            at: event.at
         )
     }
 
@@ -187,7 +228,7 @@ public enum BugReportBuilder {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(nonce)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONEncoder().encode(body)
+        request.httpBody = try body.encodedJSON()
         return request
     }
 }
