@@ -263,6 +263,25 @@ final class BGMusicLibraryTests: XCTestCase {
         }
     }
 
+    func testReplacingTheCoverLeavesOnlyTheNewCoverFile() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bglib-cover-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try BGMusicLibraryFileStore(directory: directory)
+        let library = makeLibrary(store: store)
+        let created = try library.createPlaylist(title: "Обложка", description: "")
+        let png = BGMusicCover(kind: .png, data: Data(pngCover))
+        let jpgBytes: [UInt8] = [0xFF, 0xD8, 0xFF, 0xE0]
+        let jpg = BGMusicCover(kind: .jpg, data: Data(jpgBytes))
+        _ = try library.saveEdits(created, cover: .set(png))
+        _ = try library.saveEdits(created, cover: .set(jpg))
+        XCTAssertEqual(try library.cover(localId: created.localId), jpg)
+        let folder = directory
+            .appendingPathComponent("covers", isDirectory: true)
+            .appendingPathComponent(created.localId, isDirectory: true)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), ["cover.jpg"])
+    }
+
     func testFileTypesMatchTheFormat() {
         XCTAssertEqual(BGMusicFileTypes.fileExtension, "bgmusic")
         XCTAssertEqual(BGMusicFileTypes.mimeType, "application/vnd.beygram.music+zip")
