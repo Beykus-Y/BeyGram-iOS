@@ -56,6 +56,8 @@ public enum BGYandexError: Error, Equatable {
     case rateLimited
     /// The answer did not have the shape the app understands. The service may have changed.
     case serviceChanged
+    /// The file behind a track link is not a track: an error page, a text body or a cut-off file. Nothing is kept.
+    case invalidFile
     case unknown
 
     /// True when the failure may pass on its own (a pause, a session, a network blip), so a track is retried later.
