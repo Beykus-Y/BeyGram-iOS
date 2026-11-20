@@ -243,7 +243,7 @@ public final class MihomoProxyController {
         queue.async {
             do {
                 let group = try self.client.proxies(group: MihomoProxyController.groupName)
-                let names = group.nodes.map { $0.name }
+                let names = MihomoProxyController.serverNames(in: group)
                 self.updateLatencyCheck { $0 = MihomoLatencyCheck(phase: .running, total: names.count, delays: [:]) }
                 self.checkQueue.async {
                     // One node that fails must not cancel the others. It is reported as -1.
@@ -362,7 +362,7 @@ public final class MihomoProxyController {
         checkQueue.async {
             // The delay stored in the group can be stale, so the node in use is probed directly.
             let inUseDelay = (try? self.client.testDelay(proxy: group.now, timeoutMilliseconds: MihomoProxyController.probeTimeoutMilliseconds)) ?? -1
-            let fastest: String? = inUseDelay <= 0 ? self.fastestNode(among: group.nodes.map { $0.name }) : nil
+            let fastest: String? = inUseDelay <= 0 ? self.fastestNode(among: MihomoProxyController.serverNames(in: group)) : nil
             self.queue.async {
                 if let fastest = fastest {
                     self.selectIfStillWatching(fastest, generation: generation)
@@ -376,6 +376,11 @@ public final class MihomoProxyController {
         if generation == watchdogGeneration {
             scheduleWatchdogTick(generation: generation)
         }
+    }
+
+    /// The names of the group's entries that are servers, in the group's order. See `MihomoServerRule`.
+    private static func serverNames(in group: MihomoGroupState) -> [String] {
+        return group.nodes.filter { MihomoServerRule.isServer(type: $0.type) }.map { $0.name }
     }
 
     /// Runs off `queue`. Probes the nodes and returns the fastest one that answers; of equal delays, the first in order.
@@ -500,7 +505,7 @@ public final class MihomoProxyController {
                   self.currentState.autoSelectEnabled else {
                 return
             }
-            self.selectFastestAfterNetworkChange(names: group.nodes.map { $0.name }, generation: generation)
+            self.selectFastestAfterNetworkChange(names: MihomoProxyController.serverNames(in: group), generation: generation)
         }
     }
 
