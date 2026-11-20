@@ -27,3 +27,6 @@ build:macos --strategy=SwiftCompile=worker
 
 common:macos --features=swift.use_global_module_cache
 common:macos --features=oso_prefix_is_pwd
+
+# Optional developer-specific build settings
+try-import %workspace%/.bazelrc.local
