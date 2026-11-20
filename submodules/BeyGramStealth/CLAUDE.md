@@ -7,6 +7,7 @@ Block B of the iOS plan (privacy and stealth, see the plan document «План �
 - **Presence** (`account.updateStatus`): with `hideOnline`, the account is always reported offline. Account-wide only.
 - **Typing and other chat activity** (`messages.setTyping`): with `hideTyping`, nothing is sent for the chat. Per-chat overrides apply.
 - **Read receipts** (`messages.readHistory`, `channels.readHistory`, the sync of a chat's read state): with `hideReadReceipts`, the read state is not pushed. The sync treats it as done, so it is not sent later either. Known limitation: while the rule is on, mark-as-unread is not synced to the server. "Mark all chats as read" skips the chats the rule hides.
+- **Thread and topic reads** (`messages.readDiscussion`, `messages.readSavedHistory`: a forum topic, a monoforum sub-chat, a comment thread): with `hideReadReceipts`, nothing is sent. The local read state still changes, and the server count is not fetched, since it would bring the unread count back. The per-chat mode is that of the chat the thread's messages live in (the forum, the monoforum channel or the group).
 
 ## Stealth sending
 
@@ -19,7 +20,6 @@ Block B of the iOS plan (privacy and stealth, see the plan document «План �
 
 ## Not covered yet
 
-- **Thread and topic reads** (`messages.readDiscussion`, `messages.readSavedHistory`, `TelegramEngine/Messages/ApplyMaxReadIndexInteractively.swift`) are not gated: those helpers take no account peer id.
 - **View-once media and live locations**: Android refuses them (`TdStealthScheduler.resolve`); iOS does not yet. Channel direct messages (monoforums) are not refused either.
 - **Standalone sends** (`standaloneSendMessage`, share and intent paths) do not pass the hook. The sideload build has no extensions, so they are not reachable there today.
 - Story views, open-content receipts, the delayed-send queue, live text drafts, the settings screen and the consent prompt (UI, outside this module).
@@ -28,12 +28,14 @@ Block B of the iOS plan (privacy and stealth, see the plan document «План �
 
 - **Master switch**: BeyGramKit feature `privacyPolicy`, off by default. With it off, every hook returns the upstream behaviour.
 - **Per account**: `BeyGramStealthStore`, UserDefaults key `beygram.stealth.settings.<accountPeerId>`. BeyGramKit settings are shared across accounts, so they are not used for this.
+- **Per chat**: a chat's own mode (`allow` or `block`; `inherit` uses the account setting) replaces the account setting for that chat, for read receipts and typing. This is Android's `ConfigurableInteractionPolicy` (`InteractionPolicy.kt`), where a chat override replaces the account's set. Presence has no per-chat mode.
 - **Dependencies**: Foundation and BeyGramKit only. No Postbox, no TelegramCore.
 - **Upstream hooks are short calls** into `BeyGramStealthHooks`. Hook sites:
   - `submodules/TelegramCore/Sources/State/ManagedAccountPresence.swift` (created with the account's peer id in `Account.swift`): presence.
   - `submodules/TelegramCore/Sources/State/ManagedLocalInputActivities.swift`: `requestActivity` (typing).
   - `submodules/TelegramCore/Sources/State/SynchronizePeerReadState.swift`: `pushPeerReadState` (read receipts).
   - `submodules/TelegramCore/Sources/TelegramEngine/Messages/MarkAllChatsAsRead.swift`: read receipts of "mark all chats as read".
+  - `submodules/TelegramCore/Sources/TelegramEngine/Messages/ApplyMaxReadIndexInteractively.swift` and `ReplyThreadHistory.swift`: thread and topic reads. The helpers take the account peer id for this.
   - `submodules/TelegramCore/Sources/PendingMessages/EnqueueMessage.swift` with `submodules/TelegramCore/Sources/BeyGram/BeyGramStealthSend.swift`: sending and resending.
 - **Scheduled sends**: flags bit 10 goes together with the date in the request builder (`PendingMessageManager`), so a date is never sent without its flag.
 - **Clock**: the server clock (`network.globalTime`), never the device clock. A date in the past means an immediate send.
