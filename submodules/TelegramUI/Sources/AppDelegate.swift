@@ -1072,6 +1072,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             try resetWalletLocalSecrets()
         })
         self.accountManager = accountManager
+        BeyGramMihomoRuntime.shared.attachAccountManager(accountManager, mihomoEnabled: BeyGramSettings.shared.isEnabled(.mihomoProxy))
 
         telegramUIDeclareEncodables()
         initializeAccountManagement()

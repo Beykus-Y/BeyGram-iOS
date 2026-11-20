@@ -7,17 +7,19 @@ import BeyGramProxy
 ///
 /// Only the BeyGram Mihomo screen calls this, and that screen is reachable only while the
 /// `mihomoProxy` flag is on. Telegram's proxy settings are saved before the first connect and
-/// restored on disconnect. Until the core archive is linked, the controller uses the unlinked
-/// driver, so a connect fails with a clear message. See submodules/BeyGramProxy/README.md.
+/// restored on disconnect or if the core fails to start. See submodules/BeyGramProxy/README.md.
 public final class BeyGramMihomoRuntime {
     public static let shared = BeyGramMihomoRuntime()
 
     public let controller: MihomoProxyController
+    private let runtimeLock = NSLock()
+    private var attachedAccountManager: AccountManager<TelegramAccountManagerTypes>?
+    private var resumeFailedBeforeAttach = false
 
     private init() {
         let directory = BeyGramMihomoRuntime.supportDirectory()
         self.controller = MihomoProxyController(
-            client: MihomoCoreClient(driver: UnlinkedMihomoCoreDriver()),
+            client: MihomoCoreClient(driver: MihomoCgoDriver()),
             store: MihomoProxyStateStore(directory: directory),
             homeDirectory: directory.appendingPathComponent("core", isDirectory: true)
         )
@@ -43,6 +45,8 @@ public final class BeyGramMihomoRuntime {
                     case let .failure(error):
                         if savedSnapshot {
                             self.controller.setTelegramSettingsBeforeConnect(nil)
+                        } else if self.controller.currentState.telegramSettingsBeforeConnect != nil {
+                            self.restoreTelegramSettings(accountManager: accountManager)
                         }
                         completion(.failure(error))
                 }
@@ -52,7 +56,42 @@ public final class BeyGramMihomoRuntime {
 
     /// Called at app launch when the flag is on. Starts the core again if it was running at the last exit.
     public func resumeIfNeeded() {
-        self.controller.resumeIfNeeded(completion: { _ in })
+        self.controller.resumeIfNeeded(completion: { [weak self] result in
+            guard let self = self else {
+                return
+            }
+            if case .failure = result {
+                self.runtimeLock.lock()
+                let accountManager = self.attachedAccountManager
+                if accountManager == nil {
+                    self.resumeFailedBeforeAttach = true
+                }
+                self.runtimeLock.unlock()
+                if let accountManager = accountManager {
+                    self.restoreTelegramSettings(accountManager: accountManager)
+                }
+            }
+        })
+    }
+
+    /// Attaches the account manager once initialized so a failed launch resume or disabled flag
+    /// never leaves Telegram pointing at a non-working loopback proxy.
+    public func attachAccountManager(_ accountManager: AccountManager<TelegramAccountManagerTypes>, mihomoEnabled: Bool) {
+        self.runtimeLock.lock()
+        self.attachedAccountManager = accountManager
+        let failedBeforeAttach = self.resumeFailedBeforeAttach
+        self.resumeFailedBeforeAttach = false
+        self.runtimeLock.unlock()
+
+        if !mihomoEnabled {
+            if self.controller.currentState.telegramSettingsBeforeConnect != nil {
+                self.restoreTelegramSettings(accountManager: accountManager)
+            }
+            return
+        }
+        if failedBeforeAttach && !self.controller.currentState.isRunning && self.controller.currentState.telegramSettingsBeforeConnect != nil {
+            self.restoreTelegramSettings(accountManager: accountManager)
+        }
     }
 
     /// Turns the automatic node switch on or off.
