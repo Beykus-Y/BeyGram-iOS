@@ -1,15 +1,19 @@
 import Foundation
 
-/// Gives a local MP3 for a `ym:` row. Only the file is kept. Links are requested again each time, because they expire.
+/// Gives a local MP3 for a `ym:` row. Only the file is kept. A link is asked for each time it is needed, because it expires.
 /// The cache is a folder inside the app's private storage, so it is not in backups that leave the device.
 public final class BGYandexTrackResolver {
-    private let api: BGYandexAPI
+    /// Gives a fresh link for a track: the service checks the session and the subscription. Not on the main queue.
+    public typealias LinkProvider = (String, @escaping (Result<BGYandexAudio, BGYandexError>) -> Void) -> Void
+
+    /// Set by the service once it exists. Without it no track can be downloaded.
+    public var linkProvider: LinkProvider?
+
     private let cacheDirectory: URL
     private let session: URLSession
     private let fileManager = FileManager.default
 
-    public init(api: BGYandexAPI, cacheDirectory: URL) {
-        self.api = api
+    public init(cacheDirectory: URL) {
         self.cacheDirectory = cacheDirectory
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]
@@ -25,40 +29,57 @@ public final class BGYandexTrackResolver {
         return "ym-\(safe).mp3"
     }
 
+    private func cacheURL(trackId: String) -> URL {
+        return cacheDirectory.appendingPathComponent(BGYandexTrackResolver.fileName(trackId: trackId))
+    }
+
     public func cachedFile(trackId: String) -> URL? {
-        let url = cacheDirectory.appendingPathComponent(BGYandexTrackResolver.fileName(trackId: trackId))
+        let url = cacheURL(trackId: trackId)
         return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 
-    /// Local file for the track: the cached copy, or a fresh download. One retry when the link was refused as expired.
-    public func localFile(token: String, trackId: String, completion: @escaping (Result<URL, BGYandexError>) -> Void) {
+    /// Local file for the track: the cached copy, or a fresh download. A link refused as expired is asked for once more.
+    /// Completes on the main queue.
+    public func localFile(trackId: String, completion: @escaping (Result<URL, BGYandexError>) -> Void) {
+        let report: (Result<URL, BGYandexError>) -> Void = { result in
+            DispatchQueue.main.async {
+                completion(result)
+            }
+        }
         if let cached = cachedFile(trackId: trackId) {
-            completion(.success(cached))
+            report(.success(cached))
             return
         }
-        download(token: token, trackId: trackId, retriesLeft: 1, completion: completion)
+        download(trackId: trackId, retriesLeft: 1, completion: report)
     }
 
-    private func download(token: String, trackId: String, retriesLeft: Int, completion: @escaping (Result<URL, BGYandexError>) -> Void) {
-        api.audioLink(token: token, trackId: trackId) { [weak self] linkResult in
-            guard let self = self else {
-                return
-            }
+    private func download(trackId: String, retriesLeft: Int, completion: @escaping (Result<URL, BGYandexError>) -> Void) {
+        guard let provider = linkProvider else {
+            completion(.failure(.notSignedIn))
+            return
+        }
+        provider(trackId) { linkResult in
             switch linkResult {
             case let .failure(error):
                 completion(.failure(error))
-            case let .success(link):
-                self.session.downloadTask(with: URLRequest(url: link.url)) { tempURL, response, error in
+            case let .success(audio):
+                self.session.downloadTask(with: URLRequest(url: audio.url)) { tempURL, response, error in
                     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    if (status == 403 || status == 410), retriesLeft > 0 {
-                        self.download(token: token, trackId: trackId, retriesLeft: retriesLeft - 1, completion: completion)
+                    // The link was refused as expired: one fresh link, then the track waits for a later try.
+                    if status == 403 || status == 410 {
+                        if retriesLeft > 0 {
+                            self.download(trackId: trackId, retriesLeft: retriesLeft - 1, completion: completion)
+                        } else {
+                            completion(.failure(.unavailable))
+                        }
                         return
                     }
                     guard error == nil, (200...299).contains(status), let tempURL = tempURL else {
                         completion(.failure(.network))
                         return
                     }
-                    let target = self.cacheDirectory.appendingPathComponent(BGYandexTrackResolver.fileName(trackId: trackId))
+                    // The temporary file is only valid inside this handler, so it is moved here.
+                    let target = self.cacheURL(trackId: trackId)
                     do {
                         if self.fileManager.fileExists(atPath: target.path) {
                             try self.fileManager.removeItem(at: target)
@@ -74,7 +95,7 @@ public final class BGYandexTrackResolver {
     }
 
     public func forget(trackId: String) {
-        try? fileManager.removeItem(at: cacheDirectory.appendingPathComponent(BGYandexTrackResolver.fileName(trackId: trackId)))
+        try? fileManager.removeItem(at: cacheURL(trackId: trackId))
     }
 
     /// Removes every cached track. Called on sign-out.
