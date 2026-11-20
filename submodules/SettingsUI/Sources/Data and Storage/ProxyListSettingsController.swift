@@ -10,7 +10,6 @@ import PresentationDataUtils
 import AccountContext
 import ShareController
 import UrlEscaping
-import BeyGramKit
 
 private final class ProxySettingsControllerArguments {
     let toggleEnabled: (Bool) -> Void
@@ -21,9 +20,8 @@ private final class ProxySettingsControllerArguments {
     let setServerWithRevealedOptions: (ProxyServerSettings?, ProxyServerSettings?) -> Void
     let toggleUseForCalls: (Bool) -> Void
     let shareProxyList: () -> Void
-    let openMihomo: () -> Void
     
-    init(toggleEnabled: @escaping (Bool) -> Void, addNewServer: @escaping () -> Void, activateServer: @escaping (ProxyServerSettings) -> Void, editServer: @escaping (ProxyServerSettings) -> Void, removeServer: @escaping (ProxyServerSettings) -> Void, setServerWithRevealedOptions: @escaping (ProxyServerSettings?, ProxyServerSettings?) -> Void, toggleUseForCalls: @escaping (Bool) -> Void, shareProxyList: @escaping () -> Void, openMihomo: @escaping () -> Void) {
+    init(toggleEnabled: @escaping (Bool) -> Void, addNewServer: @escaping () -> Void, activateServer: @escaping (ProxyServerSettings) -> Void, editServer: @escaping (ProxyServerSettings) -> Void, removeServer: @escaping (ProxyServerSettings) -> Void, setServerWithRevealedOptions: @escaping (ProxyServerSettings?, ProxyServerSettings?) -> Void, toggleUseForCalls: @escaping (Bool) -> Void, shareProxyList: @escaping () -> Void) {
         self.toggleEnabled = toggleEnabled
         self.addNewServer = addNewServer
         self.activateServer = activateServer
@@ -32,7 +30,6 @@ private final class ProxySettingsControllerArguments {
         self.setServerWithRevealedOptions = setServerWithRevealedOptions
         self.toggleUseForCalls = toggleUseForCalls
         self.shareProxyList = shareProxyList
-        self.openMihomo = openMihomo
     }
 }
 
@@ -41,7 +38,6 @@ private enum ProxySettingsControllerSection: Int32 {
     case servers
     case share
     case calls
-    case mihomo
 }
 
 private enum ProxyServerAvailabilityStatus: Equatable {
@@ -84,7 +80,6 @@ private enum ProxySettingsControllerEntry: ItemListNodeEntry {
     case shareProxyList(PresentationTheme, String)
     case useForCalls(PresentationTheme, String, Bool)
     case useForCallsInfo(PresentationTheme, String)
-    case mihomo(PresentationTheme, String)
     
     var section: ItemListSectionId {
         switch self {
@@ -96,8 +91,6 @@ private enum ProxySettingsControllerEntry: ItemListNodeEntry {
                 return ProxySettingsControllerSection.share.rawValue
             case .useForCalls, .useForCallsInfo:
                 return ProxySettingsControllerSection.calls.rawValue
-            case .mihomo:
-                return ProxySettingsControllerSection.mihomo.rawValue
         }
     }
     
@@ -117,8 +110,6 @@ private enum ProxySettingsControllerEntry: ItemListNodeEntry {
                 return .index(4)
             case .useForCallsInfo:
                 return .index(5)
-            case .mihomo:
-                return .index(6)
         }
     }
     
@@ -160,12 +151,6 @@ private enum ProxySettingsControllerEntry: ItemListNodeEntry {
                 } else {
                     return false
                 }
-            case let .mihomo(lhsTheme, lhsText):
-                if case let .mihomo(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
-                    return true
-                } else {
-                    return false
-                }
             case let .useForCallsInfo(lhsTheme, lhsText):
                 if case let .useForCallsInfo(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
                     return true
@@ -177,13 +162,6 @@ private enum ProxySettingsControllerEntry: ItemListNodeEntry {
     
     static func <(lhs: ProxySettingsControllerEntry, rhs: ProxySettingsControllerEntry) -> Bool {
         switch lhs {
-            case .mihomo:
-                switch rhs {
-                    case .enabled, .mihomo:
-                        return false
-                    default:
-                        return true
-                }
             case .enabled:
                 switch rhs {
                     case .enabled:
@@ -193,21 +171,21 @@ private enum ProxySettingsControllerEntry: ItemListNodeEntry {
                 }
             case .serversHeader:
                 switch rhs {
-                    case .enabled, .mihomo, .serversHeader:
+                    case .enabled, .serversHeader:
                         return false
                     default:
                         return true
                 }
             case .addServer:
                 switch rhs {
-                    case .enabled, .mihomo, .serversHeader, .addServer:
+                    case .enabled, .serversHeader, .addServer:
                         return false
                     default:
                         return true
                 }
             case let .server(lhsIndex, _, _, _, _, _, _, _):
                 switch rhs {
-                    case .enabled, .mihomo, .serversHeader, .addServer:
+                    case .enabled, .serversHeader, .addServer:
                         return false
                     case let .server(rhsIndex, _, _, _, _, _, _, _):
                         return lhsIndex < rhsIndex
@@ -216,14 +194,14 @@ private enum ProxySettingsControllerEntry: ItemListNodeEntry {
                 }
             case .shareProxyList:
                 switch rhs {
-                    case .enabled, .mihomo, .serversHeader, .addServer, .server, .shareProxyList:
+                    case .enabled, .serversHeader, .addServer, .server, .shareProxyList:
                         return false
                     default:
                         return true
             }
             case .useForCalls:
                 switch rhs {
-                    case .enabled, .mihomo, .serversHeader, .addServer, .server, .shareProxyList, .useForCalls:
+                    case .enabled, .serversHeader, .addServer, .server, .shareProxyList, .useForCalls:
                         return false
                     default:
                         return true
@@ -264,10 +242,6 @@ private enum ProxySettingsControllerEntry: ItemListNodeEntry {
                 return ProxySettingsActionItem(presentationData: presentationData, systemStyle: .glass, title: text, sectionId: self.section, editing: false, action: {
                     arguments.shareProxyList()
                 }, tag: ProxySettingsEntryTag.shareList)
-            case let .mihomo(_, text):
-                return ProxySettingsActionItem(presentationData: presentationData, systemStyle: .glass, title: text, sectionId: self.section, editing: false, action: {
-                    arguments.openMihomo()
-                })
             case let .useForCalls(_, text, value):
                 return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: text, value: value, enableInteractiveChanges: true, enabled: true, sectionId: self.section, style: .blocks, updated: { value in
                     arguments.toggleUseForCalls(value)
@@ -282,9 +256,6 @@ private func proxySettingsControllerEntries(theme: PresentationTheme, strings: P
     var entries: [ProxySettingsControllerEntry] = []
 
     entries.append(.enabled(theme, strings.ChatSettings_ConnectionType_UseProxy, proxySettings.enabled, proxySettings.servers.isEmpty))
-    if BeyGramSettings.shared.isEnabled(.mihomoProxy) {
-        entries.append(.mihomo(theme, BeyGramFeature.mihomoProxy.title(languageCode: strings.primaryComponent.languageCode)))
-    }
     entries.append(.serversHeader(theme, strings.SocksProxySetup_SavedProxies))
     entries.append(.addServer(theme, strings.SocksProxySetup_AddProxy, state.editing))
     var index = 0
@@ -447,8 +418,6 @@ public func proxySettingsController(accountManager: AccountManager<TelegramAccou
         }).start()
     }, shareProxyList: {
        shareProxyListImpl?()
-    }, openMihomo: {
-        pushControllerImpl?(beyGramMihomoController(accountManager: accountManager, presentationData: presentationData, updatedPresentationData: updatedPresentationData))
     })
     
     let proxySettings = Promise<ProxySettings>()
