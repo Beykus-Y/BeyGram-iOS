@@ -282,9 +282,7 @@ private func proxySettingsControllerEntries(theme: PresentationTheme, strings: P
     var entries: [ProxySettingsControllerEntry] = []
 
     entries.append(.enabled(theme, strings.ChatSettings_ConnectionType_UseProxy, proxySettings.enabled, proxySettings.servers.isEmpty))
-    if BeyGramSettings.shared.isEnabled(.mihomoProxy) {
-        entries.append(.mihomo(theme, BeyGramFeature.mihomoProxy.title(languageCode: strings.primaryComponent.languageCode)))
-    }
+    entries.append(.mihomo(theme, BeyGramFeature.mihomoProxy.title(languageCode: strings.primaryComponent.languageCode)))
     entries.append(.serversHeader(theme, strings.SocksProxySetup_SavedProxies))
     entries.append(.addServer(theme, strings.SocksProxySetup_AddProxy, state.editing))
     var index = 0

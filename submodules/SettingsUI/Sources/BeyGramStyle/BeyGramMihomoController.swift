@@ -218,7 +218,7 @@ private func beyGramMihomoEntries(state: BeyGramMihomoScreenState, isRussian: Bo
             entries.append(.measure(isRussian ? "Проверить задержку" : "Check delays"))
         }
     }
-    entries.append(.note(isRussian ? "Экспериментальная функция. Выключена по умолчанию." : "Experimental feature. Off by default."))
+    entries.append(.note(isRussian ? "Встроенный локальный SOCKS5-прокси на 127.0.0.1:17891." : "Built-in local SOCKS5 proxy at 127.0.0.1:17891."))
     return entries
 }
 
