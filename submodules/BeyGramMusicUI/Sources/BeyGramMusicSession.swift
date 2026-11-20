@@ -1,109 +1,144 @@
 import Foundation
-import AVFoundation
 import SwiftSignalKit
 import BeyGramMedia
 
-/// Represents a track in the BeyGram Music / BG Mix queue.
+/// Track preparation/playback state mapped from `BGMixTrackState`.
+public enum BeyGramMusicTrackStatus: Equatable {
+    case pending
+    case preparing(Float)
+    case ready
+    case playing
+    case played
+    case failed(String?)
+
+    init(track: BGMixTrack) {
+        switch track.state {
+        case .pending:
+            self = .pending
+        case .preparing:
+            self = .preparing(track.progress)
+        case .ready:
+            self = .ready
+        case .playing:
+            self = .playing
+        case .played:
+            self = .played
+        case .failed:
+            self = .failed(track.error)
+        @unknown default:
+            self = .pending
+        }
+    }
+}
+
+/// Immutable track model projected from `BGMixTrack`.
 public struct BeyGramMusicTrack: Equatable, Identifiable {
     public let id: UInt64
     public let url: URL
     public let title: String
-    public let artist: String?
     public let duration: TimeInterval?
     public let bpm: Int?
-    public let isPrepared: Bool
+    public let status: BeyGramMusicTrackStatus
 
-    public init(
-        id: UInt64,
-        url: URL,
-        title: String,
-        artist: String? = nil,
-        duration: TimeInterval? = nil,
-        bpm: Int? = nil,
-        isPrepared: Bool = true
-    ) {
-        self.id = id
-        self.url = url
-        self.title = title
-        self.artist = artist
-        self.duration = duration
-        self.bpm = bpm
-        self.isPrepared = isPrepared
+    public var isPrepared: Bool {
+        switch self.status {
+        case .ready, .playing, .played:
+            return true
+        case .pending, .preparing, .failed:
+            return false
+        }
+    }
+
+    init(track: BGMixTrack) {
+        self.id = track.identifier
+        self.url = track.fileURL
+        let rawName = track.name
+        let stripped = (rawName as NSString).deletingPathExtension
+        self.title = stripped.isEmpty ? rawName : stripped
+        self.duration = track.duration > 0 ? track.duration : nil
+        self.bpm = track.bpm > 0 ? Int(track.bpm.rounded()) : nil
+        self.status = BeyGramMusicTrackStatus(track: track)
     }
 }
 
-/// Snapshot of the shared `BeyGramMusicSession` state.
+/// Snapshot of `BGMixPlayer.sharedPlayer()` plus local mix settings.
 public struct BeyGramMusicState: Equatable {
     public var queue: [BeyGramMusicTrack]
     public var recentTracks: [BeyGramMusicTrack]
-    public var currentIndex: Int
+    public var currentTrack: BeyGramMusicTrack?
+    public var nextTrack: BeyGramMusicTrack?
+    public var position: TimeInterval
+    public var duration: TimeInterval
     public var isPlaying: Bool
+    public var isPaused: Bool
     public var isTransitionActive: Bool
+    public var transitionProgress: Float
+    public var isPreparingNext: Bool
+    public var lastError: String?
     public var transitionDuration: Double
     public var adaptiveTransitions: Bool
     public var bassSwap: Bool
 
-    public var currentTrack: BeyGramMusicTrack? {
-        guard self.currentIndex >= 0 && self.currentIndex < self.queue.count else {
-            return nil
-        }
-        return self.queue[self.currentIndex]
-    }
-
-    public var nextTrack: BeyGramMusicTrack? {
-        let nextIndex = self.currentIndex + 1
-        guard nextIndex >= 0 && nextIndex < self.queue.count else {
-            return nil
-        }
-        return self.queue[nextIndex]
-    }
-
     public init(
         queue: [BeyGramMusicTrack] = [],
         recentTracks: [BeyGramMusicTrack] = [],
-        currentIndex: Int = 0,
+        currentTrack: BeyGramMusicTrack? = nil,
+        nextTrack: BeyGramMusicTrack? = nil,
+        position: TimeInterval = 0.0,
+        duration: TimeInterval = 0.0,
         isPlaying: Bool = false,
+        isPaused: Bool = false,
         isTransitionActive: Bool = false,
+        transitionProgress: Float = 0.0,
+        isPreparingNext: Bool = false,
+        lastError: String? = nil,
         transitionDuration: Double = 0.0,
         adaptiveTransitions: Bool = true,
         bassSwap: Bool = true
     ) {
         self.queue = queue
         self.recentTracks = recentTracks
-        self.currentIndex = currentIndex
+        self.currentTrack = currentTrack
+        self.nextTrack = nextTrack
+        self.position = position
+        self.duration = duration
         self.isPlaying = isPlaying
+        self.isPaused = isPaused
         self.isTransitionActive = isTransitionActive
+        self.transitionProgress = transitionProgress
+        self.isPreparingNext = isPreparingNext
+        self.lastError = lastError
         self.transitionDuration = transitionDuration
         self.adaptiveTransitions = adaptiveTransitions
         self.bassSwap = bassSwap
     }
 }
 
-/// Shared audio session owning `BGMixPlayer` independently of any view controller lifecycle.
-public final class BeyGramMusicSession {
+/// Thin Swift reactive adapter over `BGMixPlayer.sharedPlayer()` (`BGMixPlayerObserver`).
+///
+/// There is only one global player instance (`BGMixPlayer.sharedPlayer()`), owned by `BeyGramMedia`.
+public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
     public static let shared = BeyGramMusicSession()
 
     private let player: BGMixPlayer
-    private let mixDirectory: URL
     private let stateValue: Atomic<BeyGramMusicState>
     private let statePromise: ValuePromise<BeyGramMusicState>
-    private var transitionTimer: Foundation.Timer?
 
-    private init() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        self.mixDirectory = docs.appendingPathComponent("bgmix", isDirectory: true)
-        let cacheDir = self.mixDirectory.appendingPathComponent("cache", isDirectory: true)
-        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-
-        self.player = BGMixPlayer(cacheDirectory: cacheDir.path)
+    private override init() {
+        self.player = BGMixPlayer.sharedPlayer()
         let initial = BeyGramMusicState()
         self.stateValue = Atomic(value: initial)
         self.statePromise = ValuePromise(initial, ignoreRepeated: true)
+        super.init()
 
         self.player.setTransitionDuration(initial.transitionDuration)
         self.player.setAdaptiveTransitions(initial.adaptiveTransitions)
         self.player.setBassSwap(initial.bassSwap)
+        self.player.addObserver(self)
+    }
+
+    deinit {
+        self.player.removeObserver(self)
     }
 
     public var stateSignal: Signal<BeyGramMusicState, NoError> {
@@ -123,13 +158,40 @@ public final class BeyGramMusicSession {
         self.statePromise.set(next)
     }
 
+    public func mixPlayer(_ player: BGMixPlayer, didUpdate snapshot: BGMixSnapshot) {
+        let mappedQueue = snapshot.queue.map(BeyGramMusicTrack.init(track:))
+        let mappedCurrent = snapshot.currentTrack.map(BeyGramMusicTrack.init(track:))
+        let mappedNext = snapshot.nextTrack.map(BeyGramMusicTrack.init(track:))
+
+        self.mutate { state in
+            state.queue = mappedQueue
+            state.currentTrack = mappedCurrent
+            state.nextTrack = mappedNext
+            state.position = snapshot.position
+            state.duration = snapshot.duration
+            state.isPlaying = snapshot.transport == .playing
+            state.isPaused = snapshot.transport == .paused
+            state.isTransitionActive = snapshot.transitionActive
+            state.transitionProgress = snapshot.transitionProgress
+            state.isPreparingNext = snapshot.preparingNext
+            state.lastError = snapshot.lastError
+            if let current = mappedCurrent {
+                state.recentTracks.removeAll { $0.id == current.id }
+                state.recentTracks.insert(current, at: 0)
+                if state.recentTracks.count > 20 {
+                    state.recentTracks = Array(state.recentTracks.prefix(20))
+                }
+            }
+        }
+    }
+
     public func addTracks(urls: [URL]) {
         DispatchQueue.main.async {
-            try? FileManager.default.createDirectory(at: self.mixDirectory, withIntermediateDirectories: true)
-            var added: [BeyGramMusicTrack] = []
+            let mixDir = BGMixPlayer.mixDirectory()
+            try? FileManager.default.createDirectory(at: mixDir, withIntermediateDirectories: true)
             for source in urls {
                 let scoped = source.startAccessingSecurityScopedResource()
-                let target = self.mixDirectory.appendingPathComponent("\(UUID().uuidString)-\(source.lastPathComponent)")
+                let target = mixDir.appendingPathComponent("\(UUID().uuidString)-\(source.lastPathComponent)")
                 let copied: Bool
                 do {
                     try FileManager.default.copyItem(at: source, to: target)
@@ -141,71 +203,14 @@ public final class BeyGramMusicSession {
                     source.stopAccessingSecurityScopedResource()
                 }
                 guard copied else { continue }
-
-                let identifier = self.player.addTrack(at: target)
-                guard identifier != 0 else { continue }
-
-                let asset = AVURLAsset(url: target)
-                let durationSeconds = CMTimeGetSeconds(asset.duration)
-                let duration = durationSeconds.isFinite && durationSeconds > 0 ? durationSeconds : nil
-                let fallbackTitle = source.deletingPathExtension().lastPathComponent
-                let track = BeyGramMusicTrack(
-                    id: identifier,
-                    url: target,
-                    title: fallbackTitle.isEmpty ? source.lastPathComponent : fallbackTitle,
-                    artist: nil,
-                    duration: duration,
-                    bpm: nil,
-                    isPrepared: true
-                )
-                added.append(track)
-            }
-
-            if !added.isEmpty {
-                self.mutate { state in
-                    state.queue.append(contentsOf: added)
-                    for track in added.reversed() {
-                        state.recentTracks.removeAll { $0.id == track.id }
-                        state.recentTracks.insert(track, at: 0)
-                    }
-                    if state.recentTracks.count > 20 {
-                        state.recentTracks = Array(state.recentTracks.prefix(20))
-                    }
-                }
+                _ = self.player.addTrack(at: target)
             }
         }
     }
 
     public func removeTrack(id: UInt64) {
         DispatchQueue.main.async {
-            self.player.removeTrack(withIdentifier: id)
-            self.mutate { state in
-                state.queue.removeAll { $0.id == id }
-                if state.queue.isEmpty {
-                    state.currentIndex = 0
-                    state.isPlaying = false
-                    state.isTransitionActive = false
-                } else if state.currentIndex >= state.queue.count {
-                    state.currentIndex = max(0, state.queue.count - 1)
-                }
-            }
-        }
-    }
-
-    public func moveTrack(from sourceIndex: Int, to destinationIndex: Int) {
-        DispatchQueue.main.async {
-            self.mutate { state in
-                guard sourceIndex >= 0, sourceIndex < state.queue.count,
-                      destinationIndex >= 0, destinationIndex < state.queue.count,
-                      sourceIndex != destinationIndex else {
-                    return
-                }
-                let item = state.queue.remove(at: sourceIndex)
-                state.queue.insert(item, at: destinationIndex)
-                if state.currentIndex == sourceIndex {
-                    state.currentIndex = destinationIndex
-                }
-            }
+            _ = self.player.removeTrack(withIdentifier: id)
         }
     }
 
@@ -213,36 +218,18 @@ public final class BeyGramMusicSession {
         DispatchQueue.main.async {
             self.player.stopAll()
             self.player.clearQueue()
-            self.stopTransitionPolling()
-            self.mutate { state in
-                state.queue.removeAll()
-                state.currentIndex = 0
-                state.isPlaying = false
-                state.isTransitionActive = false
-            }
         }
     }
 
     public func play() {
         DispatchQueue.main.async {
-            guard !self.currentState.queue.isEmpty else { return }
             self.player.play()
-            self.mutate { state in
-                state.isPlaying = true
-                state.isTransitionActive = self.player.isTransitionActive()
-            }
-            self.startTransitionPolling()
         }
     }
 
     public func pause() {
         DispatchQueue.main.async {
             self.player.pause()
-            self.stopTransitionPolling()
-            self.mutate { state in
-                state.isPlaying = false
-                state.isTransitionActive = false
-            }
         }
     }
 
@@ -256,15 +243,13 @@ public final class BeyGramMusicSession {
 
     public func next() {
         DispatchQueue.main.async {
-            guard !self.currentState.queue.isEmpty else { return }
             self.player.next()
-            self.mutate { state in
-                if state.currentIndex + 1 < state.queue.count {
-                    state.currentIndex += 1
-                }
-                state.isTransitionActive = self.player.isTransitionActive()
-            }
         }
+    }
+
+    @discardableResult
+    public func seek(to seconds: TimeInterval) -> Bool {
+        return self.player.seek(toPosition: seconds)
     }
 
     public func setTransitionDuration(_ seconds: Double) {
@@ -292,23 +277,5 @@ public final class BeyGramMusicSession {
                 state.bassSwap = enabled
             }
         }
-    }
-
-    private func startTransitionPolling() {
-        self.stopTransitionPolling()
-        self.transitionTimer = Foundation.Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            let active = self.player.isTransitionActive()
-            if self.currentState.isTransitionActive != active {
-                self.mutate { state in
-                    state.isTransitionActive = active
-                }
-            }
-        }
-    }
-
-    private func stopTransitionPolling() {
-        self.transitionTimer?.invalidate()
-        self.transitionTimer = nil
     }
 }
