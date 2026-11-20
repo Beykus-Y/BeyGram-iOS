@@ -3,6 +3,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
 
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <functional>
@@ -14,11 +15,14 @@
 #include "bgmedia/mix/MixEngine.hpp"
 #include "bgmedia/mix/MixSession.hpp"
 #include "BGMediaMixPreparation.hpp"
+#include "BGMediaMixState.hpp"
 
 namespace {
 
 constexpr uint32_t kSampleRate = 48000;
 constexpr AVAudioFrameCount kScratchFrames = 4096;
+// While the player runs, observers get a new snapshot at most this often.
+constexpr CFTimeInterval kObserverInterval = 0.1;
 
 // Decodes any file AVFoundation can read (MP3, AAC/M4A, FLAC, WAV, ALAC) into interleaved float PCM.
 // Runs on the MixSession worker thread. The decoded size is known from the file length, so a track
@@ -90,7 +94,118 @@ bool decodeWithAVFoundation(const std::filesystem::path &path, std::uint64_t max
     }
 }
 
+NSString *stringFromUTF8(const std::string &text) {
+    NSString *value = [NSString stringWithUTF8String:text.c_str()];
+    return value ?: @"";
+}
+
+BOOL objectsEqual(id _Nullable a, id _Nullable b) {
+    return a == b || [a isEqual:b];
+}
+
+BGMixTrackState trackStateFromQueue(bgmedia::mix::QueueState state) {
+    switch (state) {
+        case bgmedia::mix::QueueState::Pending: return BGMixTrackStatePending;
+        case bgmedia::mix::QueueState::Preparing: return BGMixTrackStatePreparing;
+        case bgmedia::mix::QueueState::Ready: return BGMixTrackStateReady;
+        case bgmedia::mix::QueueState::Playing: return BGMixTrackStatePlaying;
+        case bgmedia::mix::QueueState::Played: return BGMixTrackStatePlayed;
+        case bgmedia::mix::QueueState::Failed: return BGMixTrackStateFailed;
+    }
+    return BGMixTrackStatePending;
+}
+
+BGMixTransport transportFromCore(beygram::media::MixTransport transport) {
+    switch (transport) {
+        case beygram::media::MixTransport::Stopped: return BGMixTransportStopped;
+        case beygram::media::MixTransport::Playing: return BGMixTransportPlaying;
+        case beygram::media::MixTransport::Paused: return BGMixTransportPaused;
+    }
+    return BGMixTransportStopped;
+}
+
+BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifier) {
+    if (identifier == 0) {
+        return nil;
+    }
+    for (BGMixTrack *track in queue) {
+        if (track.identifier == identifier) {
+            return track;
+        }
+    }
+    return nil;
+}
+
 } // namespace
+
+@interface BGMixTrack ()
+@property (nonatomic, readwrite) uint64_t identifier;
+@property (nonatomic, readwrite, copy) NSString *name;
+@property (nonatomic, readwrite, copy) NSURL *fileURL;
+@property (nonatomic, readwrite) BGMixTrackState state;
+@property (nonatomic, readwrite) float progress;
+@property (nonatomic, readwrite) NSTimeInterval duration;
+@property (nonatomic, readwrite) double bpm;
+@property (nonatomic, readwrite, nullable, copy) NSString *error;
+@end
+
+@implementation BGMixTrack
+
+- (BOOL)isEqual:(id)object {
+    if (self == object) {
+        return YES;
+    }
+    if (![object isKindOfClass:[BGMixTrack class]]) {
+        return NO;
+    }
+    BGMixTrack *other = object;
+    return self.identifier == other.identifier && self.state == other.state &&
+           self.progress == other.progress && self.duration == other.duration && self.bpm == other.bpm &&
+           objectsEqual(self.name, other.name) && objectsEqual(self.fileURL, other.fileURL) &&
+           objectsEqual(self.error, other.error);
+}
+
+- (NSUInteger)hash {
+    return (NSUInteger)self.identifier ^ (NSUInteger)self.state;
+}
+
+@end
+
+@interface BGMixSnapshot ()
+@property (nonatomic, readwrite) BGMixTransport transport;
+@property (nonatomic, readwrite, nullable) BGMixTrack *currentTrack;
+@property (nonatomic, readwrite) NSTimeInterval position;
+@property (nonatomic, readwrite) NSTimeInterval duration;
+@property (nonatomic, readwrite, nullable) BGMixTrack *nextTrack;
+@property (nonatomic, readwrite) BOOL transitionActive;
+@property (nonatomic, readwrite) float transitionProgress;
+@property (nonatomic, readwrite) BOOL preparingNext;
+@property (nonatomic, readwrite, copy) NSArray<BGMixTrack *> *queue;
+@property (nonatomic, readwrite, nullable, copy) NSString *lastError;
+@end
+
+@implementation BGMixSnapshot
+
+- (instancetype)init {
+    self = [super init];
+    if (self != nil) {
+        _queue = @[];
+    }
+    return self;
+}
+
+- (BOOL)isEqualToSnapshot:(BGMixSnapshot *)other {
+    if (other == nil) {
+        return NO;
+    }
+    return self.transport == other.transport && objectsEqual(self.currentTrack, other.currentTrack) &&
+           self.position == other.position && self.duration == other.duration &&
+           objectsEqual(self.nextTrack, other.nextTrack) && self.transitionActive == other.transitionActive &&
+           self.transitionProgress == other.transitionProgress && self.preparingNext == other.preparingNext &&
+           [self.queue isEqualToArray:other.queue] && objectsEqual(self.lastError, other.lastError);
+}
+
+@end
 
 @interface BGMixPlayer () {
     // Declaration order matters: the session must be destroyed before the engine.
@@ -102,6 +217,11 @@ bool decodeWithAVFoundation(const std::filesystem::path &path, std::uint64_t max
 @property (nonatomic, strong) AVAudioSourceNode *sourceNode;
 @property (nonatomic, strong, nullable) CADisplayLink *displayLink;
 @property (nonatomic) BOOL engineStarted;
+// Weak references: an observer that goes away is dropped without a call.
+@property (nonatomic, strong) NSHashTable<id<BGMixPlayerObserver>> *observers;
+@property (nonatomic, strong, nullable) BGMixSnapshot *publishedSnapshot;
+@property (nonatomic) CFTimeInterval lastPublishTime;
+@property (nonatomic) BOOL publishing;
 @end
 
 @implementation BGMixPlayer
@@ -114,6 +234,7 @@ bool decodeWithAVFoundation(const std::filesystem::path &path, std::uint64_t max
 
     _scratch = (float *)calloc((size_t)kScratchFrames * 2, sizeof(float));
     _engine = std::make_unique<bgmedia::mix::MixEngine>(kSampleRate);
+    self.observers = [NSHashTable weakObjectsHashTable];
 
     beygram::media::MixPreparationOptions options;
     options.cacheDirectory = std::filesystem::path(cacheDirectory.UTF8String ?: "");
@@ -182,8 +303,12 @@ bool decodeWithAVFoundation(const std::filesystem::path &path, std::uint64_t max
 
 - (void)tick:(CADisplayLink *)link {
     (void)link;
-    if (_session) {
-        _session->update();
+    if (!_session) {
+        return;
+    }
+    _session->update();
+    if (CACurrentMediaTime() - self.lastPublishTime >= kObserverInterval) {
+        [self publishSnapshotIfChanged];
     }
 }
 
@@ -201,23 +326,101 @@ bool decodeWithAVFoundation(const std::filesystem::path &path, std::uint64_t max
     }
 }
 
-- (uint64_t)addTrackAtURL:(NSURL *)url {
-    if (!url.isFileURL || url.path == nil || !_session) {
-        return 0;
+// Sends the current snapshot to the observers when it differs from the last one sent. Nested calls
+// (an observer that calls back into the player) are skipped; the next tick delivers their changes.
+- (void)publishSnapshotIfChanged {
+    if (self.publishing || !_session || self.observers.count == 0) {
+        return;
     }
-    return _session->addTrack(std::filesystem::path(url.path.UTF8String));
+    self.lastPublishTime = CACurrentMediaTime();
+    BGMixSnapshot *snapshot = self.snapshot;
+    if (self.publishedSnapshot != nil && [snapshot isEqualToSnapshot:self.publishedSnapshot]) {
+        return;
+    }
+    self.publishedSnapshot = snapshot;
+    self.publishing = YES;
+    @try {
+        for (id<BGMixPlayerObserver> observer in self.observers.allObjects) {
+            [observer mixPlayer:self didUpdateSnapshot:snapshot];
+        }
+    } @finally {
+        self.publishing = NO;
+    }
 }
 
-- (void)removeTrackWithIdentifier:(uint64_t)identifier {
-    if (_session) {
-        _session->removeTrack(identifier);
+- (BGMixSnapshot *)snapshot {
+    BGMixSnapshot *snapshot = [[BGMixSnapshot alloc] init];
+    if (!_session) {
+        return snapshot;
     }
+    const bgmedia::mix::MixSessionSnapshot core = _session->snapshot();
+
+    NSMutableArray<BGMixTrack *> *queue = [NSMutableArray arrayWithCapacity:core.queue.size()];
+    for (const bgmedia::mix::QueueItemStatus &item : core.queue) {
+        BGMixTrack *track = [[BGMixTrack alloc] init];
+        track.identifier = item.id;
+        track.name = stringFromUTF8(item.displayName);
+        track.fileURL = [NSURL fileURLWithPath:stringFromUTF8(item.path)];
+        track.state = trackStateFromQueue(item.state);
+        track.progress = item.progress;
+        track.duration = item.durationSeconds;
+        track.bpm = item.bpm;
+        track.error = item.error.empty() ? nil : stringFromUTF8(item.error);
+        [queue addObject:track];
+    }
+
+    const bgmedia::mix::MixSnapshot &engine = core.engine;
+    snapshot.queue = queue;
+    snapshot.transport = transportFromCore(beygram::media::transportOf(engine));
+    snapshot.currentTrack = trackWithIdentifier(queue, beygram::media::currentTrackId(engine));
+    snapshot.nextTrack = trackWithIdentifier(queue, beygram::media::nextTrackId(engine));
+    snapshot.position = beygram::media::masterPositionSeconds(engine);
+    snapshot.duration = beygram::media::masterDurationSeconds(engine);
+    snapshot.transitionActive = _engine->transitionActive() ? YES : NO;
+    snapshot.transitionProgress = (float)engine.transitionProgress;
+    snapshot.preparingNext = core.preparingNext ? YES : NO;
+    snapshot.lastError = core.lastError.empty() ? nil : stringFromUTF8(core.lastError);
+    return snapshot;
+}
+
+- (void)addObserver:(id<BGMixPlayerObserver>)observer {
+    if (observer == nil || !_session) {
+        return;
+    }
+    [self.observers addObject:observer];
+    [observer mixPlayer:self didUpdateSnapshot:self.snapshot];
+}
+
+- (void)removeObserver:(id<BGMixPlayerObserver>)observer {
+    if (observer != nil) {
+        [self.observers removeObject:observer];
+    }
+}
+
+- (uint64_t)addTrackAtURL:(NSURL *)url {
+    const char *utf8Path = url.path.UTF8String;
+    if (!url.isFileURL || utf8Path == nullptr || !_session) {
+        return 0;
+    }
+    const uint64_t identifier = _session->addTrack(std::filesystem::path(utf8Path));
+    [self publishSnapshotIfChanged];
+    return identifier;
+}
+
+- (BOOL)removeTrackWithIdentifier:(uint64_t)identifier {
+    if (!_session) {
+        return NO;
+    }
+    const bool removed = _session->removeTrack(identifier);
+    [self publishSnapshotIfChanged];
+    return removed ? YES : NO;
 }
 
 - (void)clearQueue {
     if (_session) {
         _session->clearQueue();
     }
+    [self publishSnapshotIfChanged];
 }
 
 - (void)play {
@@ -225,12 +428,14 @@ bool decodeWithAVFoundation(const std::filesystem::path &path, std::uint64_t max
     if (_session) {
         _session->play();
     }
+    [self publishSnapshotIfChanged];
 }
 
 - (void)pause {
     if (_session) {
         _session->pause();
     }
+    [self publishSnapshotIfChanged];
 }
 
 - (void)next {
@@ -238,12 +443,23 @@ bool decodeWithAVFoundation(const std::filesystem::path &path, std::uint64_t max
     if (_session) {
         _session->next();
     }
+    [self publishSnapshotIfChanged];
 }
 
 - (void)stopAll {
     if (_session) {
         _session->stopAll();
     }
+    [self publishSnapshotIfChanged];
+}
+
+- (BOOL)seekToPosition:(NSTimeInterval)seconds {
+    if (!_session || !std::isfinite(seconds) || seconds < 0.0) {
+        return NO;
+    }
+    const bool moved = _session->seekDeck(_session->snapshot().engine.master, seconds);
+    [self publishSnapshotIfChanged];
+    return moved ? YES : NO;
 }
 
 - (BOOL)isTransitionActive {
@@ -271,6 +487,8 @@ bool decodeWithAVFoundation(const std::filesystem::path &path, std::uint64_t max
 - (void)invalidate {
     [self.displayLink invalidate];
     self.displayLink = nil;
+    [self.observers removeAllObjects];
+    self.publishedSnapshot = nil;
     if (_session) {
         _session->stopAll();
     }
