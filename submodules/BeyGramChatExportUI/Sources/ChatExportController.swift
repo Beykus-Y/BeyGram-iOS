@@ -76,7 +76,7 @@ private enum ChatExportEntry: ItemListNodeEntry, Equatable {
         case let (.html(lt, lTitle, lSel), .html(rt, rTitle, rSel)):
             return lt === rt && lTitle == rTitle && lSel == rSel
         case let (.chooseFolder(lt, lTitle, lEnabled), .chooseFolder(rt, rTitle, rEnabled)):
-            return lt === rt && lTitle == lTitle && lEnabled == rEnabled
+            return lt === rt && lTitle == rTitle && lEnabled == rEnabled
         case let (.notice(lt, lText), .notice(rt, rText)):
             return lt === rt && lText == rText
         case let (.status(lt, lText), .status(rt, rText)):

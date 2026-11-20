@@ -87,7 +87,7 @@ public final class BeyGramMusicSession {
     private let mixDirectory: URL
     private let stateValue: Atomic<BeyGramMusicState>
     private let statePromise: ValuePromise<BeyGramMusicState>
-    private var transitionTimer: Timer?
+    private var transitionTimer: Foundation.Timer?
 
     private init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
@@ -296,7 +296,7 @@ public final class BeyGramMusicSession {
 
     private func startTransitionPolling() {
         self.stopTransitionPolling()
-        self.transitionTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+        self.transitionTimer = Foundation.Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             guard let self else { return }
             let active = self.player.isTransitionActive()
             if self.currentState.isTransitionActive != active {

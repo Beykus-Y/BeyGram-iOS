@@ -36,7 +36,7 @@ public final class BeyGramHostedViewController: ViewController {
             strings: defaultPresentationStrings,
             theme: defaultPresentationTheme,
             autoNightModeTriggered: false,
-            chatWallpaper: .builtin(WallpaperSettings()),
+            chatWallpaper: defaultPresentationTheme.chat.defaultWallpaper,
             chatFontSize: .regular,
             chatBubbleCorners: PresentationChatBubbleCorners(mainRadius: 16.0, auxiliaryRadius: 8.0, mergeBubbleCorners: true),
             listsFontSize: .regular,
