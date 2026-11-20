@@ -4,7 +4,10 @@ Block B of the iOS plan (privacy and stealth, see the plan document «План �
 
 ## What is hooked
 
-- **Presence** (`account.updateStatus`): with `hideOnline`, the account is always reported offline. Account-wide only.
+- **Presence** (`account.updateStatus`): with `hideOnline`, the account is always reported offline. Account-wide only. A change
+  applies at once: `BeyGramStealthStore` posts `didChangeNotification` after a real change, and `ManagedAccountPresence`
+  evaluates again while the account is requested online (before, it waited for the next presence change or the 30-second
+  refresh). What the server may still show as online is listed in `docs/stealth-audit.md`.
 - **Typing and other chat activity** (`messages.setTyping`): with `hideTyping`, nothing is sent for the chat. Per-chat overrides apply.
 - **Read receipts** (`messages.readHistory`, `channels.readHistory`, the sync of a chat's read state): with `hideReadReceipts`, the read state is not pushed. The sync treats it as done, so it is not sent later either. Known limitation: while the rule is on, mark-as-unread is not synced to the server. "Mark all chats as read" skips the chats the rule hides.
 - **Thread and topic reads** (`messages.readDiscussion`, `messages.readSavedHistory`: a forum topic, a monoforum sub-chat, a comment thread): with `hideReadReceipts`, nothing is sent. The local read state still changes, and the server count is not fetched, since it would bring the unread count back. The per-chat mode is that of the chat the thread's messages live in (the forum, the monoforum channel or the group).
