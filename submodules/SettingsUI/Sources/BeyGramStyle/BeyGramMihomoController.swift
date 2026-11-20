@@ -17,6 +17,7 @@ private struct BeyGramMihomoScreenState: Equatable {
     var busy: Bool = false
     var serverNames: [String]
     var selectedNode: String?
+    var autoSelect: Bool = false
     var delays: [String: Int] = [:]
     var message: String?
 }
@@ -27,13 +28,15 @@ private final class BeyGramMihomoScreenArguments {
     let saveSubscription: () -> Void
     let selectNode: (String) -> Void
     let measureDelays: () -> Void
+    let toggleAutoSelect: (Bool) -> Void
 
-    init(toggleConnection: @escaping (Bool) -> Void, subscriptionUpdated: @escaping (String) -> Void, saveSubscription: @escaping () -> Void, selectNode: @escaping (String) -> Void, measureDelays: @escaping () -> Void) {
+    init(toggleConnection: @escaping (Bool) -> Void, subscriptionUpdated: @escaping (String) -> Void, saveSubscription: @escaping () -> Void, selectNode: @escaping (String) -> Void, measureDelays: @escaping () -> Void, toggleAutoSelect: @escaping (Bool) -> Void) {
         self.toggleConnection = toggleConnection
         self.subscriptionUpdated = subscriptionUpdated
         self.saveSubscription = saveSubscription
         self.selectNode = selectNode
         self.measureDelays = measureDelays
+        self.toggleAutoSelect = toggleAutoSelect
     }
 }
 
@@ -58,6 +61,7 @@ private enum BeyGramMihomoEntry: Equatable, ItemListNodeEntry {
     case nodesHeader(String)
     case node(Int, String, String?, Bool)
     case measure(String)
+    case autoSelect(String, Bool)
     case note(String)
 
     var section: ItemListSectionId {
@@ -66,7 +70,7 @@ private enum BeyGramMihomoEntry: Equatable, ItemListNodeEntry {
                 return BeyGramMihomoSection.connection.rawValue
             case .subscriptionHeader, .subscriptionField, .saveSubscription:
                 return BeyGramMihomoSection.subscription.rawValue
-            case .nodesHeader, .node, .measure:
+            case .nodesHeader, .node, .measure, .autoSelect:
                 return BeyGramMihomoSection.nodes.rawValue
             case .note:
                 return BeyGramMihomoSection.note.rawValue
@@ -91,6 +95,8 @@ private enum BeyGramMihomoEntry: Equatable, ItemListNodeEntry {
                 return .node(name)
             case .measure:
                 return .index(6)
+            case .autoSelect:
+                return .index(8)
             case .note:
                 return .index(7)
         }
@@ -111,6 +117,8 @@ private enum BeyGramMihomoEntry: Equatable, ItemListNodeEntry {
                 return 4
             case .nodesHeader:
                 return 5
+            case .autoSelect:
+                return 99
             case let .node(index, _, _, _):
                 return 100 + index
             case .measure:
@@ -154,6 +162,10 @@ private enum BeyGramMihomoEntry: Equatable, ItemListNodeEntry {
             case let .measure(title):
                 return ProxySettingsActionItem(presentationData: presentationData, systemStyle: .glass, title: title, sectionId: self.section, editing: false, action: {
                     arguments.measureDelays()
+                })
+            case let .autoSelect(title, value):
+                return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: title, value: value, enableInteractiveChanges: true, enabled: true, sectionId: self.section, style: .blocks, updated: { newValue in
+                    arguments.toggleAutoSelect(newValue)
                 })
             case let .note(text):
                 return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
@@ -201,6 +213,7 @@ private func beyGramMihomoEntries(state: BeyGramMihomoScreenState, isRussian: Bo
         for (index, name) in state.serverNames.enumerated() {
             entries.append(.node(index, name, beyGramMihomoDelayText(state.delays[name], isRussian: isRussian), state.selectedNode == name))
         }
+        entries.append(.autoSelect(isRussian ? "Автопереключение узла" : "Switch node automatically", state.autoSelect))
         if state.isRunning {
             entries.append(.measure(isRussian ? "Проверить задержку" : "Check delays"))
         }
@@ -213,7 +226,7 @@ public func beyGramMihomoController(accountManager: AccountManager<TelegramAccou
     let runtime = BeyGramMihomoRuntime.shared
     let isRussian = presentationData.strings.primaryComponent.languageCode == "ru"
     let initial = runtime.controller.currentState
-    let stateValue = Atomic(value: BeyGramMihomoScreenState(subscriptionText: initial.subscriptionSource ?? "", isRunning: initial.isRunning, serverNames: initial.serverNames, selectedNode: initial.selectedNode))
+    let stateValue = Atomic(value: BeyGramMihomoScreenState(subscriptionText: initial.subscriptionSource ?? "", isRunning: initial.isRunning, serverNames: initial.serverNames, selectedNode: initial.selectedNode, autoSelect: initial.autoSelectEnabled))
     let statePromise = ValuePromise<BeyGramMihomoScreenState>(stateValue.with { $0 })
     let mutate: ((inout BeyGramMihomoScreenState) -> Void) -> Void = { change in
         let value = stateValue.modify { current in
@@ -328,6 +341,11 @@ public func beyGramMihomoController(accountManager: AccountManager<TelegramAccou
                     }
             }
         })
+    }, toggleAutoSelect: { enable in
+        mutate { state in
+            state.autoSelect = enable
+        }
+        runtime.setAutoSelect(enable)
     })
 
     let signal = combineLatest(updatedPresentationData, statePromise.get())

@@ -1,3 +1,6 @@
+// This file is part of BeyGram and is distributed under the GNU General Public License v3.0.
+// See submodules/BeyGramProxy/LICENSE and the NOTICE file at the repository root.
+
 // Mihomo core driver over the C archive built from core/cmd/beygram-mihomo.
 //
 // This file is not part of the Bazel target, which globs Sources/ only. It is compiled only

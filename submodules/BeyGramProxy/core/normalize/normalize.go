@@ -1,3 +1,6 @@
+// This file is part of BeyGram and is distributed under the GNU General Public License v3.0.
+// See submodules/BeyGramProxy/LICENSE and the NOTICE file at the repository root.
+
 // Package normalize turns a provider subscription into the Mihomo profile that
 // BeyGram runs as an app-local SOCKS5 listener.
 //

@@ -1,3 +1,6 @@
+// This file is part of BeyGram and is distributed under the GNU General Public License v3.0.
+// See submodules/BeyGramProxy/LICENSE and the NOTICE file at the repository root.
+
 // Command beygram-mihomo is built as a C archive for the iOS app. It exports
 // BGMihomoInvoke, which takes one JSON request and returns one JSON reply, and
 // BGMihomoFree, which frees a reply. The archive is built with

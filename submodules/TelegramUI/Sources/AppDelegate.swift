@@ -350,6 +350,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         precondition(!testIsLaunched)
         testIsLaunched = true
         CrashReportCollector.shared.start()
+        if BeyGramSettings.shared.isEnabled(.mihomoProxy) {
+            BeyGramMihomoRuntime.shared.resumeIfNeeded()
+        }
         
         let _ = voipTokenPromise.get().start(next: { token in
             self.voipDeviceToken.set(.single(token))
