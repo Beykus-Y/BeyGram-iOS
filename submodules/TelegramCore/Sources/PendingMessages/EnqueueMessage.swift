@@ -1,5 +1,6 @@
 import Foundation
 import Postbox
+import BeyGramStealth
 internal import TelegramApi
 import SwiftSignalKit
 import Emoji
@@ -761,11 +762,12 @@ private func opportunisticallyTransformOutgoingMedia(network: Network, postbox: 
 /// A batch that BeyGram stealth sending refuses (submodules/BeyGramStealth). The media is already transformed, so the batch
 /// is stored in the chat as it is, and each stored message is marked failed in the same transaction. A failed message is
 /// not pending, so nothing goes out. The user resends it, which follows the stealth rules again, or deletes it.
-private func enqueueTransformedRefusedMessages(account: Account, peerId: PeerId, messages: [(Bool, EnqueueMessage)]) -> Signal<[MessageId?], NoError> {
+private func enqueueTransformedRefusedMessages(account: Account, peerId: PeerId, messages: [(Bool, EnqueueMessage)], refusal: BeyGramStealthRefusal, nowSeconds: Int32) -> Signal<[MessageId?], NoError> {
     return account.postbox.transaction { transaction -> [MessageId?] in
         let ids = enqueueMessages(transaction: transaction, account: account, peerId: peerId, messages: messages)
         for case let id? in ids {
             beyGramStealthMarkFailed(transaction: transaction, id: id)
+            BeyGramStealthRefusalRegistry.shared.record(accountPeerId: account.peerId.toInt64(), messageKey: beyGramStealthMessageKey(id), refusal: refusal, nowSeconds: nowSeconds)
         }
         return ids
     }
@@ -789,8 +791,8 @@ public func enqueueMessages(account: Account, peerId: PeerId, messages: [Enqueue
             // The batch keeps the order and the count of the transformed messages, so each message keeps its media flag.
             let prepared = zip(transformed, batch).map { pair -> (Bool, EnqueueMessage) in (pair.0.0, pair.1) }
             return enqueueTransformedMessages(account: account, peerId: peerId, messages: prepared, stealthDelays: stealthDelays, nowSeconds: nowSeconds)
-        case .refused:
-            return enqueueTransformedRefusedMessages(account: account, peerId: peerId, messages: transformed)
+        case let .refused(refusal):
+            return enqueueTransformedRefusedMessages(account: account, peerId: peerId, messages: transformed, refusal: refusal, nowSeconds: nowSeconds)
         }
     }
 }
@@ -922,8 +924,14 @@ public func resendMessages(account: Account, messageIds: [MessageId], sendNowCon
                     }
                 }
             }
-            // A resend follows the rules of a new send. A batch that cannot be scheduled stays failed, and is not deleted.
+            // A resend follows the rules of a new send. A batch that cannot be scheduled stays failed, and is not deleted: each of its
+            // messages now carries the reason of this resend.
             let resendBatch: BeyGramStealthBatch = sendNowConsent ? .send(messages, stealthDelays: Array<Int32?>(repeating: nil, count: messages.count)) : beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, nowSeconds: nowSeconds, messages: messages)
+            if case let .refused(refusal) = resendBatch {
+                for id in peerRemoveMessageIds {
+                    BeyGramStealthRefusalRegistry.shared.record(accountPeerId: account.peerId.toInt64(), messageKey: beyGramStealthMessageKey(id), refusal: refusal, nowSeconds: nowSeconds)
+                }
+            }
             guard case let .send(preparedMessages, stealthDelays: stealthDelays) = resendBatch else {
                 continue
             }
