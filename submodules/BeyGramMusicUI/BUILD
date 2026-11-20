@@ -17,6 +17,7 @@ swift_library(
         "//submodules/AccountContext:AccountContext",
         "//submodules/BeyGramKit:BeyGramKit",
         "//submodules/BeyGramMedia:BeyGramMedia",
+        "//submodules/BeyGramMusicFormat:BeyGramMusicFormat",
     ],
     visibility = [
         "//visibility:public",
