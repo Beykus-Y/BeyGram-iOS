@@ -1,0 +1,287 @@
+name: Build BeyGram iOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Build channel'
+        required: true
+        default: 'DEV'
+        type: choice
+        options:
+          - DEV
+          - release
+  push:
+    branches:
+      - main
+      - 'build/**'
+    tags:
+      - 'v*'
+      - 'release-*'
+# Pull request сборку не запускают: она идёт часами на macOS. Запуск вручную через workflow_dispatch
+# или push в ветку build/**, например build/ios-integration.
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    name: Build BeyGram IPA (ios-arm64)
+    runs-on: xcode-27
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch submodules without the workflow token
+        # GITHUB_TOKEN действует только на этот репозиторий. С ним публичный BG-Media не клонируется
+        # ("Repository not found"). Все сабмодули публичные, поэтому тянем их без токена.
+        run: |
+          git -c http.https://github.com/.extraheader= submodule update --init --recursive
+
+      - name: Read versions and determine build channel
+        id: meta
+        run: |
+          python3 - << 'EOF'
+          import json, os, subprocess
+
+          with open('versions.json', 'r', encoding='utf-8') as f:
+              v = json.load(f)
+
+          xcode_ver = v['xcode']
+          bazel_ver = v['bazel'].split(':')[0]
+          app_ver = v['app']
+          upstream_app = v.get('upstream_app', 'unknown')
+          upstream_commit = v.get('upstream_commit', 'unknown')
+
+          event_name = os.environ.get('GITHUB_EVENT_NAME', '')
+          ref_name = os.environ.get('GITHUB_REF_NAME', '')
+          dispatch_channel = os.environ.get('INPUT_CHANNEL', '')
+
+          if event_name == 'workflow_dispatch' and dispatch_channel:
+              channel = dispatch_channel
+          elif ref_name == 'main' or ref_name.startswith('v') or ref_name.startswith('release-'):
+              channel = 'release'
+          else:
+              channel = 'DEV'
+
+          if channel == 'release':
+              bundle_id = 'com.beykus.beygram'
+              display_name = 'BeyGram'
+              ipa_name = 'BeyGram.ipa'
+              config_template = 'build-system/beygram-release-configuration.json'
+          else:
+              bundle_id = 'com.beykus.beygram.dev'
+              display_name = 'BeyGram DEV'
+              ipa_name = 'BeyGram-DEV.ipa'
+              config_template = 'build-system/beygram-dev-configuration.json'
+
+          run_number = os.environ.get('GITHUB_RUN_NUMBER', '1')
+          commit_count = subprocess.check_output(['git', 'rev-list', '--count', 'HEAD']).decode().strip()
+          build_number = str(int(run_number) + 100)
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f"xcode={xcode_ver}\n")
+              out.write(f"bazel={bazel_ver}\n")
+              out.write(f"app_version={app_ver}\n")
+              out.write(f"upstream_app={upstream_app}\n")
+              out.write(f"upstream_commit={upstream_commit}\n")
+              out.write(f"channel={channel}\n")
+              out.write(f"bundle_id={bundle_id}\n")
+              out.write(f"display_name={display_name}\n")
+              out.write(f"ipa_name={ipa_name}\n")
+              out.write(f"config_template={config_template}\n")
+              out.write(f"build_number={build_number}\n")
+              out.write(f"commit_count={commit_count}\n")
+          EOF
+        env:
+          INPUT_CHANNEL: ${{ github.event.inputs.channel }}
+
+      - name: Select Xcode ${{ steps.meta.outputs.xcode }} and check environment
+        run: |
+          XCODE_APP="/Applications/Xcode_${{ steps.meta.outputs.xcode }}.app/Contents/Developer"
+          if [ -d "$XCODE_APP" ]; then
+            sudo xcode-select -s "$XCODE_APP"
+          else
+            echo "Warning: $XCODE_APP not found, using default Xcode"
+          fi
+          xcodebuild -version
+          python3 --version
+          df -h
+
+      - name: Locate Bazel repository cache
+        id: bazel-paths
+        run: |
+          # Only the Bazel repository cache is saved. It holds files downloaded from URLs with checksums,
+          # never the generated build configuration. The Bazel disk cache is not saved, because compiled
+          # outputs contain TELEGRAM_API_ID and TELEGRAM_API_HASH.
+          # The location depends on the Bazel output root, so the known macOS and Linux locations are listed.
+          user="$(id -un)"
+          {
+            echo 'paths<<BAZEL_PATHS_EOF'
+            echo "/private/var/tmp/_bazel_${user}/cache/repos/v1"
+            echo "$HOME/Library/Caches/bazel/_bazel_${user}/cache/repos/v1"
+            echo "$HOME/.cache/bazel/_bazel_${user}/cache/repos/v1"
+            echo 'BAZEL_PATHS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore Bazel repository cache
+        id: bazel-restore
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.bazel-paths.outputs.paths }}
+          key: bazel-repo-ios-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'WORKSPACE') }}
+          restore-keys: |
+            bazel-repo-ios-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Prepare temporary build configuration
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          if [ -z "${TELEGRAM_API_ID:-}" ] || [ -z "${TELEGRAM_API_HASH:-}" ]; then
+            echo "ERROR: TELEGRAM_API_ID and TELEGRAM_API_HASH secrets must be configured."
+            exit 1
+          fi
+          python3 - << 'EOF'
+          import json, os
+
+          template_path = "${{ steps.meta.outputs.config_template }}"
+          out_path = os.path.join(os.environ['RUNNER_TEMP'], 'beygram-ci-config.json')
+          with open(template_path, 'r', encoding='utf-8') as f:
+              cfg = json.load(f)
+          cfg['api_id'] = os.environ['TELEGRAM_API_ID']
+          cfg['api_hash'] = os.environ['TELEGRAM_API_HASH']
+          cfg['team_id'] = 'C67CF9S4VU'
+          with open(out_path, 'w', encoding='utf-8') as f:
+              json.dump(cfg, f, indent=2)
+          EOF
+
+      - name: Build BeyGram IPA (release_arm64, sideload-ready)
+        run: |
+          set -o pipefail
+          mkdir -p "$HOME/telegram-bazel-cache"
+          python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
+          python3 build-system/generate-sideload-codesigning.py \
+            --bundleId "${{ steps.meta.outputs.bundle_id }}" \
+            --teamId "C67CF9S4VU" \
+            --outDir "$RUNNER_TEMP/sideload-codesigning"
+          python3 -u build-system/Make/Make.py \
+            --cacheDir="$HOME/telegram-bazel-cache" \
+            build \
+            --configurationPath="$RUNNER_TEMP/beygram-ci-config.json" \
+            --codesigningInformationPath="$RUNNER_TEMP/sideload-codesigning" \
+            --disableExtensions \
+            --configuration=release_arm64 \
+            --buildNumber="${{ steps.meta.outputs.build_number }}" 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      - name: Report Bazel repository cache
+        if: always()
+        env:
+          CACHE_PATHS: ${{ steps.bazel-paths.outputs.paths }}
+        run: |
+          while IFS= read -r dir; do
+            if [ -n "$dir" ] && [ -d "$dir" ]; then
+              echo "Bazel repository cache: $(du -sh "$dir" | cut -f1) at $dir"
+            fi
+          done <<< "$CACHE_PATHS"
+
+      - name: Save Bazel repository cache
+        if: always() && steps.bazel-restore.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.bazel-paths.outputs.paths }}
+          key: bazel-repo-ios-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'WORKSPACE') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Cleanup temporary configuration
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/beygram-ci-config.json"
+          rm -rf "$RUNNER_TEMP/sideload-codesigning"
+
+      - name: Collect and verify IPA artifacts
+        run: |
+          OUT_DIR="$RUNNER_TEMP/beygram-artifacts"
+          rm -rf "$OUT_DIR"
+          mkdir -p "$OUT_DIR"
+
+          IPA_SRC="bazel-bin/Telegram/Telegram.ipa"
+          if [ ! -f "$IPA_SRC" ]; then
+            IPA_SRC="$(find bazel-out -name 'Telegram.ipa' -type f | head -n 1 || true)"
+          fi
+          if [ -z "$IPA_SRC" ] || [ ! -f "$IPA_SRC" ]; then
+            echo "ERROR: Built Telegram.ipa not found!"
+            exit 1
+          fi
+
+          IPA_DEST="$OUT_DIR/${{ steps.meta.outputs.ipa_name }}"
+          cp "$IPA_SRC" "$IPA_DEST"
+          chmod 644 "$IPA_DEST"
+
+          (cd "$OUT_DIR" && shasum -a 256 "${{ steps.meta.outputs.ipa_name }}" > "${{ steps.meta.outputs.ipa_name }}.sha256")
+
+          chmod +x build-system/verify-ipa.sh
+          build-system/verify-ipa.sh \
+            "$IPA_DEST" \
+            "${{ steps.meta.outputs.bundle_id }}" \
+            "${{ steps.meta.outputs.display_name }}" \
+            "${{ steps.meta.outputs.app_version }}"
+
+          # Collect dSYMs if present
+          DSYM_DIR="$RUNNER_TEMP/dsyms"
+          mkdir -p "$DSYM_DIR"
+          find bazel-out -path "*/bin/Telegram/*.dSYM" -maxdepth 6 -exec cp -R {} "$DSYM_DIR/" \; || true
+          if [ -n "$(ls -A "$DSYM_DIR" 2>/dev/null || true)" ]; then
+            (cd "$DSYM_DIR" && zip -qr "$OUT_DIR/BeyGram-dSYMs.zip" .)
+          fi
+
+          # Write build metadata
+          IPA_SIZE_BYTES=$(stat -f%z "$IPA_DEST")
+          XCODE_ACTUAL=$(xcodebuild -version | tr '\n' ' ')
+          cat > "$OUT_DIR/build-metadata.json" << META
+          {
+            "app": "BeyGram",
+            "version": "${{ steps.meta.outputs.app_version }}",
+            "channel": "${{ steps.meta.outputs.channel }}",
+            "build_number": "${{ steps.meta.outputs.build_number }}",
+            "bundle_id": "${{ steps.meta.outputs.bundle_id }}",
+            "display_name": "${{ steps.meta.outputs.display_name }}",
+            "beygram_commit": "${{ github.sha }}",
+            "upstream_telegram_version": "${{ steps.meta.outputs.upstream_app }}",
+            "upstream_telegram_commit": "${{ steps.meta.outputs.upstream_commit }}",
+            "xcode": "${{ steps.meta.outputs.xcode }}",
+            "xcode_actual": "$XCODE_ACTUAL",
+            "bazel": "${{ steps.meta.outputs.bazel }}",
+            "ipa_filename": "${{ steps.meta.outputs.ipa_name }}",
+            "ipa_size_bytes": $IPA_SIZE_BYTES,
+            "sideload_ready": true,
+            "extensions_included": false
+          }
+          META
+          cat "$OUT_DIR/build-metadata.json"
+
+      - name: Upload BeyGram IPA and metadata artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeyGram-${{ steps.meta.outputs.channel }}-v${{ steps.meta.outputs.app_version }}-b${{ steps.meta.outputs.build_number }}
+          path: ${{ runner.TEMP }}/beygram-artifacts/*
+          retention-days: 30
+
+      - name: Upload diagnostic logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics-${{ github.run_id }}
+          path: |
+            ${{ runner.TEMP }}/build.log
+            versions.json
+          retention-days: 7

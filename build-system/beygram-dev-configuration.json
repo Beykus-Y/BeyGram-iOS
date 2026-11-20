@@ -1,0 +1,14 @@
+{
+	"bundle_id": "com.beykus.beygram.dev",
+	"display_name": "BeyGram DEV",
+	"api_id": "__TELEGRAM_API_ID__",
+	"api_hash": "__TELEGRAM_API_HASH__",
+	"team_id": "0000000000",
+	"is_internal_build": "false",
+	"is_appstore_build": "false",
+	"appstore_id": "0",
+	"app_specific_url_scheme": "beygram",
+	"premium_iap_product_id": "",
+	"enable_siri": false,
+	"enable_icloud": false
+}
