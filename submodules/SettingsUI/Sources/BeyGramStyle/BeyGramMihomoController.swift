@@ -119,7 +119,7 @@ private final class BeyGramMihomoViewControllerImpl: ViewController, UITextField
         |> deliverOnMainQueue).start(next: { [weak self] nextData in
             guard let self else { return }
             self.presentationData = nextData
-            self.updateNavigationBarPresentationData(NavigationBarPresentationData(presentationData: nextData))
+            self.navigationBar?.updatePresentationData(NavigationBarPresentationData(presentationData: nextData), transition: .immediate)
             self.render()
         })
 
@@ -180,7 +180,7 @@ private final class BeyGramMihomoViewControllerImpl: ViewController, UITextField
 
     @objc private func handleEscapeKey() {
         if let nav = self.navigationController as? NavigationController {
-            nav.popViewController(animated: true)
+            _ = nav.popViewController(animated: true)
         } else {
             self.dismiss()
         }
@@ -286,7 +286,7 @@ private final class BeyGramMihomoViewControllerImpl: ViewController, UITextField
             btn.layer.cornerCurve = .continuous
             btn.titleLabel?.font = BeyGramTypography.font(style: .caption1, weight: .semibold)
             btn.titleLabel?.adjustsFontForContentSizeCategory = true
-            btn.contentEdgeInsets = UIEdgeInsets(top: 7, left: 6, bottom: 7, right: 6)
+            btn.heightAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true
             btn.tag = Int(order.rawValue)
             btn.addTarget(self, action: #selector(self.sortTapped(_:)), for: .touchUpInside)
             self.sortButtons.append((order, btn))

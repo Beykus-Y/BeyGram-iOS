@@ -55,7 +55,7 @@ private final class BeyGramMixSettingsViewControllerImpl: BeyGramScrollViewContr
             btn.layer.cornerCurve = .continuous
             btn.titleLabel?.font = BeyGramTypography.font(style: .footnote, weight: .semibold)
             btn.titleLabel?.adjustsFontForContentSizeCategory = true
-            btn.contentEdgeInsets = UIEdgeInsets(top: 8, left: 2, bottom: 8, right: 2)
+            btn.heightAnchor.constraint(greaterThanOrEqualToConstant: 36).isActive = true
             btn.tag = Int(value)
             btn.addTarget(self, action: #selector(self.durationTapped(_:)), for: .touchUpInside)
             self.durationButtons.append((value, btn))

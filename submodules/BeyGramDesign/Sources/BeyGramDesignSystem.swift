@@ -157,7 +157,7 @@ public final class BeyGramActionButton: UIButton {
         self.layer.cornerCurve = .continuous
         self.titleLabel?.font = BeyGramTypography.font(style: .callout, weight: .semibold)
         self.titleLabel?.adjustsFontForContentSizeCategory = true
-        self.contentEdgeInsets = UIEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+        self.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         self.spinner.hidesWhenStopped = true
         self.spinner.translatesAutoresizingMaskIntoConstraints = false
         self.addSubview(self.spinner)
@@ -434,7 +434,7 @@ open class BeyGramScrollViewController: ViewController {
         |> deliverOnMainQueue).start(next: { [weak self] presentationData in
             guard let self else { return }
             self.presentationData = presentationData
-            self.updateNavigationBarPresentationData(NavigationBarPresentationData(presentationData: presentationData))
+            self.navigationBar?.updatePresentationData(NavigationBarPresentationData(presentationData: presentationData), transition: .immediate)
             self.applyPresentationData(presentationData)
         })
         self.applyPresentationData(self.presentationData)
@@ -455,7 +455,7 @@ open class BeyGramScrollViewController: ViewController {
 
     @objc private func handleEscapeKey() {
         if let nav = self.navigationController as? NavigationController {
-            nav.popViewController(animated: true)
+            _ = nav.popViewController(animated: true)
         } else {
             self.dismiss()
         }

@@ -124,7 +124,7 @@ private final class BeyGramPrivacyViewControllerImpl: BeyGramScrollViewControlle
             btn.titleLabel?.adjustsFontForContentSizeCategory = true
             btn.titleLabel?.numberOfLines = 2
             btn.titleLabel?.textAlignment = .center
-            btn.contentEdgeInsets = UIEdgeInsets(top: 9, left: 6, bottom: 9, right: 6)
+            btn.heightAnchor.constraint(greaterThanOrEqualToConstant: 38).isActive = true
             btn.tag = self.presetButtons.count
             btn.addTarget(self, action: #selector(self.presetTapped(_:)), for: .touchUpInside)
             self.presetButtons.append((kind, btn))
@@ -153,7 +153,7 @@ private final class BeyGramPrivacyViewControllerImpl: BeyGramScrollViewControlle
             btn.layer.cornerCurve = .continuous
             btn.titleLabel?.font = BeyGramTypography.font(style: .subheadline, weight: .semibold)
             btn.titleLabel?.adjustsFontForContentSizeCategory = true
-            btn.contentEdgeInsets = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
+            btn.heightAnchor.constraint(greaterThanOrEqualToConstant: 36).isActive = true
             btn.tag = Int(delay)
             btn.addTarget(self, action: #selector(self.delayTapped(_:)), for: .touchUpInside)
             self.delayButtons.append((delay, btn))
