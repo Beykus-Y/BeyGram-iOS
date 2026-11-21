@@ -15,8 +15,11 @@
 #include "bgmedia/audio/AudioData.hpp"
 #include "bgmedia/mix/MixEngine.hpp"
 #include "bgmedia/mix/MixSession.hpp"
+#include "BGMediaAVFoundationDecoder.hpp"
 #include "BGMediaMixPreparation.hpp"
 #include "BGMediaMixState.hpp"
+
+NSNotificationName const BGMixPlayerDidStartPlaybackNotification = @"BGMixPlayerDidStartPlaybackNotification";
 
 namespace {
 
@@ -25,76 +28,6 @@ constexpr AVAudioFrameCount kScratchFrames = 4096;
 // While the mix plays, observers get a new snapshot at most this often. In the background the timer that
 // runs the update loop uses the same interval, because the display link does not fire there.
 constexpr CFTimeInterval kObserverInterval = 0.1;
-
-// Decodes any file AVFoundation can read (MP3, AAC/M4A, FLAC, WAV, ALAC) into interleaved float PCM.
-// Runs on the MixSession worker thread. The decoded size is known from the file length, so a track
-// that would not fit the in-memory limit is refused before anything is allocated. The file is read in
-// chunks into storage reserved once (no second full-length copy), and the checkpoint runs between
-// chunks: a cancelled job throws out of here.
-bool decodeWithAVFoundation(const std::filesystem::path &path, std::uint64_t maxDecodedBytes,
-                            const beygram::media::MixCheckpoint &checkpoint,
-                            bgmedia::AudioData &out, std::string &error) {
-    constexpr AVAudioFrameCount kChunkFrames = 65536;
-    AVAudioFile *file = nil;
-    AVAudioPCMBuffer *buffer = nil;
-    try {
-        // The worker thread has no autorelease pool of its own. The pool is popped on the way out
-        // of a C++ exception too, so the checkpoint may throw from inside it.
-        @autoreleasepool {
-            NSString *filePath = [NSString stringWithUTF8String:path.c_str()];
-            if (filePath == nil) {
-                error = "Invalid file path.";
-                return false;
-            }
-            NSError *nsError = nil;
-            file = [[AVAudioFile alloc] initForReading:[NSURL fileURLWithPath:filePath] error:&nsError];
-            if (file == nil) {
-                error = nsError.localizedDescription.UTF8String ?: "Could not open audio file.";
-                return false;
-            }
-            AVAudioFormat *format = file.processingFormat; // float32, non-interleaved
-            const AVAudioFramePosition length = file.length;
-            if (length <= 0 || format.channelCount == 0) {
-                error = "Audio file is empty.";
-                return false;
-            }
-            const auto channels = static_cast<std::uint32_t>(format.channelCount);
-            if (beygram::media::interleavedFloatBytes(static_cast<std::uint64_t>(length), channels) >
-                maxDecodedBytes) {
-                error = "decoded PCM exceeds the in-memory limit";
-                return false;
-            }
-            buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:format frameCapacity:kChunkFrames];
-            if (buffer == nil) {
-                error = "Could not decode audio file.";
-                return false;
-            }
-            beygram::media::InterleavedPcmBuilder builder(channels, static_cast<std::uint64_t>(length),
-                                                          maxDecodedBytes);
-            for (;;) {
-                if (![file readIntoBuffer:buffer frameCount:kChunkFrames error:&nsError]) {
-                    error = nsError.localizedDescription.UTF8String ?: "Could not decode audio file.";
-                    return false;
-                }
-                const AVAudioFrameCount frames = buffer.frameLength;
-                if (frames == 0) {
-                    break;
-                }
-                builder.appendPlanar(buffer.floatChannelData, frames);
-                checkpoint();
-            }
-            out.channels = channels;
-            out.sampleRate = (uint32_t)format.sampleRate;
-            out.samples = builder.take();
-            return out.valid();
-        }
-    } catch (...) {
-        // C++ exceptions do not release ARC references in this file, so drop them before rethrowing.
-        buffer = nil;
-        file = nil;
-        throw;
-    }
-}
 
 NSString *stringFromUTF8(const std::string &text) {
     NSString *value = [NSString stringWithUTF8String:text.c_str()];
@@ -245,18 +178,25 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     return directory;
 }
 
+static BGMixPlayer *sSharedPlayer = nil;
+
 + (BGMixPlayer *)sharedPlayer {
     // The app has one player. It is created on the first call, which happens on the main thread.
-    static BGMixPlayer *player = nil;
-    if (player == nil) {
+    if (sSharedPlayer == nil) {
         NSURL *cacheDirectory = [[self mixDirectory] URLByAppendingPathComponent:@"cache" isDirectory:YES];
         [[NSFileManager defaultManager] createDirectoryAtURL:cacheDirectory
                                  withIntermediateDirectories:YES
                                                   attributes:nil
                                                        error:nil];
-        player = [[BGMixPlayer alloc] initWithCacheDirectory:cacheDirectory.path];
+        sSharedPlayer = [[BGMixPlayer alloc] initWithCacheDirectory:cacheDirectory.path];
     }
-    return player;
+    return sSharedPlayer;
+}
+
++ (void)stopSharedEngineIfRunning {
+    if (sSharedPlayer != nil && ([sSharedPlayer isSounding] || sSharedPlayer.audioEngine.isRunning)) {
+        [sSharedPlayer stopEngine];
+    }
 }
 
 - (instancetype)initWithCacheDirectory:(NSString *)cacheDirectory {
@@ -280,7 +220,7 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
         *_engine,
         [options](const std::filesystem::path &path, bgmedia::mix::PreparedMixTrack &out,
                   std::string &error, std::function<void(float, std::string_view)> progress) {
-            return beygram::media::prepareMixTrack(path, decodeWithAVFoundation, options, out, error, progress);
+            return beygram::media::prepareMixTrack(path, beygram::media::decodeWithAVFoundation, options, out, error, progress);
         },
         bgmedia::mix::MixPlanner{},
         bgmedia::mix::MixPcmBudget{beygram::media::kMixMaxTrackPcmBytes,
@@ -409,13 +349,17 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
         AVAudioSession *session = [AVAudioSession sharedInstance];
         if (![session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:&error] ||
             ![session setActive:YES error:&error]) {
-            self.audioError = error.localizedDescription ?: @"The audio session is not available.";
+            self.audioError = error != nil
+                ? [NSString stringWithFormat:@"Audio session error (%@:%ld).", error.domain ?: @"unknown", (long)error.code]
+                : @"The audio session is not available.";
             return NO;
         }
     }
     [self.audioEngine prepare];
     if (![self.audioEngine startAndReturnError:&error]) {
-        self.audioError = error.localizedDescription ?: @"The audio engine did not start.";
+        self.audioError = error != nil
+            ? [NSString stringWithFormat:@"Audio engine error (%@:%ld).", error.domain ?: @"unknown", (long)error.code]
+            : @"The audio engine did not start.";
         return NO;
     }
     self.audioError = nil;
@@ -627,6 +571,9 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
 // The engine starts first. If the system refuses, the mix does not start and lastError says why.
 - (void)play {
     if (_session && [self ensureEngineRunning]) {
+        if (self.managesAudioSession) {
+            [[NSNotificationCenter defaultCenter] postNotificationName:BGMixPlayerDidStartPlaybackNotification object:self];
+        }
         _session->play();
     }
     [self stateChanged];
