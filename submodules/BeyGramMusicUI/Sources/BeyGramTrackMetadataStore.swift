@@ -59,15 +59,16 @@ public final class BeyGramTrackMetadataStore {
     }
 
     public func registerYandexTrack(_ track: BGYandexTrack, localURL: URL? = nil) {
-        let coverURL = track.coverURI.flatMap { BGYandexModels.coverURL(from: $0, size: "400x400") }
+        let info = BGYandexTrackInfo(track: track)
+        let artistText = info.artists.joined(separator: ", ")
         let meta = BeyGramResolvedTrackMeta(
-            title: track.title,
-            artist: track.artistText.isEmpty ? nil : track.artistText,
-            coverURL: coverURL,
-            yandexTrackId: track.id
+            title: info.title ?? track.title,
+            artist: artistText.isEmpty ? nil : artistText,
+            coverURL: info.coverURL,
+            yandexTrackId: track.trackId
         )
         self.lock.lock()
-        self.byYandexId[track.id] = meta
+        self.byYandexId[track.trackId] = meta
         if let localURL {
             self.byURLKey[localURL.standardizedFileURL.path] = meta
         }

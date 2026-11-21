@@ -13,7 +13,7 @@ import BeyGramYandexMusic
 private final class BeyGramMusicCenterViewControllerImpl: BeyGramScrollViewController, UIDocumentPickerDelegate {
     private var stateDisposable: Disposable?
     private var musicState = BeyGramMusicSession.shared.currentState
-    private let libraryStore: BGMusicLibraryStore
+    private let libraryStore: BGMusicLibraryFileStore
 
     private let waveHeroCard = BeyGramCardView(spacing: 10)
     private let waveHeroTitle = BeyGramTypography.makeLabel(style: .title3, weight: .bold, lines: 1)
@@ -41,7 +41,7 @@ private final class BeyGramMusicCenterViewControllerImpl: BeyGramScrollViewContr
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let libRoot = base.appendingPathComponent("beygram/music-library/\(context.account.peerId.toInt64())", isDirectory: true)
-        self.libraryStore = BGMusicLibraryStore(rootDirectory: libRoot)
+        self.libraryStore = BGMusicLibraryFileStore(directory: libRoot)
         super.init(context: context)
     }
 
@@ -229,7 +229,7 @@ private final class BeyGramMusicCenterViewControllerImpl: BeyGramScrollViewContr
             self.libraryListStack.removeArrangedSubview(subview)
             subview.removeFromSuperview()
         }
-        let playlists = self.libraryStore.load().playlists
+        let playlists = (try? self.libraryStore.allPlaylists()) ?? []
         if playlists.isEmpty {
             let empty = BeyGramTypography.makeLabel(style: .footnote, weight: .regular, lines: 0)
             empty.text = isRu ? "Локальных плейлистов пока нет. Вы можете импортировать архив .bgmusic." : "No local playlists yet. You can import a .bgmusic archive."
@@ -299,16 +299,8 @@ private final class BeyGramMusicCenterViewControllerImpl: BeyGramScrollViewContr
         }
     }
 
-    private func playLocalPlaylist(_ playlist: BGMusicPlaylist) {
-        let urls = playlist.tracks.compactMap { track -> URL? in
-            let candidate = self.libraryStore.rootDirectory.appendingPathComponent(track.fileName)
-            return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
-        }
-        if !urls.isEmpty {
-            BeyGramMusicSession.shared.addTracks(urls: urls)
-            BeyGramMusicSession.shared.play()
-            (self.navigationController as? NavigationController)?.pushViewController(BeyGramNowPlayingViewController(context: self.context))
-        }
+    private func playLocalPlaylist(_ playlist: BGMusicLibraryPlaylist) {
+        (self.navigationController as? NavigationController)?.pushViewController(BeyGramNowPlayingViewController(context: self.context))
     }
 
     @objc private func openYandexTapped() {
@@ -322,8 +314,11 @@ private final class BeyGramMusicCenterViewControllerImpl: BeyGramScrollViewContr
     }
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        guard let url = urls.first else { return }
-        let _ = try? self.libraryStore.importPlaylist(from: url)
+        guard let url = urls.first, let data = try? Data(contentsOf: url) else { return }
+        let library = BGMusicLibrary(store: self.libraryStore)
+        if let preview = try? library.previewImport(data: data) {
+            let _ = try? library.applyImport(preview, action: .addAsNewPlaylist)
+        }
         self.render()
     }
 }

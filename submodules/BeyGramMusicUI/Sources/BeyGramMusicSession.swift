@@ -296,7 +296,7 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
     /// Resolves a Yandex Music track through `BGYandexRuntime.shared`, registers its real title/artist/cover, and plays or enqueues it.
     public func playYandexTrack(_ track: BGYandexTrack, replaceQueue: Bool = false, completion: ((Result<Void, BGYandexPlaybackError>) -> Void)? = nil) {
         BeyGramTrackMetadataStore.shared.registerYandexTrack(track)
-        BGYandexRuntime.shared.playableFile(rowKey: "ym:\(track.id)") { [weak self] result in
+        BGYandexRuntime.shared.playableFile(rowKey: "ym:\(track.trackId)") { [weak self] result in
             guard let self else { return }
             switch result {
             case let .success(fileURL):

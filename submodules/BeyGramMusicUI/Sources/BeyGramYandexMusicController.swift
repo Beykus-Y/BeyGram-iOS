@@ -332,10 +332,11 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
         let track = self.currentWaveTrack
         self.waveTrackTitle.text = track?.title ?? (isRu ? "Моя волна" : "My Wave")
         self.waveTrackTitle.textColor = palette.primaryText
-        self.waveTrackArtist.text = track?.artist ?? (isRu ? "Персональный поток музыки" : "Your personal continuous radio")
+        let artistJoined = track?.artists.joined(separator: ", ") ?? ""
+        self.waveTrackArtist.text = artistJoined.isEmpty ? (isRu ? "Персональный поток музыки" : "Your personal continuous radio") : artistJoined
         self.waveTrackArtist.textColor = palette.secondaryText
 
-        let coverURL = track?.coverURI.flatMap { BGYandexModels.coverURL(from: $0, size: "400x400") }
+        let coverURL = track.flatMap { BGYandexTrackInfo(track: $0).coverURL }
         if self.loadedWaveCoverURL != coverURL {
             self.loadedWaveCoverURL = coverURL
             self.waveCoverView.image = UIImage(systemName: "waveform.circle.fill")
@@ -351,7 +352,7 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
             }
         }
 
-        let isThisPlaying = self.musicState.isPlaying && (track == nil || self.musicState.currentTrack?.yandexTrackId == track?.id)
+        let isThisPlaying = self.musicState.isPlaying && (track == nil || self.musicState.currentTrack?.yandexTrackId == track?.trackId)
         self.wavePlayButton.configure(
             title: track == nil ? (isRu ? "Запустить" : "Start") : (isThisPlaying ? (isRu ? "Пауза" : "Pause") : (isRu ? "Играть" : "Play")),
             style: .primary,
@@ -423,12 +424,14 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
         for (idx, track) in tracks.prefix(40).enumerated() {
             BeyGramTrackMetadataStore.shared.registerYandexTrack(track)
             let row = BeyGramRowView()
-            let durationText = track.durationSeconds > 0 ? String(format: "%d:%02d", track.durationSeconds / 60, track.durationSeconds % 60) : nil
+            let totalSec = Int(track.durationMs / 1000)
+            let durationText = totalSec > 0 ? String(format: "%d:%02d", totalSec / 60, totalSec % 60) : nil
+            let artistText = track.artists.joined(separator: ", ")
             row.configure(
                 iconName: "music.note",
                 iconTint: palette.accent,
                 title: track.title,
-                subtitle: track.artistText.isEmpty ? nil : track.artistText,
+                subtitle: artistText.isEmpty ? nil : artistText,
                 value: durationText,
                 showSeparator: idx < min(tracks.count, 40) - 1,
                 palette: palette,
@@ -464,11 +467,12 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
             for (idx, track) in self.selectedPlaylistTracks.prefix(40).enumerated() {
                 BeyGramTrackMetadataStore.shared.registerYandexTrack(track)
                 let row = BeyGramRowView()
+                let artistText = track.artists.joined(separator: ", ")
                 row.configure(
                     iconName: "music.note",
                     iconTint: palette.accent,
                     title: track.title,
-                    subtitle: track.artistText.isEmpty ? nil : track.artistText,
+                    subtitle: artistText.isEmpty ? nil : artistText,
                     showSeparator: idx < min(self.selectedPlaylistTracks.count, 40) - 1,
                     palette: palette,
                     onTap: { [weak self] in
@@ -541,7 +545,7 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
     private func startOrPlayWave() {
         let queue = self.ensureWaveQueue()
         if let current = self.currentWaveTrack {
-            if self.musicState.currentTrack?.yandexTrackId == current.id {
+            if self.musicState.currentTrack?.yandexTrackId == current.trackId {
                 BeyGramMusicSession.shared.togglePlayPause()
                 return
             }
@@ -573,13 +577,13 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
         self.currentWaveTrack = track
         self.waveLiked = false
         self.waveError = nil
-        self.lastWaveTrackIdPlayed = track.id
+        self.lastWaveTrackIdPlayed = track.trackId
         self.render()
         BeyGramMusicSession.shared.playYandexTrack(track, replaceQueue: true) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
-                self.waveQueue?.trackStarted(rowKey: "ym:\(track.id)")
+                self.waveQueue?.trackStarted(rowKey: "ym:\(track.trackId)")
                 // Pre-enqueue the next upcoming wave track so BG Mix can crossfade seamlessly.
                 if let upcoming = self.waveQueue?.upcomingTracks.first {
                     BeyGramMusicSession.shared.playYandexTrack(upcoming, replaceQueue: false)
@@ -599,8 +603,8 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
         self.waveQueue?.trackFinished(rowKey: "ym:\(prevId)", playedSeconds: self.musicState.duration)
         if let next = self.waveQueue?.takeNext() {
             self.currentWaveTrack = next
-            self.lastWaveTrackIdPlayed = next.id
-            self.waveQueue?.trackStarted(rowKey: "ym:\(next.id)")
+            self.lastWaveTrackIdPlayed = next.trackId
+            self.waveQueue?.trackStarted(rowKey: "ym:\(next.trackId)")
             if let upcoming = self.waveQueue?.upcomingTracks.first {
                 BeyGramMusicSession.shared.playYandexTrack(upcoming, replaceQueue: false)
             }
@@ -687,14 +691,11 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch event {
-                case let .waitingForUser(code, url, _):
-                    self.waitingCode = code
-                    self.verificationUrl = url
+                case let .code(deviceCode):
+                    self.waitingCode = deviceCode.userCode
+                    self.verificationUrl = deviceCode.verificationUrl
                     self.codeCopied = false
-                case .signedIn:
-                    self.waitingCode = nil
-                    self.verificationUrl = nil
-                case .cancelled:
+                case .finished:
                     self.waitingCode = nil
                     self.verificationUrl = nil
                 case let .failed(err):
@@ -731,7 +732,7 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
 
     @objc private func waveNextTapped() {
         guard let current = self.currentWaveTrack else { return }
-        self.waveQueue?.trackSkipped(rowKey: "ym:\(current.id)", playedSeconds: self.musicState.position)
+        self.waveQueue?.trackSkipped(rowKey: "ym:\(current.trackId)", playedSeconds: self.musicState.position)
         if let next = self.waveQueue?.takeNext() {
             self.playWaveTrack(next)
         } else {
@@ -744,8 +745,8 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
         guard let current = self.currentWaveTrack else { return }
         self.waveLiked.toggle()
         let next = self.waveLiked
-        self.waveQueue?.setLiked(trackId: current.id, liked: next)
-        self.service.setLiked(trackId: current.id, liked: next) { _ in }
+        self.waveQueue?.setLiked(trackId: current.trackId, liked: next)
+        self.service.setLiked(trackId: current.trackId, liked: next) { _ in }
         self.render()
     }
 
