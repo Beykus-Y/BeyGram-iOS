@@ -593,7 +593,9 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
         // The fetch ends with the file on disk (`true`) or with a failed download (`false`). After a failed download the file
         // never completes, so waiting for it would hang. A failed fetch fails at once, and the playlist moves on.
         let fetchSucceeded: Signal<Bool, NoError> = self.engine.resources.fetch(reference: reference.resourceReference(media.resource), userLocation: .other, userContentType: .audio)
-        |> ignoreValues
+        |> mapToSignal { _ -> Signal<Bool, FetchResourceError> in
+            return .complete()
+        }
         |> then(.single(true))
         |> `catch` { _ -> Signal<Bool, NoError> in
             return .single(false)
