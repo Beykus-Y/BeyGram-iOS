@@ -114,7 +114,7 @@ private final class ReportViewControllerImpl: BeyGramScrollViewController, UITex
         let nonceTrimmed = (self.nonceField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let canSend = !self.isSending && !descTrimmed.isEmpty && !nonceTrimmed.isEmpty
         self.sendButton.configure(
-            title: l10n.string(.diagnosticsSendAction, languageCode: lang),
+            title: l10n.string(.diagnosticsSendButton, languageCode: lang),
             style: .primary,
             palette: palette,
             isLoading: self.isSending,
@@ -128,10 +128,10 @@ private final class ReportViewControllerImpl: BeyGramScrollViewController, UITex
             break
         case .uploading:
             self.statusBadge.isHidden = false
-            self.statusBadge.configure(text: l10n.string(.diagnosticsStatusSending, languageCode: lang), textColor: palette.warning, backgroundColor: palette.warningSoft)
-        case let .delivered(reportId):
+            self.statusBadge.configure(text: l10n.string(.diagnosticsStageUploading, languageCode: lang), textColor: palette.warning, backgroundColor: palette.warningSoft)
+        case let .delivered(reportId, _):
             self.statusBadge.isHidden = false
-            self.statusBadge.configure(text: l10n.string(.diagnosticsStatusSent, languageCode: lang), textColor: palette.success, backgroundColor: palette.successSoft)
+            self.statusBadge.configure(text: l10n.string(.diagnosticsStageDelivered, languageCode: lang), textColor: palette.success, backgroundColor: palette.successSoft)
             self.statusLabel.isHidden = false
             self.statusLabel.text = "ID: \(reportId)"
             self.statusLabel.textColor = palette.secondaryText
@@ -139,15 +139,16 @@ private final class ReportViewControllerImpl: BeyGramScrollViewController, UITex
             self.statusBadge.isHidden = false
             self.statusBadge.configure(text: l10n.string(.commonError, languageCode: lang), textColor: palette.destructive, backgroundColor: palette.destructiveSoft)
             self.statusLabel.isHidden = false
-            self.statusLabel.text = l10n.string(.diagnosticsStatusFailed(String(describing: reason)), languageCode: lang)
+            self.statusLabel.text = "\(l10n.string(.diagnosticsStageError, languageCode: lang)): \(reason)"
             self.statusLabel.textColor = palette.destructive
         }
 
         self.previewCard.apply(palette: palette)
-        self.previewTitle.text = l10n.string(.diagnosticsPreviewHeader, languageCode: lang).uppercased()
+        self.previewTitle.text = l10n.string(.diagnosticsPreviewTitle, languageCode: lang).uppercased()
         self.previewTitle.textColor = palette.secondaryText
         let meta = BugReportDeviceInfo.current()
-        let deviceLine = [meta.deviceModel, meta.osVersion, meta.appBuild].compactMap { $0 }.joined(separator: " · ")
+        let buildCode = meta.appVersionCode.map { "(\($0))" }
+        let deviceLine = [meta.deviceModel, meta.osVersion, meta.appVersion, buildCode].compactMap { $0 }.joined(separator: " · ")
         self.previewBody.text = l10n.string(.diagnosticsPreviewBody, languageCode: lang) + (deviceLine.isEmpty ? "" : "\n\n\(deviceLine)")
         self.previewBody.textColor = palette.secondaryText
     }
