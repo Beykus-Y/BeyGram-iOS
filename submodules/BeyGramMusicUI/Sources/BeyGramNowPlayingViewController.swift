@@ -438,7 +438,11 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
     }
 
     @objc private func nextTapped() {
-        BeyGramMusicSession.shared.next()
+        if BeyGramMusicSession.shared.currentWaveState.isActive {
+            BeyGramMusicSession.shared.skipWaveTrack()
+        } else {
+            BeyGramMusicSession.shared.next()
+        }
     }
 
     @objc private func mixSettingsTapped() {
