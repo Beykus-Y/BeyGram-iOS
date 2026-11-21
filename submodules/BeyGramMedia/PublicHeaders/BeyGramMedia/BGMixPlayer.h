@@ -80,9 +80,9 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 - (instancetype)initWithCacheDirectory:(NSString *)cacheDirectory;
 
 // Queue. addTrackAtURL: returns a non-zero track identifier, or 0 when the file is rejected.
-- (uint64_t)addTrackAtURL:(NSURL *)url;
+- (uint64_t)addTrackAtURL:(NSURL *)url NS_SWIFT_NAME(addTrack(at:));
 // Returns NO when no track has this identifier.
-- (BOOL)removeTrackWithIdentifier:(uint64_t)identifier;
+- (BOOL)removeTrackWithIdentifier:(uint64_t)identifier NS_SWIFT_NAME(removeTrack(withIdentifier:));
 - (void)clearQueue;
 
 // Transport.
@@ -93,7 +93,7 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 - (void)stopAll;
 // Moves the master deck to `seconds`. Returns NO during a transition, when nothing is loaded, or
 // for a negative or non-finite value.
-- (BOOL)seekToPosition:(NSTimeInterval)seconds;
+- (BOOL)seekToPosition:(NSTimeInterval)seconds NS_SWIFT_NAME(seek(toPosition:));
 - (BOOL)isTransitionActive;
 
 - (void)setTransitionDuration:(double)seconds; // 0 = automatic
@@ -106,6 +106,15 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 // Observers are held weakly. A new observer gets the current snapshot at once, then later changes.
 - (void)addObserver:(id<BGMixPlayerObserver>)observer;
 - (void)removeObserver:(id<BGMixPlayerObserver>)observer;
+
+// Who configures and activates AVAudioSession. YES (the default) lets the player do it itself, which is what
+// the BG Mix screen needs. The app's music path sets NO: its session manager activates the session before play,
+// and the player only starts and stops its engine. Such a player does not resume by itself after an
+// interruption. The music path sets YES again when it lets go.
+@property (nonatomic) BOOL managesAudioSession;
+
+// Pauses, then stops the audio engine at once. The session manager calls it when it takes the session away.
+- (void)stopEngine;
 
 // Stops the audio engine and the update loop, and drops the observers. Call before releasing the player.
 // The shared player is not invalidated in normal use.
