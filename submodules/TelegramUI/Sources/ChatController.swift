@@ -4130,10 +4130,39 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                     }
                     let stealthSettings = BeyGramStealthStore.shared.settings(accountPeerId: strongSelf.context.account.peerId.toInt64())
                     let isStealthSchedulingOn = BeyGramSettings.shared.isEnabled(.privacyPolicy) && stealthSettings.serverScheduledSend
+                    let refusal = beyGramStealthRefusal(accountPeerId: strongSelf.context.account.peerId, messageId: topMessage.id)
                     let isUnsupportedForStealth = id.peerId.namespace == Namespaces.Peer.SecretChat || topMessage.attributes.contains(where: { $0 is PaidStarsMessageAttribute })
-                    if isStealthSchedulingOn && isUnsupportedForStealth {
+                    if (isStealthSchedulingOn && isUnsupportedForStealth) || refusal != nil {
                         let lang = strongSelf.presentationData.strings.primaryComponent.languageCode
                         let l10n = BeyGramL10n.shared
+                        let refusalBody: String
+                        if let refusal {
+                            let isRu = lang.lowercased().hasPrefix("ru")
+                            switch refusal {
+                            case .secretChat:
+                                refusalBody = isRu
+                                    ? "Отложенная отправка недоступна в секретных чатах. Отправьте сообщение сейчас или удалите его."
+                                    : "Stealth sending is not available in secret chats. Send the message now or delete it."
+                            case .paidStars:
+                                refusalBody = isRu
+                                    ? "Платное сообщение нельзя отправить по расписанию. Отправьте его сейчас или удалите."
+                                    : "A paid message cannot be sent on a schedule. Send it now or delete it."
+                            case .leadTooShort:
+                                refusalBody = isRu
+                                    ? "Задержка меньше 15 секунд: Telegram опубликовал бы сообщение сразу. Выберите задержку не меньше 15 секунд и отправьте снова."
+                                    : "The delay is under 15 seconds, so Telegram would publish the message at once. Choose a delay of at least 15 seconds and send again."
+                            case .ephemeral:
+                                refusalBody = isRu
+                                    ? "Для этого сообщения отложенная отправка недоступна. Отправьте его сейчас или удалите."
+                                    : "Stealth sending is not available for this message. Send the message now or delete it."
+                            case .notRecorded:
+                                refusalBody = isRu
+                                    ? "Не удалось подготовить отложенную отправку, сообщение не отправлено. Попробуйте снова."
+                                    : "The delayed send could not be prepared, so the message was not sent. Try again."
+                            }
+                        } else {
+                            refusalBody = l10n.string(.stealthRefusedBody, languageCode: lang)
+                        }
                         actions.append(.action(ContextMenuActionItem(text: l10n.string(.stealthSendNowAction, languageCode: lang), icon: { theme in
                             return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Resend"), color: theme.actionSheet.primaryTextColor)
                         }, action: { [weak self] _, f in
@@ -4143,7 +4172,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                             let alert = textAlertController(
                                 context: self.context,
                                 title: l10n.string(.stealthRefusedTitle, languageCode: lang),
-                                text: l10n.string(.stealthRefusedBody, languageCode: lang),
+                                text: refusalBody,
                                 actions: [
                                     TextAlertAction(type: .genericAction, title: self.presentationData.strings.Common_Cancel, action: {}),
                                     TextAlertAction(type: .destructiveAction, title: l10n.string(.stealthSendNowConfirm, languageCode: lang), action: { [weak self] in
@@ -9408,8 +9437,13 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                 self.commitPurposefulAction()
                 
                 let _ = (enqueueMessages(account: self.context.account, peerId: peerId, messages: self.transformEnqueueMessages(messages, postpone: postpone))
-                |> deliverOnMainQueue).startStandalone(next: { [weak self] _ in
+                |> deliverOnMainQueue).startStandalone(next: { [weak self] messageIds in
                     if let strongSelf = self, strongSelf.presentationInterfaceState.subject != .scheduledMessages {
+                        if messageIds.contains(where: { $0?.namespace == Namespaces.Message.ScheduledCloud }), let action = strongSelf.layoutActionOnViewTransitionAction {
+                            strongSelf.layoutActionOnViewTransitionAction = nil
+                            strongSelf.chatDisplayNode.historyNode.layoutActionOnViewTransition = nil
+                            action()
+                        }
                         strongSelf.chatDisplayNode.historyNode.scrollToEndOfHistory()
                     }
                 })

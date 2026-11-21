@@ -83,6 +83,17 @@ private final class AccountPresenceManagerImpl {
             self.onlineTimer = timer
             timer.start()
             request = self.network.request(Api.functions.account.updateStatus(offline: .boolFalse))
+        } else if requestedOnline {
+            // Re-assert offline periodically while foregrounded with hide-online active so server-side activity does not leave the account online.
+            let timer = SignalKitTimer(timeout: 30.0, repeat: false, completion: { [weak self] in
+                guard let strongSelf = self else {
+                    return
+                }
+                strongSelf.updatePresence(true)
+            }, queue: self.queue)
+            self.onlineTimer = timer
+            timer.start()
+            request = self.network.request(Api.functions.account.updateStatus(offline: .boolTrue))
         } else {
             self.onlineTimer?.invalidate()
             self.onlineTimer = nil
