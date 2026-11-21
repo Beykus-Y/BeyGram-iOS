@@ -170,9 +170,11 @@ private final class TriggerWordsViewControllerImpl: BeyGramScrollViewController,
                     onTap: { [weak self] in
                         self?.confirmDeleteRule(rule)
                     },
-                    onSwitch: { [weak self] _ in
+                    onSwitch: { [weak self] val in
                         guard let self else { return }
-                        self.store.toggleRule(id: rule.id)
+                        var updated = rule
+                        updated.isEnabled = val
+                        _ = self.store.upsertRule(updated)
                         self.render()
                     }
                 )
@@ -198,11 +200,13 @@ private final class TriggerWordsViewControllerImpl: BeyGramScrollViewController,
         } else {
             for (idx, item) in mentions.prefix(30).enumerated() {
                 let row = BeyGramRowView()
+                let title = (item.senderName?.isEmpty == false ? item.senderName : nil) ?? "Chat \(item.chatId)"
+                let snippet = item.text ?? ""
                 row.configure(
                     iconName: "bell.fill",
                     iconTint: palette.accent,
-                    title: item.chatTitle,
-                    subtitle: "\(item.matchedWord): \(item.snippet)",
+                    title: title,
+                    subtitle: snippet.isEmpty ? item.matchedPattern : "\(item.matchedPattern): \(snippet)",
                     showSeparator: idx < min(mentions.count, 30) - 1,
                     palette: palette
                 )
@@ -255,18 +259,20 @@ private final class TriggerWordsViewControllerImpl: BeyGramScrollViewController,
         self.patternField.resignFirstResponder()
         let lang = self.presentationData.strings.primaryComponent.languageCode
         let l10n = BeyGramL10n.shared
-        let status = self.store.addRule(pattern: self.draftPattern, mode: self.draftMode)
-        switch status {
-        case .added:
+        let rule = TriggerWordRule(pattern: self.draftPattern, mode: self.draftMode)
+        if let err = self.store.upsertRule(rule) {
+            switch err {
+            case .emptyPattern:
+                self.statusMessage = l10n.string(.triggerEmptyPatternStatus, languageCode: lang)
+            case .duplicatePattern:
+                self.statusMessage = l10n.string(.triggerDuplicateStatus, languageCode: lang)
+            case .patternTooLong, .tooManyRules:
+                self.statusMessage = l10n.string(.commonError, languageCode: lang)
+            }
+        } else {
             self.draftPattern = ""
             self.patternField.text = ""
             self.statusMessage = nil
-        case .empty:
-            self.statusMessage = l10n.string(.triggerEmptyPatternStatus, languageCode: lang)
-        case .duplicate:
-            self.statusMessage = l10n.string(.triggerDuplicateStatus, languageCode: lang)
-        case .tooLong, .limitReached:
-            self.statusMessage = l10n.string(.commonError, languageCode: lang)
         }
         self.render()
     }
