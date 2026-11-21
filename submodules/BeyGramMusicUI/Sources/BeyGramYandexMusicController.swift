@@ -24,11 +24,8 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
     private var codeCopied: Bool = false
     private var authFailure: String?
 
-    private var waveQueue: BGYandexWaveQueue?
-    private var currentWaveTrack: BGYandexTrack?
-    private var waveLoading: Bool = false
-    private var waveError: String?
-    private var waveLiked: Bool = false
+    private var waveStateDisposable: Disposable?
+    private var waveState = BeyGramMusicSession.shared.currentWaveState
 
     private var searchQuery: String = ""
     private var searchResults: [BGYandexTrack] = []
@@ -47,7 +44,6 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
 
     private var musicStateDisposable: Disposable?
     private var musicState = BeyGramMusicSession.shared.currentState
-    private var lastWaveTrackIdPlayed: String?
 
     // Onboarding / Auth UI
     private let authCard = BeyGramCardView(spacing: 12)
@@ -88,6 +84,7 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
 
     deinit {
         self.musicStateDisposable?.dispose()
+        self.waveStateDisposable?.dispose()
     }
 
     override func viewDidLoad() {
@@ -101,9 +98,13 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
         self.musicStateDisposable = (BeyGramMusicSession.shared.stateSignal
         |> deliverOnMainQueue).start(next: { [weak self] state in
             guard let self else { return }
-            let previousTrack = self.musicState.currentTrack
             self.musicState = state
-            self.handleMusicAdvanceIfWaveActive(previous: previousTrack, current: state.currentTrack)
+            self.render()
+        })
+        self.waveStateDisposable = (BeyGramMusicSession.shared.waveStateSignal
+        |> deliverOnMainQueue).start(next: { [weak self] waveState in
+            guard let self else { return }
+            self.waveState = waveState
             self.render()
         })
         self.render()
@@ -329,7 +330,7 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
 
     private func renderMyWave(palette: BeyGramThemePalette, isRu: Bool) {
         self.waveCard.apply(palette: palette)
-        let track = self.currentWaveTrack
+        let track = self.waveState.currentTrack
         self.waveTrackTitle.text = track?.title ?? (isRu ? "Моя волна" : "My Wave")
         self.waveTrackTitle.textColor = palette.primaryText
         let artistJoined = track?.artists.joined(separator: ", ") ?? ""
@@ -357,23 +358,23 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
             title: track == nil ? (isRu ? "Запустить" : "Start") : (isThisPlaying ? (isRu ? "Пауза" : "Pause") : (isRu ? "Играть" : "Play")),
             style: .primary,
             palette: palette,
-            isLoading: self.waveLoading
+            isLoading: self.waveState.isLoading
         )
         self.waveNextButton.configure(title: isRu ? "Дальше" : "Skip", style: .secondary, palette: palette, isEnabled: track != nil)
         self.waveLikeButton.configure(
-            title: self.waveLiked ? (isRu ? "В любимом" : "Liked") : (isRu ? "Нравится" : "Like"),
+            title: self.waveState.isLiked ? (isRu ? "В любимом" : "Liked") : (isRu ? "Нравится" : "Like"),
             style: .secondary,
             palette: palette,
             isEnabled: track != nil
         )
 
-        if let waveError {
+        if let waveError = self.waveState.error {
             self.waveStatusLabel.isHidden = false
             self.waveStatusLabel.text = waveError
             self.waveStatusLabel.textColor = palette.destructive
-        } else if let q = self.waveQueue, !q.upcomingTracks.isEmpty {
+        } else if self.waveState.upcomingCount > 0 {
             self.waveStatusLabel.isHidden = false
-            self.waveStatusLabel.text = isRu ? "Впереди ещё треков: \(q.upcomingTracks.count) (автоподгрузка)" : "\(q.upcomingTracks.count) tracks queued ahead (auto-refill)"
+            self.waveStatusLabel.text = isRu ? "Впереди ещё треков: \(self.waveState.upcomingCount) (автоподгрузка)" : "\(self.waveState.upcomingCount) tracks queued ahead (auto-refill)"
             self.waveStatusLabel.textColor = palette.secondaryText
         } else {
             self.waveStatusLabel.isHidden = true
@@ -525,92 +526,6 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
         }
     }
 
-    private func ensureWaveQueue() -> BGYandexWaveQueue {
-        if let existing = self.waveQueue {
-            return existing
-        }
-        let session = self.service.makeWave(seeds: ["user:onyourwave"])
-        let queue = BGYandexWaveQueue(source: session, prepare: { [weak self] track in
-            BeyGramTrackMetadataStore.shared.registerYandexTrack(track)
-            self?.service.localFile(trackId: track.trackId) { result in
-                if case let .success(url) = result {
-                    BeyGramTrackMetadataStore.shared.associate(localURL: url, with: track)
-                }
-            }
-        })
-        self.waveQueue = queue
-        return queue
-    }
-
-    private func startOrPlayWave() {
-        let queue = self.ensureWaveQueue()
-        if let current = self.currentWaveTrack {
-            if self.musicState.currentTrack?.yandexTrackId == current.trackId {
-                BeyGramMusicSession.shared.togglePlayPause()
-                return
-            }
-            self.playWaveTrack(current)
-            return
-        }
-        self.waveLoading = true
-        self.waveError = nil
-        self.render()
-        queue.start { [weak self] result in
-            guard let self else { return }
-            self.waveLoading = false
-            switch result {
-            case let .success(firstTrack):
-                if let firstTrack {
-                    self.playWaveTrack(firstTrack)
-                } else {
-                    self.waveError = "My Wave returned no tracks."
-                    self.render()
-                }
-            case let .failure(error):
-                self.waveError = String(describing: error)
-                self.render()
-            }
-        }
-    }
-
-    private func playWaveTrack(_ track: BGYandexTrack) {
-        self.currentWaveTrack = track
-        self.waveLiked = false
-        self.waveError = nil
-        self.lastWaveTrackIdPlayed = track.trackId
-        self.render()
-        BeyGramMusicSession.shared.playYandexTrack(track, replaceQueue: true) { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success:
-                self.waveQueue?.trackStarted(rowKey: "ym:\(track.trackId)")
-                // Pre-enqueue the next upcoming wave track so BG Mix can crossfade seamlessly.
-                if let upcoming = self.waveQueue?.upcomingTracks.first {
-                    BeyGramMusicSession.shared.playYandexTrack(upcoming, replaceQueue: false)
-                }
-            case let .failure(err):
-                self.waveError = String(describing: err)
-                self.render()
-            }
-        }
-    }
-
-    private func handleMusicAdvanceIfWaveActive(previous: BeyGramMusicTrack?, current: BeyGramMusicTrack?) {
-        guard self.waveQueue != nil, let prevId = previous?.yandexTrackId, prevId == self.lastWaveTrackIdPlayed,
-              current?.yandexTrackId != prevId else {
-            return
-        }
-        self.waveQueue?.trackFinished(rowKey: "ym:\(prevId)", playedSeconds: self.musicState.duration)
-        if let next = self.waveQueue?.takeNext() {
-            self.currentWaveTrack = next
-            self.lastWaveTrackIdPlayed = next.trackId
-            self.waveQueue?.trackStarted(rowKey: "ym:\(next.trackId)")
-            if let upcoming = self.waveQueue?.upcomingTracks.first {
-                BeyGramMusicSession.shared.playYandexTrack(upcoming, replaceQueue: false)
-            }
-        }
-    }
-
     private func playSingleYandexTrack(_ track: BGYandexTrack) {
         BeyGramMusicSession.shared.playYandexTrack(track, replaceQueue: true) { [weak self] result in
             guard let self else { return }
@@ -710,9 +625,7 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
     }
 
     @objc private func signOutTapped() {
-        self.waveQueue?.stop()
-        self.waveQueue = nil
-        self.currentWaveTrack = nil
+        BeyGramMusicSession.shared.stopWave()
         self.service.signOut()
         self.render()
     }
@@ -723,27 +636,15 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
     }
 
     @objc private func wavePlayTapped() {
-        self.startOrPlayWave()
+        BeyGramMusicSession.shared.startOrToggleWave()
     }
 
     @objc private func waveNextTapped() {
-        guard let current = self.currentWaveTrack else { return }
-        self.waveQueue?.trackSkipped(rowKey: "ym:\(current.trackId)", playedSeconds: self.musicState.position)
-        if let next = self.waveQueue?.takeNext() {
-            self.playWaveTrack(next)
-        } else {
-            self.currentWaveTrack = nil
-            self.startOrPlayWave()
-        }
+        BeyGramMusicSession.shared.skipWaveTrack()
     }
 
     @objc private func waveLikeTapped() {
-        guard let current = self.currentWaveTrack else { return }
-        self.waveLiked.toggle()
-        let next = self.waveLiked
-        self.waveQueue?.setLiked(trackId: current.trackId, liked: next)
-        self.service.setLiked(trackId: current.trackId, liked: next) { _ in }
-        self.render()
+        BeyGramMusicSession.shared.toggleWaveLike()
     }
 
     @objc private func searchTapped() {
