@@ -147,10 +147,9 @@ objc_library(
 
 cc_test(
     name = "BGMediaAVFoundationDecoderTests",
-    srcs = ["Tests/BGMediaAVFoundationDecoderTests.mm"],
+    srcs = ["Tests/BGMediaAVFoundationDecoderTests.cpp"],
     copts = [
         "-std=c++20",
-        "-fobjc-arc",
     ],
     deps = [":BGMediaAVFoundationDecoder"],
 )
