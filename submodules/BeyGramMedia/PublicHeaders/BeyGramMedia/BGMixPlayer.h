@@ -67,6 +67,10 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 // so Telegram's native MediaPlayer can pause cleanly without conflicting audio output.
 extern NSNotificationName const BGMixPlayerDidStartPlaybackNotification;
 
+// Posted on the main thread when the shared BGMixPlayer is stopped because Telegram's native
+// MediaPlayer is taking over audio playback, so BG Mix releases system Now Playing controls cleanly.
+extern NSNotificationName const BGMixPlayerDidStopForExternalAudioNotification;
+
 // BG Mix (AutoMix) for iOS: a queue of local audio files, prepared in the background (decode,
 // BG Beat analysis, BG Mix features) and played through AVAudioEngine with smart crossfades.
 // All methods and all observer callbacks run on the main thread. The contract is in
@@ -89,6 +93,9 @@ extern NSNotificationName const BGMixPlayerDidStartPlaybackNotification;
 
 // Queue. addTrackAtURL: returns a non-zero track identifier, or 0 when the file is rejected.
 - (uint64_t)addTrackAtURL:(NSURL *)url NS_SWIFT_NAME(addTrack(at:));
+// Atomically stops playback, drains and clears both decks, adds `url`, and starts playback.
+// Prevents "busy deck" races when replacing the queue while audio is playing.
+- (uint64_t)replaceQueueAndPlayTrackAtURL:(NSURL *)url NS_SWIFT_NAME(replaceQueueAndPlayTrack(at:));
 // Returns NO when no track has this identifier.
 - (BOOL)removeTrackWithIdentifier:(uint64_t)identifier NS_SWIFT_NAME(removeTrack(withIdentifier:));
 - (void)clearQueue;
@@ -98,6 +105,10 @@ extern NSNotificationName const BGMixPlayerDidStartPlaybackNotification;
 - (void)pause;
 // Starts a smooth crossfade to the next prepared track.
 - (void)next;
+// Attempts to start a crossfade to the next prepared track. Returns YES only if the engine
+// actually entered an active transition; returns NO if the next track is not ready or the
+// transition plan was rejected.
+- (BOOL)tryStartNextTransition;
 - (void)stopAll;
 // Moves the master deck to `seconds`. Returns NO during a transition, when nothing is loaded, or
 // for a negative or non-finite value.

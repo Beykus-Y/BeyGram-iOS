@@ -20,6 +20,7 @@
 #include "BGMediaMixState.hpp"
 
 NSNotificationName const BGMixPlayerDidStartPlaybackNotification = @"BGMixPlayerDidStartPlaybackNotification";
+NSNotificationName const BGMixPlayerDidStopForExternalAudioNotification = @"BGMixPlayerDidStopForExternalAudioNotification";
 
 namespace {
 
@@ -195,6 +196,7 @@ static BGMixPlayer *sSharedPlayer = nil;
 
 + (void)stopSharedEngineIfRunning {
     if (sSharedPlayer != nil && ([sSharedPlayer isSounding] || sSharedPlayer.audioEngine.isRunning)) {
+        [[NSNotificationCenter defaultCenter] postNotificationName:BGMixPlayerDidStopForExternalAudioNotification object:sSharedPlayer];
         [sSharedPlayer stopEngine];
     }
 }
@@ -542,12 +544,49 @@ static BGMixPlayer *sSharedPlayer = nil;
     }
 }
 
+- (void)resetDecksSynchronously {
+    if (!_session || !_engine) {
+        return;
+    }
+    if (self.audioEngine.isRunning) {
+        [self.audioEngine stop];
+    }
+    _session->stopAll();
+    // Safe on main thread because AVAudioEngine is stopped:
+    // 1) 1024 frames drains the 8ms de-click ramp (384 frames at 48kHz) and handles stopRequested_.
+    // 2) 1 frame enters the paused&&pauseFade_<=0 path and marks both decks playing=false.
+    _engine->render(_scratch, 1024);
+    _engine->render(_scratch, 1);
+    _session->clearQueue();
+    _session->update();
+    // 3) Advance renderEpoch_ once more so retired PCM buffers from cleared decks are reclaimed immediately.
+    _engine->render(_scratch, 1);
+    _session->update();
+}
+
 - (uint64_t)addTrackAtURL:(NSURL *)url {
     const char *utf8Path = url.path.UTF8String;
     if (!url.isFileURL || utf8Path == nullptr || !_session) {
         return 0;
     }
     const uint64_t identifier = _session->addTrack(std::filesystem::path(utf8Path));
+    [self stateChanged];
+    return identifier;
+}
+
+- (uint64_t)replaceQueueAndPlayTrackAtURL:(NSURL *)url {
+    const char *utf8Path = url.path.UTF8String;
+    if (!url.isFileURL || utf8Path == nullptr || !_session || !_engine) {
+        return 0;
+    }
+    [self resetDecksSynchronously];
+    const uint64_t identifier = _session->addTrack(std::filesystem::path(utf8Path));
+    if (identifier != 0 && [self ensureEngineRunning]) {
+        if (self.managesAudioSession) {
+            [[NSNotificationCenter defaultCenter] postNotificationName:BGMixPlayerDidStartPlaybackNotification object:self];
+        }
+        _session->play();
+    }
     [self stateChanged];
     return identifier;
 }
@@ -562,8 +601,17 @@ static BGMixPlayer *sSharedPlayer = nil;
 }
 
 - (void)clearQueue {
-    if (_session) {
+    if (_session && _engine) {
+        if (!self.audioEngine.isRunning) {
+            _engine->render(_scratch, 1024);
+            _engine->render(_scratch, 1);
+        }
         _session->clearQueue();
+        _session->update();
+        if (!self.audioEngine.isRunning) {
+            _engine->render(_scratch, 1);
+            _session->update();
+        }
     }
     [self stateChanged];
 }
@@ -602,9 +650,40 @@ static BGMixPlayer *sSharedPlayer = nil;
     [self stateChanged];
 }
 
+- (BOOL)tryStartNextTransition {
+    if (!_session || !_engine) {
+        return NO;
+    }
+    if (_engine->transitionActive()) {
+        return NO;
+    }
+    BGMixSnapshot *before = self.snapshot;
+    if (before.nextTrack == nil || before.nextTrack.state != BGMixTrackStateReady) {
+        return NO;
+    }
+    if (![self ensureEngineRunning]) {
+        [self stateChanged];
+        return NO;
+    }
+    _session->next();
+    const BOOL started = _engine->transitionActive() ? YES : NO;
+    if (!started) {
+        // Clear pending nextRequested_ when the planner rejected the transition so serviceDecks()
+        // does not keep retrying and emitting "transition plan is not valid" on every tick.
+        _session->cancelTransition();
+    }
+    [self stateChanged];
+    return started;
+}
+
 - (void)stopAll {
-    if (_session) {
+    if (_session && _engine) {
+        if (self.audioEngine.isRunning) {
+            [self.audioEngine stop];
+        }
         _session->stopAll();
+        _engine->render(_scratch, 1024);
+        _engine->render(_scratch, 1);
     }
     [self stateChanged];
 }
