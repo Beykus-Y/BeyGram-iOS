@@ -63,6 +63,10 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 - (void)mixPlayer:(BGMixPlayer *)player didUpdateSnapshot:(BGMixSnapshot *)snapshot;
 @end
 
+// Posted on the main thread when a BGMixPlayer that manages its own AVAudioSession starts playback,
+// so Telegram's native MediaPlayer can pause cleanly without conflicting audio output.
+extern NSNotificationName const BGMixPlayerDidStartPlaybackNotification;
+
 // BG Mix (AutoMix) for iOS: a queue of local audio files, prepared in the background (decode,
 // BG Beat analysis, BG Mix features) and played through AVAudioEngine with smart crossfades.
 // All methods and all observer callbacks run on the main thread. The contract is in
@@ -72,6 +76,10 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 // The app's player. It belongs to the app, not to the BG Mix screen, so closing the screen does not stop
 // the mix. Created on first use.
 + (BGMixPlayer *)sharedPlayer;
+
+// If the shared player already exists and is currently playing, pauses and stops its audio engine.
+// Never instantiates the shared player if it has not been created yet.
++ (void)stopSharedEngineIfRunning;
 
 // Documents/bgmix: the queued copies and the analysis caches. Created on first use.
 + (NSURL *)mixDirectory;

@@ -72,4 +72,38 @@ final class BGYandexAudioCheckTests: XCTestCase {
     func testInvalidFileReachesThePlayerAsItsOwnError() {
         XCTAssertEqual(BGYandexPlayback.error(for: .invalidFile), .invalidFile)
     }
+
+    func testLegacyCachedM4AWithMP3ExtensionIsNormalizedInPlace() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("bgyandex-resolver-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // Valid M4A ftyp header (> 8 KiB) stored with legacy .mp3 extension.
+        var m4aBytes = Data([0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70, 0x4D, 0x34, 0x41, 0x20])
+        m4aBytes.append(Data(repeating: 0x00, count: 10_000))
+        let legacyURL = dir.appendingPathComponent("ym-777.mp3")
+        try m4aBytes.write(to: legacyURL)
+
+        let resolver = BGYandexTrackResolver(cacheDirectory: dir)
+        var linkProviderCalled = false
+        resolver.linkProvider = { _, done in
+            linkProviderCalled = true
+            done(.failure(.network))
+        }
+
+        let exp = expectation(description: "localFile")
+        var resolvedURL: URL?
+        resolver.localFile(trackId: "777") { result in
+            if case let .success(url) = result {
+                resolvedURL = url
+            }
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 2.0)
+
+        XCTAssertFalse(linkProviderCalled, "valid cached audio must not be re-downloaded")
+        XCTAssertEqual(resolvedURL?.lastPathComponent, "ym-777.m4a")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("ym-777.m4a").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL.path))
+    }
 }
