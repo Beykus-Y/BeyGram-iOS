@@ -22,6 +22,7 @@ swift_test(
         "Tests/BGYandexAudioCheckTests.swift",
         "Tests/BGYandexTrackInfoTests.swift",
         "Tests/BGYandexWaveQueueTests.swift",
+        "Tests/BGYandexWavePlaybackCoordinatorTests.swift",
     ],
     deps = [
         ":BeyGramYandexMusic",
