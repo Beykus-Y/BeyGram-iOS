@@ -186,8 +186,7 @@ final class SharedMediaPlayer {
     /// The item the playlist was asked to leave, for BG Mix. If the list settles on that same item, short of its end, BG Mix starts it again.
     private var bgMixAdvanceFrom: AnyHashable?
     /// Items in a row that BG Mix could not play. Reaching the limit pauses playback rather than cycling through the list.
-    private var bgMixFailureStreak = 0
-    private static let maxBGMixFailureStreak = 5
+    private var bgMixFailureStreak = BGMixFailureStreak()
     
     init(context: AccountContext, mediaManager: MediaManager, inForeground: Signal<Bool, NoError>, engine: TelegramEngine, audioSession: ManagedAudioSession, overlayMediaManager: OverlayMediaManager, playlist: SharedMediaPlaylist, initialOrder: MusicPlaybackSettingsOrder, initialLooping: MusicPlaybackSettingsLooping, initialPlaybackRate: AudioPlaybackRate, playerIndex: Int32, controlPlaybackWithProximity: Bool, type: MediaManagerPlayerType, continueInstantVideoLoopAfterFinish: Bool) {
         self.context = context
@@ -464,7 +463,7 @@ final class SharedMediaPlayer {
     func control(_ action: SharedMediaPlayerControlAction) {
         if let bgMix = self.bgMix {
             // A control from the user or the system starts the count of failures in a row again.
-            self.bgMixFailureStreak = 0
+            self.bgMixFailureStreak.reset()
             switch action {
                 case .next:
                     bgMix.play()
@@ -576,10 +575,10 @@ final class SharedMediaPlayer {
     /// stops playback at once, because the next Yandex track would fail the same way. After a run of other failures
     /// playback stops at the limit, so a list of broken items does not cycle forever.
     private func handleBGMixItemFailed(_ failure: SharedMediaBGMixFailure) {
-        self.bgMixFailureStreak += 1
-        Logger.shared.log("SharedMediaPlayer", "BG Mix could not play the current item (\(self.bgMixFailureStreak) in a row): \(failure)")
-        if SharedMediaPlayer.stopsBGMixAtOnce(failure) || self.bgMixFailureStreak >= SharedMediaPlayer.maxBGMixFailureStreak {
-            self.bgMixFailureStreak = 0
+        let failureCount = self.bgMixFailureStreak.recordFailure()
+        Logger.shared.log("SharedMediaPlayer", "BG Mix could not play the current item (\(failureCount) in a row): \(failure)")
+        if SharedMediaPlayer.stopsBGMixAtOnce(failure) || failureCount >= BGMixFailureStreak.limit {
+            self.bgMixFailureStreak.reset()
             self.bgMix?.pause()
             return
         }
@@ -623,7 +622,12 @@ final class SharedMediaPlayer {
             self.bgMixAdvanceFrom = nil
             // The list settled on the item it left, short of its end: a single item on repeat-all, or a failed item that gets
             // another try. Its state does not change, so BG Mix starts the item here.
-            restartsItem = !state.playedToEnd && state.item?.stableId == advanceFrom
+            restartsItem = BGMixPlaybackRecovery.shouldRestartItem(
+                advanceFrom: advanceFrom,
+                currentItem: state.item?.stableId,
+                isLoading: state.loading,
+                playedToEnd: state.playedToEnd
+            )
         }
         if stateChanged {
             // Repeat-one queues only the current item, so AutoMix cannot crossfade on into another track.
@@ -655,7 +659,7 @@ final class SharedMediaPlayer {
             |> take(1)
             |> deliverOnMainQueue).startStrict(next: { [weak self] _ in
                 // An item that plays starts the count of failures in a row again.
-                self?.bgMixFailureStreak = 0
+                self?.bgMixFailureStreak.reset()
                 self?.playlist.onItemPlaybackStarted(item)
             }))
         } else {
