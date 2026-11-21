@@ -66,6 +66,16 @@ public enum BGYandexPlayback {
 }
 
 extension BGYandexService {
+    /// Drops a file after the player could not decode it. The downloader's inexpensive content check can refuse error
+    /// bodies and truncated transfers, but AVFoundation is the final authority on whether the bytes form a readable track.
+    /// A later play request asks Yandex for a fresh link instead of retrying the same bad cache entry.
+    public func discardUnplayableFile(rowKey: String) {
+        guard let trackId = BGYandexPlayback.trackId(rowKey: rowKey) else {
+            return
+        }
+        resolver.forget(trackId: trackId)
+    }
+
     /// A file the player can read for a `ym:` row: the downloaded MP3 when it is on disk, otherwise a fresh download. Needs a
     /// signed-in account with a subscription. Completes on the main queue.
     public func playableFile(rowKey: String, completion: @escaping (Result<URL, BGYandexPlaybackError>) -> Void) {
