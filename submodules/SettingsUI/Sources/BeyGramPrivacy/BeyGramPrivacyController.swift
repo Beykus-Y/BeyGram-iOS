@@ -66,7 +66,7 @@ private final class BeyGramPrivacyViewControllerImpl: BeyGramScrollViewControlle
     private var settingsObserver: NSObjectProtocol?
     private var featureObserver: NSObjectProtocol?
 
-    init(context: AccountContext) {
+    override init(context: AccountContext) {
         self.accountPeerId = context.account.peerId.toInt64()
         self.featureEnabled = BeyGramSettings.shared.isEnabled(.privacyPolicy)
         self.settings = BeyGramStealthStore.shared.settings(accountPeerId: self.accountPeerId)

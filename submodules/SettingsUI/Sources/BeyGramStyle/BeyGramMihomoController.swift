@@ -28,7 +28,7 @@ private final class BeyGramMihomoViewControllerImpl: ViewController, UITextField
     private let accountManager: AccountManager<TelegramAccountManagerTypes>
     private var presentationData: PresentationData
     private var presentationDisposable: Disposable?
-    private var latencyToken: UUID?
+    private var latencyToken: Int?
 
     private let scrollView = UIScrollView()
     private let stackView = UIStackView()
