@@ -188,7 +188,11 @@ public final class BeyGramMiniPlayerBar: UIView {
     }
 
     @objc private func nextTapped() {
-        BeyGramMusicSession.shared.next()
+        if BeyGramMusicSession.shared.currentWaveState.isActive {
+            BeyGramMusicSession.shared.skipWaveTrack()
+        } else {
+            BeyGramMusicSession.shared.next()
+        }
     }
 
     @objc private func barTapped() {

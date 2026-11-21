@@ -2,6 +2,7 @@ import Foundation
 
 /// Immutable snapshot of the active "My Wave" radio playback session.
 public struct BGYandexWaveState: Equatable {
+    /// The track confirmed on the master audio deck (or the initial track while cold-starting).
     public let currentTrack: BGYandexTrack?
     public let isActive: Bool
     public let isLoading: Bool
@@ -29,15 +30,16 @@ public struct BGYandexWaveState: Equatable {
 /// Player interface required by `BGYandexWavePlaybackCoordinator`.
 /// `BeyGramMusicSession` conforms in production; unit tests provide a deterministic fake.
 public protocol BGYandexWavePlayerAdapter: AnyObject {
-    /// Resolves and adds `track` to the audio player queue.
+    /// Resolves and submits `track` to the audio player queue.
+    /// When `replaceQueue == true`, the player must atomically drain/clear decks before adding and playing.
     /// Completes on the main queue with the player's unique queue item identifier (`UInt64`).
     func playWaveTrack(
         _ track: BGYandexTrack,
         replaceQueue: Bool,
         completion: @escaping (Result<UInt64, BGYandexPlaybackError>) -> Void
     )
-    /// Triggers a smooth crossfade/advance to the already-prepared next track.
-    /// Returns `true` if the player accepted the transition.
+    /// Attempts a smooth crossfade/advance to the already-prepared next track.
+    /// Must return `true` ONLY if the engine actually entered an active transition.
     func skipToPreparedNextWaveTrack() -> Bool
     /// Toggles play/pause on the current track.
     func toggleWavePlayPause()
@@ -46,10 +48,14 @@ public protocol BGYandexWavePlayerAdapter: AnyObject {
 /// Coordinates continuous "My Wave" playback independently of any UI view controller.
 ///
 /// Guarantees:
-/// - The first track is consumed from `BGYandexWaveQueue` via `takeNext()` exactly once before pre-enqueuing the next track.
-/// - Track transitions are matched by player queue item ID (`UInt64`), so consecutive tracks with identical `yandexTrackId` still advance.
-/// - Handles skip, end-of-track with empty next deck (`current == nil` / `.played`), download/decode failures with bounded retry,
-///   and survives dismissal of the Yandex Music screen.
+/// - Single authority for advancing and enqueuing wave tracks.
+/// - `state.currentTrack` reflects the actual audible master-deck track; adding/replacing a track
+///   does not overwrite a sounding track in the UI until the master deck confirms the new item ID.
+/// - `takeNext()` is not consumed until queue admission succeeds (or a track permanently fails),
+///   preventing lost tracks on cancelled or busy-deck attempts.
+/// - Transient `currentItemId == nil` before the master deck has confirmed the current track never
+///   triggers runaway auto-advancing.
+/// - Transitions are matched by player queue item ID (`UInt64`), supporting consecutive identical `yandexTrackId`s.
 public final class BGYandexWavePlaybackCoordinator {
     public static let maxConsecutiveFailures = 3
 
@@ -60,8 +66,16 @@ public final class BGYandexWavePlaybackCoordinator {
     public var onStateChanged: ((BGYandexWaveState) -> Void)?
 
     private var waveQueue: BGYandexWaveQueue?
-    private var currentTrack: BGYandexTrack?
-    private var currentItemId: UInt64?
+
+    // Audible master-deck state (source of truth for UI once confirmed).
+    private var audibleTrack: BGYandexTrack?
+    private var audibleItemId: UInt64?
+
+    // Pending replacement track (submitted via replaceQueue=true, awaiting master-deck confirmation).
+    private var pendingCurrentTrack: BGYandexTrack?
+    private var pendingCurrentItemId: UInt64?
+
+    // Pre-enqueued next track (submitted via replaceQueue=false, waiting on deck B).
     private var preEnqueuedTrack: BGYandexTrack?
     private var preEnqueuedItemId: UInt64?
 
@@ -79,6 +93,7 @@ public final class BGYandexWavePlaybackCoordinator {
     private var lastPosition: TimeInterval = 0.0
     private var lastDuration: TimeInterval = 0.0
     private var lastNextItemReady: Bool = false
+    private var lastTransitionActive: Bool = false
 
     public init(
         makeQueue: @escaping () -> BGYandexWaveQueue,
@@ -91,10 +106,12 @@ public final class BGYandexWavePlaybackCoordinator {
     }
 
     public var state: BGYandexWaveState {
+        // Show the confirmed audible track whenever one is playing; fall back to pending only on cold start.
+        let visibleTrack = self.audibleTrack ?? self.pendingCurrentTrack
         return BGYandexWaveState(
-            currentTrack: self.currentTrack,
+            currentTrack: visibleTrack,
             isActive: self.isActive,
-            isLoading: self.isLoading,
+            isLoading: self.isLoading || (self.isStartingCurrent && self.audibleTrack == nil),
             isLiked: self.isLiked,
             upcomingCount: self.waveQueue?.upcomingTracks.count ?? 0,
             error: self.error
@@ -114,17 +131,20 @@ public final class BGYandexWavePlaybackCoordinator {
         return created
     }
 
-    /// Starts "My Wave" if inactive, or toggles play/pause if the current wave track is already loaded.
+    /// Starts "My Wave" if inactive, or toggles play/pause if the current wave track is already sounding.
     public func startOrTogglePlay() {
         if self.isLoading {
             return
         }
-        if self.isActive, self.currentTrack != nil, self.currentItemId != nil {
+        if self.isActive, self.audibleTrack != nil, self.audibleItemId != nil {
             self.player?.toggleWavePlayPause()
             return
         }
-        if self.isActive, let current = self.currentTrack, self.currentItemId == nil {
-            self.playAsCurrent(current)
+        if self.isActive, self.isStartingCurrent {
+            return
+        }
+        if self.isActive, let pending = self.pendingCurrentTrack, self.pendingCurrentItemId == nil {
+            self.playAsCurrent(pending, alreadyConsumed: true)
             return
         }
 
@@ -148,50 +168,57 @@ public final class BGYandexWavePlaybackCoordinator {
                 self.error = String(describing: err)
                 self.publishState()
             case .success:
-                // Consume the first track via takeNext() so it leaves upcomingTracks before we pre-enqueue the next one.
-                guard let firstTrack = queue.takeNext() else {
+                guard let firstTrack = queue.upcomingTracks.first else {
                     self.isActive = false
                     self.error = "My Wave returned no tracks."
                     self.publishState()
                     return
                 }
-                self.playAsCurrent(firstTrack)
+                self.playAsCurrent(firstTrack, alreadyConsumed: false)
             }
         }
     }
 
-    /// Skips the current wave track, reporting `.skipped` feedback and preserving BG Mix crossfade when the next track is ready.
+    /// Skips the current wave track, reporting `.skipped` feedback and preserving BG Mix crossfade
+    /// only when the engine confirms the transition actually started; otherwise falls back to atomic replace.
     public func skip() {
-        guard let current = self.currentTrack else {
+        guard let current = self.audibleTrack ?? self.pendingCurrentTrack else {
             return
         }
+        let activeId = self.audibleItemId ?? self.pendingCurrentItemId
         self.waveQueue?.trackSkipped(rowKey: current.rowKey, playedSeconds: self.lastPosition)
-        self.skippedItemId = self.currentItemId
-        self.reportedEndedItemId = self.currentItemId
+        self.skippedItemId = activeId
+        self.reportedEndedItemId = activeId
 
-        if self.preEnqueuedItemId != nil, self.lastNextItemReady, self.player?.skipToPreparedNextWaveTrack() == true {
+        if self.preEnqueuedItemId != nil,
+           self.lastNextItemReady,
+           !self.lastTransitionActive,
+           self.player?.skipToPreparedNextWaveTrack() == true {
             return
         }
+
         if let pre = self.preEnqueuedTrack {
             self.preEnqueuedTrack = nil
             self.preEnqueuedItemId = nil
-            self.playAsCurrent(pre)
+            self.playAsCurrent(pre, alreadyConsumed: true)
             return
         }
-        if let next = self.waveQueue?.takeNext() {
-            self.playAsCurrent(next)
+        if let next = self.waveQueue?.upcomingTracks.first {
+            self.playAsCurrent(next, alreadyConsumed: false)
             return
         }
         // Queue exhausted: restart wave cleanly.
-        self.currentTrack = nil
-        self.currentItemId = nil
+        self.audibleTrack = nil
+        self.audibleItemId = nil
+        self.pendingCurrentTrack = nil
+        self.pendingCurrentItemId = nil
         self.isActive = false
         self.startOrTogglePlay()
     }
 
-    /// Toggles like for the active wave track and reports radio feedback.
+    /// Toggles like for the active audible wave track and reports radio feedback.
     public func toggleLike() {
-        guard let current = self.currentTrack else {
+        guard let current = self.audibleTrack ?? self.pendingCurrentTrack else {
             return
         }
         self.isLiked.toggle()
@@ -206,8 +233,10 @@ public final class BGYandexWavePlaybackCoordinator {
         self.generation += 1
         self.waveQueue?.stop()
         self.waveQueue = nil
-        self.currentTrack = nil
-        self.currentItemId = nil
+        self.audibleTrack = nil
+        self.audibleItemId = nil
+        self.pendingCurrentTrack = nil
+        self.pendingCurrentItemId = nil
         self.preEnqueuedTrack = nil
         self.preEnqueuedItemId = nil
         self.isActive = false
@@ -222,24 +251,65 @@ public final class BGYandexWavePlaybackCoordinator {
         self.lastPosition = 0.0
         self.lastDuration = 0.0
         self.lastNextItemReady = false
+        self.lastTransitionActive = false
         self.publishState()
     }
 
-    /// Called on every player snapshot update (main queue) to drive continuous auto-advance.
+    /// Called on every player snapshot update (main queue) to synchronize UI with the real master deck
+    /// and drive continuous auto-advance.
     public func handlePlaybackUpdate(
         currentItemId: UInt64?,
         currentItemFailed: Bool,
         currentItemPlayed: Bool,
         nextItemReady: Bool,
+        transitionActive: Bool = false,
+        isStopped: Bool = false,
         position: TimeInterval,
         duration: TimeInterval
     ) {
         self.lastNextItemReady = nextItemReady
+        self.lastTransitionActive = transitionActive
         guard self.isActive else {
             return
         }
 
-        if let trackedId = self.currentItemId, currentItemId == trackedId {
+        // Case 0: Pending replacement track has now been confirmed on the master deck.
+        if let newItemId = currentItemId,
+           let pendingId = self.pendingCurrentItemId,
+           let pendingTrack = self.pendingCurrentTrack,
+           newItemId == pendingId {
+            self.audibleTrack = pendingTrack
+            self.audibleItemId = pendingId
+            self.pendingCurrentTrack = nil
+            self.pendingCurrentItemId = nil
+            self.isLiked = false
+            self.error = nil
+            self.consecutiveFailures = 0
+            self.lastPosition = position
+            self.lastDuration = duration
+            self.skippedItemId = nil
+            self.reportedEndedItemId = nil
+            self.waveQueue?.trackStarted(rowKey: pendingTrack.rowKey)
+            self.publishState()
+            if !transitionActive {
+                self.enqueueNextIfNeeded()
+            }
+            return
+        }
+
+        // Case 0b: Pending replacement track failed preparation before reaching master deck.
+        if currentItemFailed,
+           let newItemId = currentItemId,
+           let pendingId = self.pendingCurrentItemId,
+           newItemId == pendingId {
+            self.pendingCurrentTrack = nil
+            self.pendingCurrentItemId = nil
+            self.handleCurrentPlaybackFailure(message: "Failed to prepare track.")
+            return
+        }
+
+        // Case 1: Confirmed audible track is still on the master deck.
+        if let trackedId = self.audibleItemId, currentItemId == trackedId {
             self.lastPosition = position
             if duration > 0 {
                 self.lastDuration = duration
@@ -249,20 +319,25 @@ public final class BGYandexWavePlaybackCoordinator {
                 return
             }
             if currentItemPlayed {
-                self.handleCurrentTrackEnded()
+                self.handleAudibleTrackEnded()
                 return
+            }
+            if !transitionActive && self.preEnqueuedTrack == nil && !self.isPreEnqueuing && !self.isStartingCurrent {
+                self.enqueueNextIfNeeded()
             }
             return
         }
 
-        // Case 1: BG Mix transitioned cleanly from currentItemId to preEnqueuedItemId.
+        // Case 2: BG Mix transitioned cleanly from audibleItemId to preEnqueuedItemId on the master deck.
         if let newItemId = currentItemId,
            let preId = self.preEnqueuedItemId,
            let preTrack = self.preEnqueuedTrack,
            newItemId == preId {
             self.reportFinishedIfNeeded()
-            self.currentTrack = preTrack
-            self.currentItemId = preId
+            self.audibleTrack = preTrack
+            self.audibleItemId = preId
+            self.pendingCurrentTrack = nil
+            self.pendingCurrentItemId = nil
             self.preEnqueuedTrack = nil
             self.preEnqueuedItemId = nil
             self.isLiked = false
@@ -274,19 +349,28 @@ public final class BGYandexWavePlaybackCoordinator {
             self.reportedEndedItemId = nil
             self.waveQueue?.trackStarted(rowKey: preTrack.rowKey)
             self.publishState()
-            self.enqueueNextIfNeeded()
+            if !transitionActive {
+                self.enqueueNextIfNeeded()
+            }
             return
         }
 
-        // Case 2: Current track finished and player has no next track loaded (currentItemId == nil).
-        if currentItemId == nil, self.currentItemId != nil, !self.isStartingCurrent {
-            self.handleCurrentTrackEnded()
+        // Case 3: Confirmed audible track ended and player stopped with no next track loaded.
+        // Guarded strictly by `audibleItemId != nil` and `pendingCurrentItemId == nil` and `!isStartingCurrent`
+        // so transient nil snapshots during deck replacement NEVER trigger runaway auto-advance.
+        if currentItemId == nil,
+           isStopped,
+           self.audibleItemId != nil,
+           self.pendingCurrentItemId == nil,
+           !self.isStartingCurrent,
+           !transitionActive {
+            self.handleAudibleTrackEnded()
         }
     }
 
     private func reportFinishedIfNeeded() {
-        guard let finishedTrack = self.currentTrack,
-              let finishedId = self.currentItemId,
+        guard let finishedTrack = self.audibleTrack,
+              let finishedId = self.audibleItemId,
               self.reportedEndedItemId != finishedId,
               self.skippedItemId != finishedId else {
             return
@@ -296,15 +380,15 @@ public final class BGYandexWavePlaybackCoordinator {
         self.waveQueue?.trackFinished(rowKey: finishedTrack.rowKey, playedSeconds: played)
     }
 
-    private func handleCurrentTrackEnded() {
+    private func handleAudibleTrackEnded() {
         self.reportFinishedIfNeeded()
-        self.currentItemId = nil
+        self.audibleItemId = nil
         if let pre = self.preEnqueuedTrack {
             self.preEnqueuedTrack = nil
             self.preEnqueuedItemId = nil
-            self.playAsCurrent(pre)
-        } else if let next = self.waveQueue?.takeNext() {
-            self.playAsCurrent(next)
+            self.playAsCurrent(pre, alreadyConsumed: true)
+        } else if let next = self.waveQueue?.upcomingTracks.first {
+            self.playAsCurrent(next, alreadyConsumed: false)
         } else {
             self.publishState()
         }
@@ -312,7 +396,6 @@ public final class BGYandexWavePlaybackCoordinator {
 
     private func handleCurrentPlaybackFailure(message: String) {
         self.consecutiveFailures += 1
-        self.currentItemId = nil
         if self.consecutiveFailures >= BGYandexWavePlaybackCoordinator.maxConsecutiveFailures {
             self.error = message
             self.publishState()
@@ -321,30 +404,25 @@ public final class BGYandexWavePlaybackCoordinator {
         if let pre = self.preEnqueuedTrack {
             self.preEnqueuedTrack = nil
             self.preEnqueuedItemId = nil
-            self.playAsCurrent(pre)
-        } else if let next = self.waveQueue?.takeNext() {
-            self.playAsCurrent(next)
+            self.playAsCurrent(pre, alreadyConsumed: true)
+        } else if let next = self.waveQueue?.upcomingTracks.first {
+            self.playAsCurrent(next, alreadyConsumed: false)
         } else {
             self.error = message
             self.publishState()
         }
     }
 
-    private func playAsCurrent(_ track: BGYandexTrack) {
+    private func playAsCurrent(_ track: BGYandexTrack, alreadyConsumed: Bool) {
         self.generation += 1
         let gen = self.generation
-        self.currentTrack = track
-        self.currentItemId = nil
+        self.pendingCurrentTrack = track
+        self.pendingCurrentItemId = nil
         self.preEnqueuedTrack = nil
         self.preEnqueuedItemId = nil
         self.isStartingCurrent = true
         self.isPreEnqueuing = false
-        self.isLiked = false
         self.error = nil
-        self.lastPosition = 0.0
-        self.lastDuration = 0.0
-        self.skippedItemId = nil
-        self.reportedEndedItemId = nil
         self.publishState()
 
         self.player?.playWaveTrack(track, replaceQueue: true) { [weak self] result in
@@ -354,12 +432,19 @@ public final class BGYandexWavePlaybackCoordinator {
             self.isStartingCurrent = false
             switch result {
             case let .success(itemId):
-                self.currentItemId = itemId
+                if !alreadyConsumed, self.waveQueue?.upcomingTracks.first?.trackId == track.trackId {
+                    _ = self.waveQueue?.takeNext()
+                }
+                self.pendingCurrentItemId = itemId
                 self.consecutiveFailures = 0
-                self.waveQueue?.trackStarted(rowKey: track.rowKey)
                 self.publishState()
-                self.enqueueNextIfNeeded()
             case let .failure(err):
+                if !alreadyConsumed, self.waveQueue?.upcomingTracks.first?.trackId == track.trackId,
+                   !BGYandexWavePlaybackCoordinator.stopsWaveAtOnce(err) {
+                    _ = self.waveQueue?.takeNext()
+                }
+                self.pendingCurrentTrack = nil
+                self.pendingCurrentItemId = nil
                 if BGYandexWavePlaybackCoordinator.stopsWaveAtOnce(err) {
                     self.error = String(describing: err)
                     self.publishState()
@@ -374,22 +459,27 @@ public final class BGYandexWavePlaybackCoordinator {
         guard self.isActive,
               !self.isStartingCurrent,
               !self.isPreEnqueuing,
+              !self.lastTransitionActive,
+              self.audibleItemId != nil,
               self.preEnqueuedTrack == nil,
-              let next = self.waveQueue?.takeNext() else {
+              let candidate = self.waveQueue?.upcomingTracks.first else {
             return
         }
         let gen = self.generation
         self.isPreEnqueuing = true
         self.publishState()
 
-        self.player?.playWaveTrack(next, replaceQueue: false) { [weak self] result in
+        self.player?.playWaveTrack(candidate, replaceQueue: false) { [weak self] result in
             guard let self, gen == self.generation else {
                 return
             }
             self.isPreEnqueuing = false
             switch result {
             case let .success(itemId):
-                self.preEnqueuedTrack = next
+                if self.waveQueue?.upcomingTracks.first?.trackId == candidate.trackId {
+                    _ = self.waveQueue?.takeNext()
+                }
+                self.preEnqueuedTrack = candidate
                 self.preEnqueuedItemId = itemId
                 self.consecutiveFailures = 0
                 self.publishState()
@@ -398,6 +488,9 @@ public final class BGYandexWavePlaybackCoordinator {
                     self.error = String(describing: err)
                     self.publishState()
                     return
+                }
+                if self.waveQueue?.upcomingTracks.first?.trackId == candidate.trackId {
+                    _ = self.waveQueue?.takeNext()
                 }
                 self.consecutiveFailures += 1
                 if self.consecutiveFailures < BGYandexWavePlaybackCoordinator.maxConsecutiveFailures {

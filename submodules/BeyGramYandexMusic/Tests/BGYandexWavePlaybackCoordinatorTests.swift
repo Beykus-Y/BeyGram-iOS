@@ -83,8 +83,8 @@ final class BGYandexWavePlaybackCoordinatorTests: XCTestCase {
         }
     }
 
-    /// Regression test for Issue #123: start -> A -> enqueue B -> end A -> play B -> enqueue C.
-    /// Verifies A is NEVER duplicated in the player queue.
+    /// Regression test for Issue #123 & #128:
+    /// start -> A queued -> A confirmed on master deck -> B pre-enqueued -> B confirmed on master deck -> C pre-enqueued.
     func testSequenceAToBToCNoDuplicateFirstTrack() {
         let radio = FakeWaveRadio()
         radio.firstResult = .success(makeTracks(["A", "B", "C", "D"]))
@@ -96,7 +96,12 @@ final class BGYandexWavePlaybackCoordinatorTests: XCTestCase {
 
         coordinator.startOrTogglePlay()
 
-        // A played with replaceQueue=true (itemId=101), B pre-enqueued with replaceQueue=false (itemId=102).
+        // Only A is submitted until master deck confirms A is audible.
+        XCTAssertEqual(player.calls.map { $0.trackId }, ["A"])
+        XCTAssertEqual(player.calls.map { $0.replaceQueue }, [true])
+
+        // Master deck confirms A (101) is loaded/playing -> B (102) is pre-enqueued.
+        coordinator.handlePlaybackUpdate(currentItemId: 101, currentItemFailed: false, currentItemPlayed: false, nextItemReady: false, position: 0, duration: 180)
         XCTAssertEqual(player.calls.map { $0.trackId }, ["A", "B"])
         XCTAssertEqual(player.calls.map { $0.replaceQueue }, [true, false])
         XCTAssertEqual(coordinator.state.currentTrack?.trackId, "A")
@@ -107,7 +112,7 @@ final class BGYandexWavePlaybackCoordinatorTests: XCTestCase {
         coordinator.handlePlaybackUpdate(currentItemId: 101, currentItemFailed: false, currentItemPlayed: false, nextItemReady: true, position: 120, duration: 180)
         XCTAssertEqual(player.calls.count, 2, "no spurious enqueue while A plays")
 
-        // Simulate BG Mix auto-advancing from A (101) to B (102).
+        // Simulate BG Mix auto-advancing master deck from A (101) to B (102).
         coordinator.handlePlaybackUpdate(currentItemId: 102, currentItemFailed: false, currentItemPlayed: false, nextItemReady: false, position: 0, duration: 180)
 
         XCTAssertEqual(coordinator.state.currentTrack?.trackId, "B")
@@ -119,11 +124,48 @@ final class BGYandexWavePlaybackCoordinatorTests: XCTestCase {
             "trackStarted:ym:B",
         ])
 
-        // Simulate BG Mix auto-advancing from B (102) to C (103).
+        // Simulate BG Mix auto-advancing master deck from B (102) to C (103).
         coordinator.handlePlaybackUpdate(currentItemId: 103, currentItemFailed: false, currentItemPlayed: false, nextItemReady: false, position: 0, duration: 180)
 
         XCTAssertEqual(coordinator.state.currentTrack?.trackId, "C")
         XCTAssertEqual(player.calls.map { $0.trackId }, ["A", "B", "C", "D"])
+    }
+
+    /// Regression test for Issue #128: transient nil snapshots while replacing deck MUST NOT cause runaway advancing,
+    /// and displayed track MUST remain A until B is confirmed on the master deck.
+    func testTransientNilSnapshotsDoNotAdvanceAndUIFollowsAudibleMasterDeck() {
+        let radio = FakeWaveRadio()
+        radio.firstResult = .success(makeTracks(["A", "B", "C", "D"]))
+        let player = FakeWavePlayer()
+        player.acceptCrossfadeSkip = false // Forces fallback to replaceQueue=true on skip
+        let coordinator = BGYandexWavePlaybackCoordinator(
+            makeQueue: { BGYandexWaveQueue(source: radio, prepare: { _ in }) },
+            player: player
+        )
+
+        coordinator.startOrTogglePlay()
+        coordinator.handlePlaybackUpdate(currentItemId: 101, currentItemFailed: false, currentItemPlayed: false, nextItemReady: true, position: 10, duration: 180)
+        XCTAssertEqual(coordinator.state.currentTrack?.trackId, "A")
+
+        // Skip A -> crossfade rejected -> atomic replace queues B (itemId=103).
+        coordinator.skip()
+        XCTAssertEqual(player.calls.last?.trackId, "B")
+        XCTAssertEqual(player.calls.last?.replaceQueue, true)
+        // Before master deck confirms 103, UI still reflects last confirmed audible track A (not jumping ahead to C/D!).
+        XCTAssertEqual(coordinator.state.currentTrack?.trackId, "A")
+
+        // Repeated transient nil snapshots while deck B is preparing must NOT advance to C or D!
+        for _ in 0..<5 {
+            coordinator.handlePlaybackUpdate(currentItemId: nil, currentItemFailed: false, currentItemPlayed: false, nextItemReady: false, isStopped: true, position: 0, duration: 0)
+        }
+        XCTAssertEqual(player.calls.map { $0.trackId }, ["A", "B", "B"])
+        XCTAssertEqual(coordinator.state.currentTrack?.trackId, "A")
+
+        // Master deck finally confirms B (103) -> UI updates to B and pre-enqueues C.
+        coordinator.handlePlaybackUpdate(currentItemId: 103, currentItemFailed: false, currentItemPlayed: false, nextItemReady: false, position: 0, duration: 180)
+        XCTAssertEqual(coordinator.state.currentTrack?.trackId, "B")
+        XCTAssertEqual(player.calls.last?.trackId, "C")
+        XCTAssertEqual(player.calls.last?.replaceQueue, false)
     }
 
     /// Regression test: consecutive tracks with identical yandexTrackId still advance because matching uses queue item ID.
@@ -137,6 +179,7 @@ final class BGYandexWavePlaybackCoordinatorTests: XCTestCase {
         )
 
         coordinator.startOrTogglePlay()
+        coordinator.handlePlaybackUpdate(currentItemId: 101, currentItemFailed: false, currentItemPlayed: false, nextItemReady: false, position: 0, duration: 180)
         XCTAssertEqual(player.calls.map { $0.assignedItemId }, [101, 102])
 
         // Transition 101 -> 102 (same yandexTrackId "SAME", different queue item ID).
@@ -184,12 +227,13 @@ final class BGYandexWavePlaybackCoordinatorTests: XCTestCase {
         )
 
         coordinator.startOrTogglePlay()
+        coordinator.handlePlaybackUpdate(currentItemId: 101, currentItemFailed: false, currentItemPlayed: false, nextItemReady: false, position: 0, duration: 180)
         XCTAssertEqual(player.calls.map { $0.trackId }, ["A", "C"])
         XCTAssertNil(coordinator.state.error)
     }
 
-    /// Regression test: if current track ends with currentItemId == nil (nothing pre-enqueued), coordinator still plays next track.
-    func testCurrentBecomesNilRecoversWithNextTrack() {
+    /// Regression test: if current track ends with player stopped and nothing pre-enqueued, coordinator recovers with next track.
+    func testCurrentEndedWhileStoppedRecoversWithNextTrack() {
         let radio = FakeWaveRadio()
         radio.firstResult = .success(makeTracks(["A"]))
         radio.moreResults = [.success(makeTracks(["B"]))]
@@ -200,10 +244,10 @@ final class BGYandexWavePlaybackCoordinatorTests: XCTestCase {
         )
 
         coordinator.startOrTogglePlay()
-        // Both A and B were loaded because refill ran on start; simulate A ending directly to nil.
-        coordinator.handlePlaybackUpdate(currentItemId: nil, currentItemFailed: false, currentItemPlayed: true, nextItemReady: false, position: 180, duration: 180)
+        coordinator.handlePlaybackUpdate(currentItemId: 101, currentItemFailed: false, currentItemPlayed: false, nextItemReady: false, position: 10, duration: 180)
+        // Simulate A reaching .played and player stopping.
+        coordinator.handlePlaybackUpdate(currentItemId: nil, currentItemFailed: false, currentItemPlayed: true, nextItemReady: false, isStopped: true, position: 180, duration: 180)
 
-        XCTAssertEqual(coordinator.state.currentTrack?.trackId, "B")
         XCTAssertEqual(player.calls.last?.trackId, "B")
         XCTAssertEqual(player.calls.last?.replaceQueue, true)
     }

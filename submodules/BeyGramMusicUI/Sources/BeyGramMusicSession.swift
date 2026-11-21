@@ -132,7 +132,9 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
     private let waveStateValue: Atomic<BGYandexWaveState>
     private let waveStatePromise: ValuePromise<BGYandexWaveState>
     private var waveCoordinator: BGYandexWavePlaybackCoordinator!
+    private var nowPlayingCenter: BeyGramNowPlayingCenter!
     private var metadataObserver: NSObjectProtocol?
+    private var externalAudioObserver: NSObjectProtocol?
 
     private override init() {
         self.player = BGMixPlayer.shared()
@@ -167,6 +169,7 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
             self.waveStatePromise.set(waveState)
         }
         self.waveCoordinator = coordinator
+        self.nowPlayingCenter = BeyGramNowPlayingCenter(session: self)
 
         self.player.setTransitionDuration(initial.transitionDuration)
         self.player.setAdaptiveTransitions(initial.adaptiveTransitions)
@@ -176,12 +179,19 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
             guard let self else { return }
             self.mixPlayer(self.player, didUpdate: self.player.snapshot)
         }
+        self.externalAudioObserver = NotificationCenter.default.addObserver(forName: NSNotification.Name.BGMixPlayerDidStopForExternalAudio, object: nil, queue: .main) { [weak self] _ in
+            self?.nowPlayingCenter?.relinquishForExternalAudio()
+        }
     }
 
     deinit {
         if let metadataObserver {
             NotificationCenter.default.removeObserver(metadataObserver)
         }
+        if let externalAudioObserver {
+            NotificationCenter.default.removeObserver(externalAudioObserver)
+        }
+        self.nowPlayingCenter?.relinquish()
         self.player.remove(self)
     }
 
@@ -267,8 +277,16 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
             currentItemFailed: currentTrack?.state == .failed,
             currentItemPlayed: currentTrack?.state == .played,
             nextItemReady: nextReady,
+            transitionActive: snapshot.transitionActive,
+            isStopped: snapshot.transport == .stopped,
             position: snapshot.position,
             duration: snapshot.duration
+        )
+
+        self.nowPlayingCenter?.update(
+            state: self.currentState,
+            managesAudioSession: self.player.managesAudioSession,
+            waveActive: self.currentWaveState.isActive
         )
     }
 
@@ -330,7 +348,12 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
 
     public func next() {
         DispatchQueue.main.async {
-            self.player.next()
+            if self.player.tryStartNextTransition() {
+                return
+            }
+            if let nextTrack = self.player.snapshot.nextTrack {
+                _ = self.player.replaceQueueAndPlayTrack(at: nextTrack.fileURL)
+            }
         }
     }
 
@@ -388,12 +411,7 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
     }
 
     public func skipToPreparedNextWaveTrack() -> Bool {
-        let snapshot = self.player.snapshot
-        guard snapshot.nextTrack?.state == .ready else {
-            return false
-        }
-        self.player.next()
-        return true
+        return self.player.tryStartNextTransition()
     }
 
     public func toggleWavePlayPause() {
@@ -409,17 +427,18 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
                 BeyGramTrackMetadataStore.shared.associate(localURL: fileURL, with: track)
                 DispatchQueue.main.async {
                     self.player.managesAudioSession = true
+                    let itemId: UInt64
                     if replaceQueue {
-                        self.player.stopAll()
-                        self.player.clearQueue()
+                        itemId = self.player.replaceQueueAndPlayTrack(at: fileURL)
+                    } else {
+                        itemId = self.player.addTrack(at: fileURL)
+                        if itemId != 0 && !self.currentState.isPlaying {
+                            self.player.play()
+                        }
                     }
-                    let itemId = self.player.addTrack(at: fileURL)
                     guard itemId != 0 else {
                         completion(.failure(.unavailable))
                         return
-                    }
-                    if replaceQueue || !self.currentState.isPlaying {
-                        self.player.play()
                     }
                     completion(.success(itemId))
                 }
