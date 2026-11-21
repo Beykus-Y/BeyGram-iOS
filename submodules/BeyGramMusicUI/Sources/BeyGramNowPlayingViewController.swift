@@ -378,7 +378,14 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
                 self.isLoadingLyrics = false
                 switch result {
                 case let .success(lyrics):
-                    self.lyricsText = lyrics.text
+                    if !lyrics.lines.isEmpty {
+                        self.lyricsText = lyrics.lines.map { $0.text }.joined(separator: "\n")
+                    } else {
+                        self.lyricsText = lyrics.plainText
+                    }
+                    if let holder = lyrics.copyrightHolder, !holder.isEmpty {
+                        self.lyricsText = (self.lyricsText ?? "") + "\n\n\(holder)"
+                    }
                 case .failure:
                     self.lyricsText = nil
                 }

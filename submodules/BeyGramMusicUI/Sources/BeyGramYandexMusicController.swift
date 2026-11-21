@@ -293,10 +293,10 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
         }
 
         if !self.accepted {
-            self.authTitleLabel.text = l10n.string(.yandexExperimentalWarningTitle, languageCode: lang)
-            self.authBodyLabel.text = l10n.string(.yandexExperimentalWarningBody, languageCode: lang)
+            self.authTitleLabel.text = l10n.string(.yandexWarningTitle, languageCode: lang)
+            self.authBodyLabel.text = l10n.string(.yandexWarningBody, languageCode: lang)
             self.codeLabel.isHidden = true
-            self.authPrimaryButton.configure(title: l10n.string(.yandexAcceptExperimental, languageCode: lang), style: .primary, palette: palette)
+            self.authPrimaryButton.configure(title: l10n.string(.yandexAcceptConsent, languageCode: lang), style: .primary, palette: palette)
             self.authSecondaryButton.isHidden = true
         } else if !self.service.credentials.isConfigured {
             self.authTitleLabel.text = l10n.string(.yandexNotConfiguredTitle, languageCode: lang)
@@ -305,8 +305,8 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
             self.authPrimaryButton.isHidden = true
             self.authSecondaryButton.isHidden = true
         } else if let code = self.waitingCode {
-            self.authTitleLabel.text = l10n.string(.yandexWaitingHeader, languageCode: lang)
-            self.authBodyLabel.text = l10n.string(.yandexVerificationLink, languageCode: lang)
+            self.authTitleLabel.text = l10n.string(.yandexWaitingTitle, languageCode: lang)
+            self.authBodyLabel.text = l10n.string(.yandexOpenVerification, languageCode: lang)
             self.codeLabel.isHidden = false
             self.codeLabel.text = code
             self.authPrimaryButton.isHidden = false
@@ -532,7 +532,7 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
         let session = self.service.makeWave(seeds: ["user:onyourwave"])
         let queue = BGYandexWaveQueue(source: session, prepare: { [weak self] track in
             BeyGramTrackMetadataStore.shared.registerYandexTrack(track)
-            self?.service.localFile(trackId: track.id) { result in
+            self?.service.localFile(trackId: track.trackId) { result in
                 if case let .success(url) = result {
                     BeyGramTrackMetadataStore.shared.associate(localURL: url, with: track)
                 }
@@ -615,13 +615,9 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
         BeyGramMusicSession.shared.playYandexTrack(track, replaceQueue: true) { [weak self] result in
             guard let self else { return }
             if case let .failure(err) = result {
-                let alert = textAlertController(
-                    context: self.context,
-                    title: "Yandex Music",
-                    text: String(describing: err),
-                    actions: [TextAlertAction(type: .defaultAction, title: self.presentationData.strings.Common_OK, action: {})]
-                )
-                self.present(alert, in: .window(.root))
+                let alert = UIAlertController(title: "Yandex Music", message: String(describing: err), preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_OK, style: .default))
+                self.present(alert, animated: true, completion: nil)
             }
         }
     }
