@@ -222,7 +222,7 @@ public func reportController(context: AccountContext, appVersion: String) -> Vie
             bump()
             Task { @MainActor in
                 do {
-                    let (body, _) = try BugReportBuilder.makeBody(reportId: id, description: description, summary: nil, meta: BugReportClientMeta(appVersion: appVersion), events: [])
+                    let (body, _) = try BugReportSnapshot.makeBody(reportId: id, description: description, meta: BugReportDeviceInfo.current())
                     let event = await client.upload(body: body, nonce: sentNonce)
                     state.flow = BugReportFlow.reduce(state.flow, event)
                 } catch {
