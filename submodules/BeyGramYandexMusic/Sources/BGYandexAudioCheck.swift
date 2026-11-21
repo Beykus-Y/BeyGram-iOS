@@ -51,7 +51,7 @@ public enum BGYandexAudioCheck {
             verdict = .tooSmall
         } else if expectedLength >= 0 && expectedLength != byteCount {
             verdict = .cutOff
-        } else if looksLikeMP3(header) {
+        } else if looksLikeSupportedAudio(header) {
             verdict = .audio
         } else {
             verdict = .notMP3
@@ -75,7 +75,7 @@ public enum BGYandexAudioCheck {
         return inspect(header: header, byteCount: byteCount, expectedLength: -1, contentType: nil)
     }
 
-    /// An ID3v2 tag or an MPEG audio frame sync at the very start of the file. A text body starts with neither.
+    /// An ID3v2 tag or an MPEG/AAC ADTS frame sync at the start of the file.
     static func looksLikeMP3(_ header: Data) -> Bool {
         guard header.count >= 3 else {
             return false
@@ -86,6 +86,79 @@ public enum BGYandexAudioCheck {
             return true
         }
         return start[0] == 0xFF && (start[1] & 0xE0) == 0xE0
+    }
+
+    /// Recognises audio formats AVFoundation can decode: MP3/ADTS, MP4/M4A (`ftyp`), FLAC (`fLaC`), WAV (`RIFF..WAVE`), AIFF (`FORM..AIFF/AIFC`).
+    static func looksLikeSupportedAudio(_ header: Data) -> Bool {
+        if looksLikeMP3(header) {
+            return true
+        }
+        let bytes = [UInt8](header.prefix(12))
+        if bytes.count >= 8 && bytes[4] == 0x66 && bytes[5] == 0x74 && bytes[6] == 0x79 && bytes[7] == 0x70 {
+            // ISO BMFF / M4A / MP4 ("ftyp")
+            return true
+        }
+        if bytes.count >= 4 && bytes[0] == 0x66 && bytes[1] == 0x4C && bytes[2] == 0x61 && bytes[3] == 0x43 {
+            // "fLaC"
+            return true
+        }
+        if bytes.count >= 12
+            && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46
+            && bytes[8] == 0x57 && bytes[9] == 0x41 && bytes[10] == 0x56 && bytes[11] == 0x45 {
+            // "RIFF....WAVE"
+            return true
+        }
+        if bytes.count >= 12
+            && bytes[0] == 0x46 && bytes[1] == 0x4F && bytes[2] == 0x52 && bytes[3] == 0x4D
+            && bytes[8] == 0x41 && bytes[9] == 0x49 && bytes[10] == 0x46 && (bytes[11] == 0x46 || bytes[11] == 0x43) {
+            // "FORM....AIFF" / "AIFC"
+            return true
+        }
+        return false
+    }
+
+    /// Picks a file extension matching the audio header so AVAudioFile gets the right container hint.
+    public static func fileExtension(for header: Data, contentType: String? = nil, fallbackCodec: String? = nil) -> String {
+        let bytes = [UInt8](header.prefix(12))
+        if bytes.count >= 8 && bytes[4] == 0x66 && bytes[5] == 0x74 && bytes[6] == 0x79 && bytes[7] == 0x70 {
+            return "m4a"
+        }
+        if bytes.count >= 4 && bytes[0] == 0x66 && bytes[1] == 0x4C && bytes[2] == 0x61 && bytes[3] == 0x43 {
+            return "flac"
+        }
+        if bytes.count >= 12
+            && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46
+            && bytes[8] == 0x57 && bytes[9] == 0x41 && bytes[10] == 0x56 && bytes[11] == 0x45 {
+            return "wav"
+        }
+        if bytes.count >= 12
+            && bytes[0] == 0x46 && bytes[1] == 0x4F && bytes[2] == 0x52 && bytes[3] == 0x4D
+            && bytes[8] == 0x41 && bytes[9] == 0x49 && bytes[10] == 0x46 && (bytes[11] == 0x46 || bytes[11] == 0x43) {
+            return "aiff"
+        }
+        if let type = parseMediaType(contentType) {
+            if type.contains("mp4") || type.contains("m4a") || type.contains("aac") {
+                return "m4a"
+            }
+            if type.contains("flac") {
+                return "flac"
+            }
+            if type.contains("wav") {
+                return "wav"
+            }
+        }
+        if let codec = fallbackCodec?.lowercased() {
+            if codec.contains("aac") || codec.contains("mp4") || codec.contains("m4a") || codec.contains("alac") {
+                return "m4a"
+            }
+            if codec.contains("flac") {
+                return "flac"
+            }
+            if codec.contains("wav") {
+                return "wav"
+            }
+        }
+        return "mp3"
     }
 
     /// A media type that cannot be a track: any text, JSON, XML or HTML.

@@ -39,19 +39,26 @@ public final class BGYandexTrackResolver {
         try? target.setResourceValues(values)
     }
 
+    private static let supportedExtensions = ["mp3", "m4a", "flac", "wav", "aiff"]
+
     /// File name for a track id. Only letters and digits pass, so an id can never point outside the folder.
-    static func fileName(trackId: String) -> String {
+    static func fileName(trackId: String, ext: String = "mp3") -> String {
         let safe = trackId.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
-        return "ym-\(safe).mp3"
+        return "ym-\(safe).\(ext)"
     }
 
-    private func cacheURL(trackId: String) -> URL {
-        return cacheDirectory.appendingPathComponent(BGYandexTrackResolver.fileName(trackId: trackId))
+    private func cacheURL(trackId: String, ext: String = "mp3") -> URL {
+        return cacheDirectory.appendingPathComponent(BGYandexTrackResolver.fileName(trackId: trackId, ext: ext))
     }
 
     public func cachedFile(trackId: String) -> URL? {
-        let url = cacheURL(trackId: trackId)
-        return fileManager.fileExists(atPath: url.path) ? url : nil
+        for ext in BGYandexTrackResolver.supportedExtensions {
+            let url = cacheURL(trackId: trackId, ext: ext)
+            if fileManager.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+        return nil
     }
 
     /// Local file for the track: the cached copy, or a fresh download. A link refused as expired is asked for once more.
@@ -100,7 +107,7 @@ public final class BGYandexTrackResolver {
                         return
                     }
                     // The temporary file is only valid inside this handler, so it is checked and moved here.
-                    let probe = self.inspectDownload(at: tempURL, response: http)
+                    let (probe, header) = self.inspectDownload(at: tempURL, response: http)
                     guard probe.verdict == .audio else {
                         try? self.fileManager.removeItem(at: tempURL)
                         self.onRejectedDownload?(probe)
@@ -112,11 +119,10 @@ public final class BGYandexTrackResolver {
                         }
                         return
                     }
-                    let target = self.cacheURL(trackId: trackId)
+                    let ext = BGYandexAudioCheck.fileExtension(for: header, contentType: http?.value(forHTTPHeaderField: "Content-Type"), fallbackCodec: audio.codec)
+                    let target = self.cacheURL(trackId: trackId, ext: ext)
                     do {
-                        if self.fileManager.fileExists(atPath: target.path) {
-                            try self.fileManager.removeItem(at: target)
-                        }
+                        self.forget(trackId: trackId)
                         try self.fileManager.moveItem(at: tempURL, to: target)
                         completion(.success(target))
                     } catch {
@@ -128,7 +134,7 @@ public final class BGYandexTrackResolver {
     }
 
     /// The check of a finished download, with what the response said about its body.
-    private func inspectDownload(at file: URL, response: HTTPURLResponse?) -> BGYandexAudioCheck.Probe {
+    private func inspectDownload(at file: URL, response: HTTPURLResponse?) -> (BGYandexAudioCheck.Probe, Data) {
         let attributes = try? fileManager.attributesOfItem(atPath: file.path)
         let byteCount = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
         var header = Data()
@@ -140,14 +146,17 @@ public final class BGYandexTrackResolver {
         let encoding = response?.value(forHTTPHeaderField: "Content-Encoding")?.lowercased() ?? "identity"
         let isEncoded = !encoding.isEmpty && encoding != "identity"
         let announced = isEncoded ? -1 : (response?.expectedContentLength ?? -1)
-        return BGYandexAudioCheck.inspect(header: header,
-                                          byteCount: byteCount,
-                                          expectedLength: announced,
-                                          contentType: response?.value(forHTTPHeaderField: "Content-Type"))
+        let probe = BGYandexAudioCheck.inspect(header: header,
+                                               byteCount: byteCount,
+                                               expectedLength: announced,
+                                               contentType: response?.value(forHTTPHeaderField: "Content-Type"))
+        return (probe, header)
     }
 
     public func forget(trackId: String) {
-        try? fileManager.removeItem(at: cacheURL(trackId: trackId))
+        for ext in BGYandexTrackResolver.supportedExtensions {
+            try? fileManager.removeItem(at: cacheURL(trackId: trackId, ext: ext))
+        }
     }
 
     /// Removes every cached track. Called on sign-out.
