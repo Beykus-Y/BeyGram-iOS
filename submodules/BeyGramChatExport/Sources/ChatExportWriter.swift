@@ -606,6 +606,6 @@ public final class ChatExportWriter {
         .sender { color: #7fd4ab; }
         .warning { background: #3a2c10; color: #ffe08a; }
         .meta, .message header, .attachment figcaption, .chat-footer { color: #aeb4bc; }
-    }\
+    }
     """
 }
