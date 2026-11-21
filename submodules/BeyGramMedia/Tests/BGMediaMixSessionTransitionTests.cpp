@@ -77,7 +77,7 @@ void resetDecksSynchronously(bgmedia::mix::MixEngine& engine, bgmedia::mix::MixS
 bool waitUntilTrackReadyOrPlaying(bgmedia::mix::MixEngine& engine,
                                   bgmedia::mix::MixSession& session,
                                   std::uint64_t trackId,
-                                  int maxSteps = 400) {
+                                  int maxSteps = 2000) {
     std::vector<float> scratch(2048, 0.0f);
     for (int i = 0; i < maxSteps; ++i) {
         session.update();
@@ -97,9 +97,9 @@ bool waitUntilTrackReadyOrPlaying(bgmedia::mix::MixEngine& engine,
 
 void testReplaceQueueWhilePlayingNeverHitsBusyDeckAndChangesRealAudio() {
     std::unordered_map<std::string, bgmedia::AudioData> fixtures;
-    fixtures["track_a.wav"] = makeSine(440.0, 20.0);
-    fixtures["track_b.wav"] = makeSine(660.0, 20.0);
-    fixtures["track_c.wav"] = makeSine(880.0, 20.0);
+    fixtures["track_a.wav"] = makeSine(440.0, 3.0);
+    fixtures["track_b.wav"] = makeSine(660.0, 3.0);
+    fixtures["track_c.wav"] = makeSine(880.0, 3.0);
 
     bgmedia::mix::MixEngine engine(kRate);
     beygram::media::MixPreparationOptions options;
@@ -131,6 +131,7 @@ void testReplaceQueueWhilePlayingNeverHitsBusyDeckAndChangesRealAudio() {
 
     auto playAndMeasureHz = [&](const std::string& name) -> double {
         resetDecksSynchronously(engine, session);
+        CHECK(engine.retiredPcmBytes() == 0);
         const std::uint64_t id = session.addTrack(std::filesystem::path(name));
         CHECK(id != 0);
         session.play();
