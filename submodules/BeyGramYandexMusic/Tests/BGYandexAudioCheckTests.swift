@@ -1,4 +1,5 @@
 import XCTest
+import AVFoundation
 @testable import BeyGramYandexMusic
 
 final class BGYandexAudioCheckTests: XCTestCase {
@@ -69,6 +70,83 @@ final class BGYandexAudioCheckTests: XCTestCase {
         XCTAssertEqual(BGYandexAudioCheck.inspect(fileAt: url).verdict, .notMP3)
     }
 
+    func testSyntheticMP3FixtureIsAcceptedAndFullyDecoded() throws {
+        let url = try self.fixtureURL()
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        let byteCount = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        let handle = try FileHandle(forReadingFrom: url)
+        let header = try handle.read(upToCount: BGYandexAudioCheck.headerByteCount) ?? Data()
+        try handle.close()
+
+        XCTAssertEqual(BGYandexAudioCheck.inspect(header: header,
+                                                  byteCount: byteCount,
+                                                  expectedLength: byteCount,
+                                                  contentType: "audio/mpeg").verdict, .audio)
+
+        let file = try AVAudioFile(forReading: url)
+        var decodedFrames: AVAudioFramePosition = 0
+        while true {
+            let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096)!
+            try file.read(into: buffer, frameCount: buffer.frameCapacity)
+            if buffer.frameLength == 0 {
+                break
+            }
+            decodedFrames += AVAudioFramePosition(buffer.frameLength)
+        }
+        XCTAssertGreaterThan(decodedFrames, 44_100)
+        XCTAssertEqual(file.processingFormat.channelCount, 1)
+        XCTAssertEqual(file.processingFormat.sampleRate, 44_100, accuracy: 1)
+    }
+
+    func testHeaderOnlyCorruptCacheIsRefusedByDecoderAndCanBeDiscarded() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("bgyandex-corrupt-cache-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fixture = try self.fixtureURL()
+        let fixtureHandle = try FileHandle(forReadingFrom: fixture)
+        let firstFrameHeader = try fixtureHandle.read(upToCount: 4) ?? Data()
+        try fixtureHandle.close()
+        var corrupt = Data(repeating: 0, count: Int(BGYandexAudioCheck.minimumByteCount) + 128)
+        corrupt.replaceSubrange(0..<firstFrameHeader.count, with: firstFrameHeader)
+
+        let cacheFile = directory.appendingPathComponent(BGYandexTrackResolver.fileName(trackId: "789"))
+        try corrupt.write(to: cacheFile)
+        XCTAssertEqual(BGYandexAudioCheck.inspect(fileAt: cacheFile).verdict, .audio,
+                       "the fast check is only a container hint; AVFoundation decides whether the body decodes")
+
+        var decodedFrames: AVAudioFramePosition = 0
+        do {
+            let file = try AVAudioFile(forReading: cacheFile)
+            while true {
+                let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096)!
+                try file.read(into: buffer, frameCount: buffer.frameCapacity)
+                if buffer.frameLength == 0 { break }
+                decodedFrames += AVAudioFramePosition(buffer.frameLength)
+            }
+        } catch {
+            // An open/read error is a decoder refusal. If AVFoundation tolerates the first frame, the frame-count
+            // assertion still requires that the body be far shorter than the real fixture it impersonates.
+        }
+        XCTAssertLessThan(decodedFrames, 22_050)
+
+        let service = BGYandexService(
+            credentials: BGYandexCredentials(clientId: "id", clientSecret: "secret"),
+            cacheDirectory: directory
+        )
+        service.discardUnplayableFile(rowKey: "ym:789:654")
+        XCTAssertNil(service.resolver.cachedFile(trackId: "789"))
+    }
+
+    func testTruncatedRealMP3BodyFailsAnnouncedLengthCheck() throws {
+        let complete = try Data(contentsOf: self.fixtureURL())
+        let truncated = complete.prefix(complete.count / 2)
+        XCTAssertEqual(BGYandexAudioCheck.inspect(header: Data(truncated.prefix(BGYandexAudioCheck.headerByteCount)),
+                                                  byteCount: Int64(truncated.count),
+                                                  expectedLength: Int64(complete.count),
+                                                  contentType: "audio/mpeg").verdict, .cutOff)
+    }
+
     func testInvalidFileReachesThePlayerAsItsOwnError() {
         XCTAssertEqual(BGYandexPlayback.error(for: .invalidFile), .invalidFile)
     }
@@ -105,5 +183,19 @@ final class BGYandexAudioCheckTests: XCTestCase {
         XCTAssertEqual(resolvedURL?.lastPathComponent, "ym-777.m4a")
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("ym-777.m4a").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL.path))
+    }
+
+    private func fixtureURL() throws -> URL {
+        let environment = ProcessInfo.processInfo.environment
+        let runfiles = environment["TEST_SRCDIR"] ?? FileManager.default.currentDirectoryPath
+        let workspace = environment["TEST_WORKSPACE"] ?? ""
+        let path = URL(fileURLWithPath: runfiles)
+            .appendingPathComponent(workspace)
+            .appendingPathComponent("submodules/BeyGramYandexMusic/Tests/Fixtures/synthetic-tone.mp3")
+        if FileManager.default.fileExists(atPath: path.path) {
+            return path
+        }
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("submodules/BeyGramYandexMusic/Tests/Fixtures/synthetic-tone.mp3")
     }
 }
