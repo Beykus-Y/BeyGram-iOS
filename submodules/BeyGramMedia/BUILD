@@ -111,6 +111,37 @@ cc_test(
 )
 
 objc_library(
+    name = "BGMediaAVFoundationDecoder",
+    srcs = ["Sources/BGMediaAVFoundationDecoder.mm"],
+    hdrs = [
+        "Sources/BGMediaAVFoundationDecoder.hpp",
+        "Sources/BGMediaMixPreparation.hpp",
+        "Sources/BGMediaPcmLimits.hpp",
+    ],
+    copts = [
+        "-std=c++20",
+        "-fobjc-arc",
+    ],
+    sdk_frameworks = [
+        "Foundation",
+        "AVFoundation",
+        "CoreMedia",
+    ],
+    visibility = ["//visibility:private"],
+    deps = [":BGMediaCore"],
+)
+
+cc_test(
+    name = "BGMediaAVFoundationDecoderTests",
+    srcs = ["Tests/BGMediaAVFoundationDecoderTests.mm"],
+    copts = [
+        "-std=c++20",
+        "-fobjc-arc",
+    ],
+    deps = [":BGMediaAVFoundationDecoder"],
+)
+
+objc_library(
     name = "BeyGramMedia",
     enable_modules = True,
     module_name = "BeyGramMedia",
@@ -133,6 +164,7 @@ objc_library(
     sdk_frameworks = [
         "Foundation",
         "AVFoundation",
+        "CoreMedia",
         "QuartzCore",
         "UIKit",
         "UniformTypeIdentifiers",
