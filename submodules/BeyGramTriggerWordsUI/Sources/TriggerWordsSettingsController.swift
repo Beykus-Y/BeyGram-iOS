@@ -264,8 +264,6 @@ private final class TriggerWordsViewControllerImpl: BeyGramScrollViewController,
             switch err {
             case .emptyPattern:
                 self.statusMessage = l10n.string(.triggerEmptyPatternStatus, languageCode: lang)
-            case .duplicatePattern:
-                self.statusMessage = l10n.string(.triggerDuplicateStatus, languageCode: lang)
             case .patternTooLong, .tooManyRules:
                 self.statusMessage = l10n.string(.commonError, languageCode: lang)
             }
