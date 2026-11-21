@@ -88,17 +88,17 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
     init(engine: TelegramEngine, audioSession: ManagedAudioSession) {
         self.engine = engine
         self.audioSession = audioSession
-        self.player = BGMixPlayer.sharedPlayer()
+        self.player = BGMixPlayer.shared()
         self.statusPromise = Promise(StatusSample(key: nil, status: SharedMediaBGMixBackend.idleStatus()))
         super.init()
         self.player.managesAudioSession = false
-        self.player.addObserver(self)
+        self.player.add(self)
     }
 
     /// Ends the backend when its playlist player goes away: nothing keeps sounding, the queue is emptied, and the
     /// shared player goes back to managing its own session (the BG Mix screen needs that).
     func shutdown() {
-        self.player.removeObserver(self)
+        self.player.remove(self)
         self.pendingResume = nil
         self.wantsPlaying = false
         self.fillGeneration += 1
@@ -211,7 +211,7 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
 
     // MARK: - BGMixPlayerObserver
 
-    func mixPlayer(_ mixPlayer: BGMixPlayer, didUpdateSnapshot snapshot: BGMixSnapshot) {
+    func mixPlayer(_ mixPlayer: BGMixPlayer, didUpdate snapshot: BGMixSnapshot) {
         let previousTransport = self.lastTransport
         self.lastTransport = snapshot.transport
         self.publish(snapshot)
