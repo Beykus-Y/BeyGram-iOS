@@ -9,7 +9,7 @@ import BeyGramMedia
 import BeyGramYandexMusic
 
 /// Why BG Mix could not play the current item of the playlist.
-enum SharedMediaBGMixFailure: Equatable {
+enum SharedMediaBGMixFailure: Error, Equatable {
     /// The item has no file BG Mix can read: the file is missing, its download failed, or its source cannot be played.
     case unavailable
     /// BG Mix refused the file when it was queued.
