@@ -13,7 +13,7 @@ Off by default: needs the `yandexMusic` flag, a configured OAuth pair, and the a
   (400 to 403) ends the session, and so does a token the service refuses after one refresh. Sign-in, sign-out and a
   refused refresh move the sign-in generation; a request that started under another generation drops its result.
 - Track rows use `ym:<trackId>[:<albumId>]` (`BGMusicTrackKey`). A row holds no file until it is played; the signed link is
-  requested each time and never stored. Files live in `Application Support/beygram/yandex`. Full tracks need an account
+  requested each time and never stored. Files live in the folder the service is given; the screens pass `Application Support/beygram/yandex`. Full tracks need an account
   with a subscription (`hasPlus`); previews are never played as full tracks.
 - Public surface for the screens (Gemini owns the screens): `search`, `likedTracks`, `likedTrackIds`, `setLiked`,
   `setDisliked`, `playlists`, `likedPlaylists`, `playlistTracks`, `playlistByUuid`, `likedAlbums`, `album`, `lyrics`

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Gives a local MP3 for a `ym:` row. Only the file is kept. A link is asked for each time it is needed, because it expires.
-/// The cache is a folder inside the app's private storage, so it is not in backups that leave the device.
+/// Files live in the folder the service is given, excluded from iCloud and device backups: the tracks may not leave the device.
 public final class BGYandexTrackResolver {
     /// Gives a fresh link for a track: the service checks the session and the subscription. Not on the main queue.
     public typealias LinkProvider = (String, @escaping (Result<BGYandexAudio, BGYandexError>) -> Void) -> Void
@@ -13,6 +13,8 @@ public final class BGYandexTrackResolver {
     private let session: URLSession
     private let fileManager = FileManager.default
 
+    /// The folder the tracks live in, used as given. It is excluded from backups in full, so it must be a folder of its own:
+    /// the screens pass `Application Support/beygram/yandex`.
     public init(cacheDirectory: URL) {
         self.cacheDirectory = cacheDirectory
         let configuration = URLSessionConfiguration.ephemeral
@@ -21,6 +23,15 @@ public final class BGYandexTrackResolver {
         configuration.urlCache = nil
         self.session = URLSession(configuration: configuration)
         try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        BGYandexTrackResolver.excludeFromBackup(cacheDirectory)
+    }
+
+    /// Keeps one folder out of iCloud and device backups. Application Support is backed up unless a folder says otherwise.
+    static func excludeFromBackup(_ folder: URL) {
+        var target = folder
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? target.setResourceValues(values)
     }
 
     /// File name for a track id. Only letters and digits pass, so an id can never point outside the folder.
