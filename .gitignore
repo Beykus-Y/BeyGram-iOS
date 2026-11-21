@@ -88,3 +88,4 @@ submodules/TelegramApi/Tests/SwiftPMGenerated/
 build/accessibility/
 /.bazelrc.local
 submodules/BeyGramProxy/CoreBridge/lib/
+/BEYGRAM_BUILD_LOCAL.md
