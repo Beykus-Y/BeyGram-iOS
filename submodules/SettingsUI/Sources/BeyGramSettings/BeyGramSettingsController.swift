@@ -234,11 +234,12 @@ private final class BeyGramSettingsHubViewControllerImpl: BeyGramScrollViewContr
                 self.pushController(reportController(context: self.context, appVersion: version))
             }
         )
+        let shortVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0.1"
         self.updatesRow.configure(
             iconName: "arrow.down.circle.fill",
             iconTint: palette.accent,
             title: l10n.string(.settingsUpdatesTitle, languageCode: lang),
-            value: BeyGramBuildInfo.currentVersionLabel(),
+            value: shortVersion,
             showsChevron: true,
             showSeparator: true,
             palette: palette,
@@ -299,10 +300,12 @@ private final class BeyGramAboutViewControllerImpl: BeyGramScrollViewController 
         self.card.apply(palette: palette)
 
         let info = Bundle.main.infoDictionary
-        let shortVersion = (info?["CFBundleShortVersionString"] as? String) ?? "1.0"
+        let shortVersion = (info?["CFBundleShortVersionString"] as? String) ?? "0.0.1"
         let buildNumber = (info?["CFBundleVersion"] as? String) ?? "1"
-        let channel = BeyGramBuildInfo.channelName()
-        let commit = BeyGramBuildInfo.shortCommit()
+        let channelRaw = (info?["BeyGramBuildChannel"] as? String)?.lowercased()
+        let isDev = channelRaw == "dev" || (info?["CFBundleIdentifier"] as? String)?.lowercased().contains("dev") == true
+        let channel = isDev ? "dev" : "release"
+        let commit = (info?["BeyGramGitCommit"] as? String) ?? (info?["GitCommit"] as? String) ?? "—"
 
         self.versionRow.configure(title: l10n.string(.settingsAboutVersion, languageCode: lang), value: shortVersion, showSeparator: true, palette: palette)
         self.buildRow.configure(title: l10n.string(.settingsAboutBuild, languageCode: lang), value: buildNumber, showSeparator: true, palette: palette)
