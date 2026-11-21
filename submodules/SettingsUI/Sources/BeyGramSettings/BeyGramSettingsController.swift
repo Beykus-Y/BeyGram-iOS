@@ -263,7 +263,7 @@ private final class BeyGramSettingsHubViewControllerImpl: BeyGramScrollViewContr
     }
 
     private func pushController(_ controller: ViewController) {
-        (self.navigationController as? NavigationController)?.pushViewController(controller)
+        let _ = (self.navigationController as? NavigationController)?.pushViewController(controller)
     }
 }
 
