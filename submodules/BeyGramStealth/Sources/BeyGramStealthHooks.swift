@@ -13,10 +13,10 @@ public enum BeyGramStealthHooks {
     }
 
     /// The decision for one outgoing message. See `BeyGramStealthSettings.sendDecision`.
-    public static func sendDecision(accountPeerId: Int64, explicitScheduleTime: Int32?, isSchedulable: Bool, nowSeconds: Int32) -> BeyGramStealthSendDecision {
+    public static func sendDecision(accountPeerId: Int64, explicitScheduleTime: Int32?, unschedulableReason: BeyGramStealthRefusal?, nowSeconds: Int32) -> BeyGramStealthSendDecision {
         guard BeyGramSettings.shared.isEnabled(.privacyPolicy) else {
             return .unchanged
         }
-        return BeyGramStealthStore.shared.settings(accountPeerId: accountPeerId).sendDecision(explicitScheduleTime: explicitScheduleTime, isSchedulable: isSchedulable, nowSeconds: nowSeconds)
+        return BeyGramStealthStore.shared.settings(accountPeerId: accountPeerId).sendDecision(explicitScheduleTime: explicitScheduleTime, unschedulableReason: unschedulableReason, nowSeconds: nowSeconds)
     }
 }

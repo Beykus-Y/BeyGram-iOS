@@ -2,6 +2,7 @@ import Foundation
 import Postbox
 internal import TelegramApi
 import SwiftSignalKit
+import BeyGramStealth
 
 
 func _internal_applyMaxReadIndexInteractively(postbox: Postbox, stateManager: AccountStateManager, index: MessageIndex) -> Signal<Void, NoError> {
@@ -172,13 +173,13 @@ func applySecretOutgoingMessageReadActions(transaction: Transaction, id: Message
     }
 }
 
-func _internal_togglePeerUnreadMarkInteractively(postbox: Postbox, network: Network, viewTracker: AccountViewTracker, peerId: PeerId, setToValue: Bool? = nil) -> Signal<Void, NoError> {
+func _internal_togglePeerUnreadMarkInteractively(postbox: Postbox, accountPeerId: PeerId, network: Network, viewTracker: AccountViewTracker, peerId: PeerId, setToValue: Bool? = nil) -> Signal<Void, NoError> {
     return postbox.transaction { transaction -> Void in
-        _internal_togglePeerUnreadMarkInteractively(transaction: transaction, network: network, viewTracker: viewTracker, peerId: peerId, setToValue: setToValue)
+        _internal_togglePeerUnreadMarkInteractively(transaction: transaction, accountPeerId: accountPeerId, network: network, viewTracker: viewTracker, peerId: peerId, setToValue: setToValue)
     }
 }
 
-func _internal_toggleForumThreadUnreadMarkInteractively(transaction: Transaction, network: Network, viewTracker: AccountViewTracker, peerId: PeerId, threadId: Int64, setToValue: Bool?) {
+func _internal_toggleForumThreadUnreadMarkInteractively(transaction: Transaction, accountPeerId: PeerId, network: Network, viewTracker: AccountViewTracker, peerId: PeerId, threadId: Int64, setToValue: Bool?) {
     guard let peer = transaction.getPeer(peerId) else {
         return
     }
@@ -217,12 +218,14 @@ func _internal_toggleForumThreadUnreadMarkInteractively(transaction: Transaction
                 transaction.setMessageHistoryThreadInfo(peerId: peerId, threadId: threadId, info: entry)
             }
             
+            // A stealth rule that hides read receipts for this chat leaves the topic read on this device only.
+            let sendsReadReceipt = BeyGramStealthHooks.allows(.readHistory, accountPeerId: accountPeerId.toInt64(), chatPeerId: peerId.toInt64())
             if peer.isForum {
-                if let inputPeer = apiInputPeer(peer) {
+                if let inputPeer = apiInputPeer(peer), sendsReadReceipt {
                     let _ = network.request(Api.functions.messages.readDiscussion(peer: inputPeer, msgId: Int32(clamping: threadId), readMaxId: messageIndex.id.id)).start()
                 }
             } else if peer.isMonoForum {
-                if let inputPeer = apiInputPeer(peer), let subPeer = transaction.getPeer(PeerId(threadId)).flatMap(apiInputPeer) {
+                if let inputPeer = apiInputPeer(peer), let subPeer = transaction.getPeer(PeerId(threadId)).flatMap(apiInputPeer), sendsReadReceipt {
                     let _ = network.request(Api.functions.messages.readSavedHistory(parentPeer: inputPeer, peer: subPeer, maxId: messageIndex.id.id)).start()
                 }
             }
@@ -230,7 +233,7 @@ func _internal_toggleForumThreadUnreadMarkInteractively(transaction: Transaction
     }
 }
 
-func _internal_markForumThreadAsReadInteractively(transaction: Transaction, network: Network, viewTracker: AccountViewTracker, peerId: PeerId, threadId: Int64) {
+func _internal_markForumThreadAsReadInteractively(transaction: Transaction, accountPeerId: PeerId, network: Network, viewTracker: AccountViewTracker, peerId: PeerId, threadId: Int64) {
     guard let peer = transaction.getPeer(peerId) else {
         return
     }
@@ -253,19 +256,21 @@ func _internal_markForumThreadAsReadInteractively(transaction: Transaction, netw
             transaction.setMessageHistoryThreadInfo(peerId: peerId, threadId: threadId, info: entry)
         }
         
+        // A stealth rule that hides read receipts for this chat leaves the topic read on this device only.
+        let sendsReadReceipt = BeyGramStealthHooks.allows(.readHistory, accountPeerId: accountPeerId.toInt64(), chatPeerId: peerId.toInt64())
         if peer.isForum {
-            if let inputPeer = apiInputPeer(peer) {
+            if let inputPeer = apiInputPeer(peer), sendsReadReceipt {
                 let _ = network.request(Api.functions.messages.readDiscussion(peer: inputPeer, msgId: Int32(clamping: threadId), readMaxId: messageIndex.id.id)).start()
             }
         } else if peer.isMonoForum {
-            if let inputPeer = apiInputPeer(peer), let subPeer = transaction.getPeer(PeerId(threadId)).flatMap(apiInputPeer) {
+            if let inputPeer = apiInputPeer(peer), let subPeer = transaction.getPeer(PeerId(threadId)).flatMap(apiInputPeer), sendsReadReceipt {
                 let _ = network.request(Api.functions.messages.readSavedHistory(parentPeer: inputPeer, peer: subPeer, maxId: messageIndex.id.id)).start()
             }
         }
     }
 }
 
-func _internal_togglePeerUnreadMarkInteractively(transaction: Transaction, network: Network, viewTracker: AccountViewTracker, peerId: PeerId, setToValue: Bool? = nil) {
+func _internal_togglePeerUnreadMarkInteractively(transaction: Transaction, accountPeerId: PeerId, network: Network, viewTracker: AccountViewTracker, peerId: PeerId, setToValue: Bool? = nil) {
     guard let peer = transaction.getPeer(peerId) else {
         return
     }
@@ -278,6 +283,8 @@ func _internal_togglePeerUnreadMarkInteractively(transaction: Transaction, netwo
     }
     
     if peer.isForumOrMonoForum, !displayAsRegularChat {
+        // A stealth rule that hides read receipts for this chat leaves the topics read on this device only.
+        let sendsReadReceipt = BeyGramStealthHooks.allows(.readHistory, accountPeerId: accountPeerId.toInt64(), chatPeerId: peerId.toInt64())
         for item in transaction.getMessageHistoryThreadIndex(peerId: peerId, limit: 20) {
             guard var data = transaction.getMessageHistoryThreadInfo(peerId: peerId, threadId: item.threadId)?.data.get(MessageHistoryThreadData.self) else {
                 continue
@@ -296,11 +303,11 @@ func _internal_togglePeerUnreadMarkInteractively(transaction: Transaction, netwo
                 }
                 
                 if peer.isForum {
-                    if let inputPeer = apiInputPeer(peer) {
+                    if let inputPeer = apiInputPeer(peer), sendsReadReceipt {
                         let _ = network.request(Api.functions.messages.readDiscussion(peer: inputPeer, msgId: Int32(clamping: item.threadId), readMaxId: messageIndex.id.id)).start()
                     }
                 } else if peer.isMonoForum {
-                    if let inputPeer = apiInputPeer(peer), let subPeer = transaction.getPeer(PeerId(item.threadId)).flatMap(apiInputPeer) {
+                    if let inputPeer = apiInputPeer(peer), let subPeer = transaction.getPeer(PeerId(item.threadId)).flatMap(apiInputPeer), sendsReadReceipt {
                         let _ = network.request(Api.functions.messages.readSavedHistory(parentPeer: inputPeer, peer: subPeer, maxId: messageIndex.id.id)).start()
                     }
                 }
@@ -395,8 +402,8 @@ public func clearPeerUnseenReactionsAndPollVotesInteractively(account: Account, 
     |> ignoreValues
 }
 
-func _internal_markAllChatsAsReadInteractively(transaction: Transaction, network: Network, viewTracker: AccountViewTracker, groupId: PeerGroupId, filterPredicate: ChatListFilterPredicate?) {
+func _internal_markAllChatsAsReadInteractively(transaction: Transaction, accountPeerId: PeerId, network: Network, viewTracker: AccountViewTracker, groupId: PeerGroupId, filterPredicate: ChatListFilterPredicate?) {
     for peerId in transaction.getUnreadChatListPeerIds(groupId: groupId, filterPredicate: filterPredicate, additionalFilter: nil, stopOnFirstMatch: false) {
-        _internal_togglePeerUnreadMarkInteractively(transaction: transaction, network: network, viewTracker: viewTracker, peerId: peerId, setToValue: false)
+        _internal_togglePeerUnreadMarkInteractively(transaction: transaction, accountPeerId: accountPeerId, network: network, viewTracker: viewTracker, peerId: peerId, setToValue: false)
     }
 }

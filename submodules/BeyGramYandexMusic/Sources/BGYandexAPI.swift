@@ -310,15 +310,15 @@ public final class BGYandexAPI {
                     return
                 }
                 if best.direct, let direct = URL(string: best.url) {
-                    completion(.success(BGYandexAudio(url: direct, codec: "mp3", bitrateKbps: best.kbps)))
+                    completion(.success(BGYandexAudio(url: direct, codec: best.codec, bitrateKbps: best.kbps)))
                     return
                 }
-                self.signedLink(fromXMLAt: best.url, kbps: best.kbps, completion: completion)
+                self.signedLink(fromXMLAt: best.url, codec: best.codec, kbps: best.kbps, completion: completion)
             }
         }
     }
 
-    private func signedLink(fromXMLAt urlText: String, kbps: Int, completion: @escaping (Result<BGYandexAudio, BGYandexError>) -> Void) {
+    private func signedLink(fromXMLAt urlText: String, codec: String, kbps: Int, completion: @escaping (Result<BGYandexAudio, BGYandexError>) -> Void) {
         guard let url = URL(string: urlText) else {
             completion(.failure(.serviceChanged))
             return
@@ -334,7 +334,7 @@ public final class BGYandexAPI {
                     completion(.failure(.serviceChanged))
                     return
                 }
-                completion(.success(BGYandexAudio(url: link, codec: "mp3", bitrateKbps: kbps)))
+                completion(.success(BGYandexAudio(url: link, codec: codec, bitrateKbps: kbps)))
             }
         }
     }
@@ -342,16 +342,22 @@ public final class BGYandexAPI {
     // MARK: Parsing (the rules of YandexApi.kt). Unknown fields are ignored; a missing required field is a changed service.
 
     struct DownloadOption: Equatable {
+        let codec: String
         let kbps: Int
         let url: String
         let direct: Bool
     }
 
+    private static let supportedCodecs: Set<String> = ["mp3", "aac", "he-aac", "mp4", "m4a", "flac", "alac", "wav"]
+
     static func downloadOption(_ item: [String: Any]) -> DownloadOption? {
-        guard (item["codec"] as? String) == "mp3", (item["preview"] as? Bool) != true else {
+        guard let rawCodec = (item["codec"] as? String)?.lowercased(),
+              supportedCodecs.contains(rawCodec),
+              (item["preview"] as? Bool) != true else {
             return nil
         }
         return DownloadOption(
+            codec: rawCodec,
             kbps: (item["bitrateInKbps"] as? NSNumber)?.intValue ?? 0,
             url: (item["downloadInfoUrl"] as? String) ?? "",
             direct: (item["direct"] as? Bool) == true

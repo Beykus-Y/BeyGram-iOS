@@ -1,6 +1,7 @@
 import Foundation
 import SwiftSignalKit
 import BeyGramMedia
+import BeyGramYandexMusic
 
 /// Track preparation/playback state mapped from `BGMixTrackState`.
 public enum BeyGramMusicTrackStatus: Equatable {
@@ -36,6 +37,9 @@ public struct BeyGramMusicTrack: Equatable, Identifiable {
     public let id: UInt64
     public let url: URL
     public let title: String
+    public let artist: String?
+    public let coverURL: URL?
+    public let yandexTrackId: String?
     public let duration: TimeInterval?
     public let bpm: Int?
     public let status: BeyGramMusicTrackStatus
@@ -52,9 +56,11 @@ public struct BeyGramMusicTrack: Equatable, Identifiable {
     init(track: BGMixTrack) {
         self.id = track.identifier
         self.url = track.fileURL
-        let rawName = track.name
-        let stripped = (rawName as NSString).deletingPathExtension
-        self.title = stripped.isEmpty ? rawName : stripped
+        let meta = BeyGramTrackMetadataStore.shared.metadata(for: track.fileURL, fallbackName: track.name)
+        self.title = meta.title
+        self.artist = meta.artist
+        self.coverURL = meta.coverURL
+        self.yandexTrackId = meta.yandexTrackId
         self.duration = track.duration > 0 ? track.duration : nil
         self.bpm = track.bpm > 0 ? Int(track.bpm.rounded()) : nil
         self.status = BeyGramMusicTrackStatus(track: track)
@@ -123,6 +129,7 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
     private let player: BGMixPlayer
     private let stateValue: Atomic<BeyGramMusicState>
     private let statePromise: ValuePromise<BeyGramMusicState>
+    private var metadataObserver: NSObjectProtocol?
 
     private override init() {
         self.player = BGMixPlayer.shared()
@@ -135,9 +142,16 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
         self.player.setAdaptiveTransitions(initial.adaptiveTransitions)
         self.player.setBassSwap(initial.bassSwap)
         self.player.add(self)
+        self.metadataObserver = NotificationCenter.default.addObserver(forName: BeyGramTrackMetadataStore.didUpdateNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.mixPlayer(self.player, didUpdate: self.player.snapshot)
+        }
     }
 
     deinit {
+        if let metadataObserver {
+            NotificationCenter.default.removeObserver(metadataObserver)
+        }
         self.player.remove(self)
     }
 
@@ -275,6 +289,34 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
             self.player.setBassSwap(enabled)
             self.mutate { state in
                 state.bassSwap = enabled
+            }
+        }
+    }
+
+    /// Resolves a Yandex Music track through `BGYandexRuntime.shared`, registers its real title/artist/cover, and plays or enqueues it.
+    public func playYandexTrack(_ track: BGYandexTrack, replaceQueue: Bool = false, completion: ((Result<Void, BGYandexPlaybackError>) -> Void)? = nil) {
+        BeyGramTrackMetadataStore.shared.registerYandexTrack(track)
+        BGYandexRuntime.shared.playableFile(rowKey: "ym:\(track.trackId)") { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case let .success(fileURL):
+                BeyGramTrackMetadataStore.shared.associate(localURL: fileURL, with: track)
+                DispatchQueue.main.async {
+                    self.player.managesAudioSession = true
+                    if replaceQueue {
+                        self.player.stopAll()
+                        self.player.clearQueue()
+                    }
+                    _ = self.player.addTrack(at: fileURL)
+                    if replaceQueue || !self.currentState.isPlaying {
+                        self.player.play()
+                    }
+                    completion?(.success(()))
+                }
+            case let .failure(error):
+                DispatchQueue.main.async {
+                    completion?(.failure(error))
+                }
             }
         }
     }

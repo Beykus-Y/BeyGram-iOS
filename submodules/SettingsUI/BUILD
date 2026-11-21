@@ -14,6 +14,7 @@ swift_library(
     deps = [
         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
         "//submodules/BeyGramAppearance",
+        "//submodules/BeyGramDesign:BeyGramDesign",
         "//submodules/BeyGramKit:BeyGramKit",
         "//submodules/BeyGramMusicUI:BeyGramMusicUI",
         "//submodules/BeyGramProxy:BeyGramProxy",

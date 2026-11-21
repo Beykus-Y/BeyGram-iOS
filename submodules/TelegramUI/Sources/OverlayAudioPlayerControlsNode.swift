@@ -460,6 +460,10 @@ final class OverlayAudioPlayerControlsNode: ASDisplayNode {
                             } else {
                                 strongSelf.scrubberNode.bufferingStatus = nil
                             }
+                        case .yandexTrack, .localFile:
+                            // A Yandex track or a local file has no Telegram resource, so there is no buffering status to show.
+                            strongSelf.currentFileReference = nil
+                            strongSelf.scrubberNode.bufferingStatus = nil
                     }
                 } else {
                     strongSelf.scrubberNode.bufferingStatus = nil
@@ -471,6 +475,9 @@ final class OverlayAudioPlayerControlsNode: ASDisplayNode {
                 switch source {
                 case let .telegramFile(_, isCopyProtected, _):
                     strongSelf.shareNode.isHidden = isCopyProtected || forceCopyProtected
+                case .yandexTrack, .localFile:
+                    // Yandex tracks and local files cannot be forwarded, so they have no share button.
+                    strongSelf.shareNode.isHidden = true
                 }
             }
             

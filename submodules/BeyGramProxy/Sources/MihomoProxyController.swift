@@ -44,6 +44,13 @@ public final class MihomoProxyController {
     private var watchdogGeneration = 0
     private static let watchdogIntervalSeconds = 20
     private static let probeTimeoutMilliseconds = 5000
+    /// After a change of the network, the core is checked once the network has stayed as it is for this long.
+    private static let networkSettleSeconds = 2
+    /// Bumped by every change of the network and every stop of the watch, so a recovery scheduled earlier does nothing.
+    /// Used on `queue` only.
+    private var networkGeneration = 0
+    /// Watches the network while the core runs. A new monitor for each run. Used on `queue` only.
+    private var networkMonitor: MihomoNetworkMonitor?
     /// At most this many probes are in flight at once. The limit protects the phone's network, not the core.
     private static let maxConcurrentProbes = 8
     /// Probes wait on the network, so they run here, off `queue`: a check never holds up start, stop or a node change.
@@ -103,6 +110,41 @@ public final class MihomoProxyController {
         }
     }
 
+    /// Loads the saved subscription again and keeps its server list. Neither the automatic switch nor Telegram's proxy
+    /// settings change. A running core takes the new profile at once, and only when the profile differs from the one it
+    /// runs; the node in use stays when it is still in the list. A failed load changes nothing.
+    public func refreshSubscription(completion: @escaping (Result<[String], Error>) -> Void) {
+        guard let source = currentState.subscriptionSource else {
+            deliver(.failure(MihomoProxyError.noSubscription), to: completion)
+            return
+        }
+        loadText(source) { result in
+            self.queue.async {
+                do {
+                    let text = try result.get()
+                    let credentials = try LoopbackCredentialStore.loadOrCreate()
+                    let profile = try self.client.normalize(source: text, credentials: credentials)
+                    self.update { state in
+                        state.serverNames = profile.serverNames
+                        if let selected = state.selectedNode, !profile.serverNames.contains(selected) {
+                            state.selectedNode = nil
+                        }
+                    }
+                    if self.currentState.isRunning, let running = self.profileYAML, running != profile.yaml {
+                        self.profileYAML = profile.yaml
+                        self.restartCore()
+                        if !self.currentState.isRunning {
+                            throw MihomoCoreError.refused("Ядро не запустилось с обновлённой подпиской. Подключение остановлено.")
+                        }
+                    }
+                    self.deliver(.success(profile.serverNames), to: completion)
+                } catch {
+                    self.deliver(.failure(error), to: completion)
+                }
+            }
+        }
+    }
+
     /// Loads the saved subscription, starts the core on the loopback inlet, and selects the node the user chose.
     public func start(completion: @escaping (Result<Void, Error>) -> Void) {
         guard let source = currentState.subscriptionSource else {
@@ -128,9 +170,11 @@ public final class MihomoProxyController {
                         state.serverNames = profile.serverNames
                     }
                     self.startWatchdogIfEnabled()
+                    self.startNetworkWatch()
                     self.deliver(.success(()), to: completion)
                 } catch {
                     self.stopWatchdog()
+                    self.stopNetworkWatch()
                     self.update { $0.isRunning = false }
                     self.deliver(.failure(error), to: completion)
                 }
@@ -143,6 +187,7 @@ public final class MihomoProxyController {
         queue.async {
             var result: Result<Void, Error> = .success(())
             self.stopWatchdog()
+            self.stopNetworkWatch()
             self.profileYAML = nil
             do {
                 try self.client.stop()
@@ -198,7 +243,7 @@ public final class MihomoProxyController {
         queue.async {
             do {
                 let group = try self.client.proxies(group: MihomoProxyController.groupName)
-                let names = group.nodes.map { $0.name }
+                let names = MihomoProxyController.serverNames(in: group)
                 self.updateLatencyCheck { $0 = MihomoLatencyCheck(phase: .running, total: names.count, delays: [:]) }
                 self.checkQueue.async {
                     // One node that fails must not cancel the others. It is reported as -1.
@@ -317,7 +362,7 @@ public final class MihomoProxyController {
         checkQueue.async {
             // The delay stored in the group can be stale, so the node in use is probed directly.
             let inUseDelay = (try? self.client.testDelay(proxy: group.now, timeoutMilliseconds: MihomoProxyController.probeTimeoutMilliseconds)) ?? -1
-            let fastest: String? = inUseDelay <= 0 ? self.fastestNode(among: group.nodes.map { $0.name }) : nil
+            let fastest: String? = inUseDelay <= 0 ? self.fastestNode(among: MihomoProxyController.serverNames(in: group)) : nil
             self.queue.async {
                 if let fastest = fastest {
                     self.selectIfStillWatching(fastest, generation: generation)
@@ -331,6 +376,11 @@ public final class MihomoProxyController {
         if generation == watchdogGeneration {
             scheduleWatchdogTick(generation: generation)
         }
+    }
+
+    /// The names of the group's entries that are servers, in the group's order. See `MihomoServerRule`.
+    private static func serverNames(in group: MihomoGroupState) -> [String] {
+        return group.nodes.filter { MihomoServerRule.isServer(type: $0.type) }.map { $0.name }
     }
 
     /// Runs off `queue`. Probes the nodes and returns the fastest one that answers; of equal delays, the first in order.
@@ -365,6 +415,7 @@ public final class MihomoProxyController {
     private func restartCore() {
         guard let yaml = profileYAML else {
             stopWatchdog()
+            stopNetworkWatch()
             update { $0.isRunning = false }
             return
         }
@@ -378,8 +429,113 @@ public final class MihomoProxyController {
             try client.setup(config: yaml, selected: selected)
         } catch {
             stopWatchdog()
+            stopNetworkWatch()
             profileYAML = nil
             update { $0.isRunning = false }
+        }
+    }
+
+    // MARK: - Network changes
+
+    /// Runs on `queue`. Watches the network while the core runs. Each run uses a new monitor, because a stopped one cannot start again.
+    private func startNetworkWatch() {
+        stopNetworkWatch()
+        let monitor = MihomoNetworkMonitor { [weak self] in
+            guard let self = self else {
+                return
+            }
+            self.queue.async {
+                self.networkChanged()
+            }
+        }
+        networkMonitor = monitor
+        monitor.start()
+    }
+
+    /// Runs on `queue`. Stops the watch. A recovery that is still waiting then does nothing.
+    private func stopNetworkWatch() {
+        networkGeneration += 1
+        networkMonitor?.stop()
+        networkMonitor = nil
+    }
+
+    /// Runs on `queue`. A change starts the recovery once the network has stayed as it is for `networkSettleSeconds`.
+    /// A change that comes meanwhile restarts that wait, so one handover gives one recovery.
+    private func networkChanged() {
+        guard currentState.isRunning, profileYAML != nil else {
+            return
+        }
+        networkGeneration += 1
+        let generation = networkGeneration
+        queue.asyncAfter(deadline: .now() + .seconds(MihomoProxyController.networkSettleSeconds)) {
+            self.recoverAfterNetworkChange(generation: generation)
+        }
+    }
+
+    /// Runs on `queue`. The node in use is probed first. When it answers, nothing changes, so a change the core
+    /// rides out costs nothing. When it does not answer, the core is restarted and the node is probed again.
+    private func recoverAfterNetworkChange(generation: Int) {
+        guard generation == networkGeneration, currentState.isRunning, profileYAML != nil else {
+            return
+        }
+        guard let group = try? client.proxies(group: MihomoProxyController.groupName) else {
+            restartAfterNetworkChange(generation: generation)
+            return
+        }
+        probeOffQueue(group.now) { answered in
+            if !answered {
+                self.restartAfterNetworkChange(generation: generation)
+            }
+        }
+    }
+
+    /// Runs on `queue`. Restarts the core with the profile and the node the user chose, then probes that node again.
+    /// If it still does not answer and the automatic switch is on, the fastest node that answers is selected.
+    private func restartAfterNetworkChange(generation: Int) {
+        guard generation == networkGeneration, currentState.isRunning, profileYAML != nil else {
+            return
+        }
+        restartCore()
+        guard generation == networkGeneration, currentState.isRunning,
+              let group = try? client.proxies(group: MihomoProxyController.groupName) else {
+            return
+        }
+        probeOffQueue(group.now) { answered in
+            guard generation == self.networkGeneration, self.currentState.isRunning, !answered,
+                  self.currentState.autoSelectEnabled else {
+                return
+            }
+            self.selectFastestAfterNetworkChange(names: MihomoProxyController.serverNames(in: group), generation: generation)
+        }
+    }
+
+    /// Runs on `queue`. Probes the nodes off `queue` and selects the fastest one that answers. Nothing is selected when the
+    /// core has stopped or the network has changed again in the meantime.
+    private func selectFastestAfterNetworkChange(names: [String], generation: Int) {
+        checkQueue.async {
+            let fastest = self.fastestNode(among: names)
+            self.queue.async {
+                guard let fastest, generation == self.networkGeneration, self.currentState.isRunning else {
+                    return
+                }
+                do {
+                    try self.client.select(group: MihomoProxyController.groupName, proxy: fastest)
+                    self.update { $0.selectedNode = fastest }
+                } catch {
+                    // The node in use stays. The next change of the network tries again.
+                }
+            }
+        }
+    }
+
+    /// Runs on `queue`. Probes one node on `probeQueue`, so a running delay check does not hold it up, and calls `then`
+    /// back on `queue` with whether the node answered. Only `testDelay` runs off `queue`, which the core allows beside other actions.
+    private func probeOffQueue(_ name: String, then: @escaping (Bool) -> Void) {
+        probeQueue.async {
+            let delay = (try? self.client.testDelay(proxy: name, timeoutMilliseconds: MihomoProxyController.probeTimeoutMilliseconds)) ?? -1
+            self.queue.async {
+                then(delay > 0)
+            }
         }
     }
 
@@ -388,8 +544,13 @@ public final class MihomoProxyController {
             completion(.success(source))
             return
         }
-        SubscriptionFetcher.fetch(source) { result in
-            completion(result.mapError { $0 as Error })
+        do {
+            let installationId = try InstallationIdentifierStore.loadOrCreate()
+            SubscriptionFetcher.fetch(source, installationId: installationId) { result in
+                completion(result.mapError { $0 as Error })
+            }
+        } catch {
+            completion(.failure(error))
         }
     }
 
