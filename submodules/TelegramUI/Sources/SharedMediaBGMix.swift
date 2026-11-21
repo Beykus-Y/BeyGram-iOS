@@ -312,6 +312,12 @@ final class SharedMediaBGMixBackend: NSObject, BGMixPlayerObserver {
             return
         }
         self.reportedFailedTrackId = track.identifier
+        if let playbackData = currentItem.playbackData,
+           case let .yandexTrack(rowKey) = playbackData.source {
+            // AVFoundation rejected the cached bytes during preparation. Remove them before the playlist advances, so
+            // the next play request obtains a fresh signed link instead of retrying the same corrupt cache entry.
+            BGYandexRuntime.shared.discardUnplayableFile(rowKey: rowKey)
+        }
         self.onCurrentItemFailed?(.preparation(track.error))
     }
 
