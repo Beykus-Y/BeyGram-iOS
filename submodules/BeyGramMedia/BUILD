@@ -110,6 +110,29 @@ cc_test(
     deps = [":BGMediaMixState"],
 )
 
+cc_library(
+    name = "BGMediaMixPreparation",
+    srcs = ["Sources/BGMediaMixPreparation.cpp"],
+    hdrs = [
+        "Sources/BGMediaMixPreparation.hpp",
+        "Sources/BGMediaPcmLimits.hpp",
+    ],
+    copts = ["-std=c++20"],
+    deps = [":BGMediaCore"],
+    visibility = ["//visibility:private"],
+)
+
+cc_test(
+    name = "BGMediaMixSessionTransitionTests",
+    srcs = ["Tests/BGMediaMixSessionTransitionTests.cpp"],
+    copts = ["-std=c++20"],
+    deps = [
+        ":BGMediaCore",
+        ":BGMediaMixPreparation",
+        ":BGMediaMixState",
+    ],
+)
+
 objc_library(
     name = "BGMediaAVFoundationDecoder",
     srcs = ["Sources/BGMediaAVFoundationDecoder.mm"],
