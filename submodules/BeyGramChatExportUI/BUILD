@@ -18,6 +18,7 @@ swift_library(
         "//submodules/ItemListUI:ItemListUI",
         "//submodules/PresentationDataUtils:PresentationDataUtils",
         "//submodules/AccountContext:AccountContext",
+        "//submodules/BeyGramDesign:BeyGramDesign",
         "//submodules/BeyGramChatExport:BeyGramChatExport",
         "//submodules/BeyGramChatExportTelegram:BeyGramChatExportTelegram",
         "//submodules/BeyGramKit:BeyGramKit",

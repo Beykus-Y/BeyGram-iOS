@@ -3,353 +3,331 @@ import UIKit
 import Display
 import SwiftSignalKit
 import TelegramPresentationData
-import ItemListUI
-import PresentationDataUtils
 import AccountContext
+import UniformTypeIdentifiers
+import BeyGramDesign
 import BeyGramKit
+import BeyGramMusicLibrary
 import BeyGramYandexMusic
 
-private final class BeyGramMusicCenterArguments {
-    let togglePlayPause: () -> Void
-    let nextTrack: () -> Void
-    let openMix: () -> Void
-    let openWave: () -> Void
-    let openYandex: () -> Void
-    let openMixSettings: () -> Void
+private final class BeyGramMusicCenterViewControllerImpl: BeyGramScrollViewController, UIDocumentPickerDelegate {
+    private var stateDisposable: Disposable?
+    private var musicState = BeyGramMusicSession.shared.currentState
+    private let libraryStore: BGMusicLibraryStore
 
-    init(
-        togglePlayPause: @escaping () -> Void,
-        nextTrack: @escaping () -> Void,
-        openMix: @escaping () -> Void,
-        openWave: @escaping () -> Void,
-        openYandex: @escaping () -> Void,
-        openMixSettings: @escaping () -> Void
-    ) {
-        self.togglePlayPause = togglePlayPause
-        self.nextTrack = nextTrack
-        self.openMix = openMix
-        self.openWave = openWave
-        self.openYandex = openYandex
-        self.openMixSettings = openMixSettings
+    private let waveHeroCard = BeyGramCardView(spacing: 10)
+    private let waveHeroTitle = BeyGramTypography.makeLabel(style: .title3, weight: .bold, lines: 1)
+    private let waveHeroSubtitle = BeyGramTypography.makeLabel(style: .subheadline, weight: .regular, lines: 0)
+    private let waveHeroButton = BeyGramActionButton(style: .primary)
+
+    private let sourcesHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let sourcesCard = BeyGramCardView(spacing: 0, insets: UIEdgeInsets(top: 4, left: 16, bottom: 4, right: 16))
+    private let yandexRow = BeyGramRowView()
+    private let bgMixRow = BeyGramRowView()
+    private let bgWaveRow = BeyGramRowView()
+    private let mixSettingsRow = BeyGramRowView()
+
+    private let libraryHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let libraryCard = BeyGramCardView(spacing: 10)
+    private let libraryListStack = UIStackView()
+    private let importBgMusicButton = BeyGramActionButton(style: .secondary)
+
+    private let recentHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let recentCard = BeyGramCardView(spacing: 0, insets: UIEdgeInsets(top: 4, left: 16, bottom: 4, right: 16))
+
+    private var miniPlayerBar: BeyGramMiniPlayerBar!
+
+    override init(context: AccountContext) {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let libRoot = base.appendingPathComponent("beygram/music-library/\(context.account.peerId.toInt64())", isDirectory: true)
+        self.libraryStore = BGMusicLibraryStore(rootDirectory: libRoot)
+        super.init(context: context)
+    }
+
+    deinit {
+        self.stateDisposable?.dispose()
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        self.setupUI()
+        self.stateDisposable = (BeyGramMusicSession.shared.stateSignal
+        |> deliverOnMainQueue).start(next: { [weak self] state in
+            guard let self else { return }
+            self.musicState = state
+            self.render()
+        })
+    }
+
+    private func setupUI() {
+        // My Wave Hero Card
+        self.waveHeroCard.contentStack.addArrangedSubview(self.waveHeroTitle)
+        self.waveHeroCard.contentStack.addArrangedSubview(self.waveHeroSubtitle)
+        self.waveHeroButton.addTarget(self, action: #selector(self.openYandexTapped), for: .touchUpInside)
+        self.waveHeroCard.contentStack.addArrangedSubview(self.waveHeroButton)
+        self.stackView.addArrangedSubview(self.waveHeroCard)
+
+        // Sources
+        self.stackView.addArrangedSubview(self.sourcesHeader)
+        self.sourcesCard.contentStack.addArrangedSubview(self.yandexRow)
+        self.sourcesCard.contentStack.addArrangedSubview(self.bgMixRow)
+        self.sourcesCard.contentStack.addArrangedSubview(self.bgWaveRow)
+        self.sourcesCard.contentStack.addArrangedSubview(self.mixSettingsRow)
+        self.stackView.addArrangedSubview(self.sourcesCard)
+
+        // Local Library & .bgmusic
+        self.stackView.addArrangedSubview(self.libraryHeader)
+        self.libraryListStack.axis = .vertical
+        self.libraryListStack.spacing = 0
+        self.libraryCard.contentStack.addArrangedSubview(self.libraryListStack)
+        self.importBgMusicButton.addTarget(self, action: #selector(self.importBgMusicTapped), for: .touchUpInside)
+        self.libraryCard.contentStack.addArrangedSubview(self.importBgMusicButton)
+        self.stackView.addArrangedSubview(self.libraryCard)
+
+        // Recent Tracks
+        self.stackView.addArrangedSubview(self.recentHeader)
+        self.stackView.addArrangedSubview(self.recentCard)
+
+        // Docked Mini-Player
+        self.miniPlayerBar = BeyGramMiniPlayerBar(onOpenPlayer: { [weak self] in
+            guard let self else { return }
+            (self.navigationController as? NavigationController)?.pushViewController(BeyGramNowPlayingViewController(context: self.context))
+        })
+        self.miniPlayerBar.translatesAutoresizingMaskIntoConstraints = false
+        self.displayNode.view.addSubview(self.miniPlayerBar)
+        NSLayoutConstraint.activate([
+            self.miniPlayerBar.leadingAnchor.constraint(equalTo: self.displayNode.view.leadingAnchor, constant: 12),
+            self.miniPlayerBar.trailingAnchor.constraint(equalTo: self.displayNode.view.trailingAnchor, constant: -12),
+            self.miniPlayerBar.bottomAnchor.constraint(equalTo: self.displayNode.view.safeAreaLayoutGuide.bottomAnchor, constant: -10)
+        ])
+
+        self.render()
+    }
+
+    override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
+        super.containerLayoutUpdated(layout, transition: transition)
+        let extraBottom: CGFloat = self.miniPlayerBar.isHidden ? 16 : 82
+        self.scrollView.contentInset.bottom = layout.intrinsicInsets.bottom + extraBottom
+        self.scrollView.scrollIndicatorInsets = self.scrollView.contentInset
+    }
+
+    override func applyPresentationData(_ presentationData: PresentationData) {
+        super.applyPresentationData(presentationData)
+        self.render()
+    }
+
+    private func render() {
+        let lang = self.presentationData.strings.primaryComponent.languageCode
+        let isRu = lang.lowercased().hasPrefix("ru")
+        let l10n = BeyGramL10n.shared
+        let palette = BeyGramThemePalette(theme: self.presentationData.theme)
+
+        self.title = l10n.string(.musicTitle, languageCode: lang)
+        self.miniPlayerBar?.apply(theme: self.presentationData.theme)
+
+        // Hero Card
+        self.waveHeroCard.apply(palette: palette)
+        let ymService = BGYandexRuntime.shared
+        let ymSignedIn: Bool
+        let ymAccountLabel: String
+        switch ymService.accountState {
+        case .signedOut:
+            ymSignedIn = false
+            ymAccountLabel = isRu ? "Не подключено" : "Not signed in"
+        case let .signedIn(account):
+            ymSignedIn = true
+            let plus = account.hasPlus ? " · Plus" : ""
+            ymAccountLabel = account.displayName + plus
+        }
+
+        self.waveHeroTitle.text = isRu ? "Моя волна и Музыка" : "My Wave & Music"
+        self.waveHeroTitle.textColor = palette.primaryText
+        self.waveHeroSubtitle.text = ymSignedIn
+            ? (isRu ? "Непрерывный поток рекомендаций, поиск, лайки и плейлисты Яндекс.Музыки." : "Continuous recommendations, search, likes, and playlists via Yandex Music.")
+            : (isRu ? "Подключите Яндекс.Музыку для Моей волны, поиска и текстов песен." : "Connect Yandex Music for My Wave, search, and synced lyrics.")
+        self.waveHeroSubtitle.textColor = palette.secondaryText
+        self.waveHeroButton.configure(
+            title: ymSignedIn ? (isRu ? "Открыть Мою волну" : "Open My Wave") : (isRu ? "Подключить Яндекс.Музыку" : "Connect Yandex Music"),
+            style: .primary,
+            palette: palette
+        )
+
+        // Sources
+        self.sourcesHeader.text = (isRu ? "ИСТОЧНИКИ И ПЛЕЕР" : "SOURCES & PLAYER").uppercased()
+        self.sourcesHeader.textColor = palette.secondaryText
+        self.sourcesCard.apply(palette: palette)
+
+        self.yandexRow.configure(
+            iconName: "music.quarternote.3",
+            iconTint: palette.accent,
+            title: l10n.string(.yandexTitle, languageCode: lang),
+            subtitle: ymAccountLabel,
+            showsChevron: true,
+            showSeparator: true,
+            palette: palette,
+            onTap: { [weak self] in self?.openYandexTapped() }
+        )
+
+        let queueCount = self.musicState.queue.count
+        let mixSub: String
+        if let current = self.musicState.currentTrack {
+            mixSub = current.title + (current.bpm.map { " · \($0) BPM" } ?? "")
+        } else if queueCount > 0 {
+            mixSub = isRu ? "Треков в очереди: \(queueCount)" : "\(queueCount) tracks in queue"
+        } else {
+            mixSub = isRu ? "Открыть плеер и очередь" : "Open full player & queue"
+        }
+        self.bgMixRow.configure(
+            iconName: "play.square.stack.fill",
+            iconTint: palette.accent,
+            title: l10n.string(.bgMixTitle, languageCode: lang),
+            subtitle: mixSub,
+            showsChevron: true,
+            showSeparator: true,
+            palette: palette,
+            onTap: { [weak self] in
+                guard let self else { return }
+                (self.navigationController as? NavigationController)?.pushViewController(BeyGramNowPlayingViewController(context: self.context))
+            }
+        )
+
+        self.bgWaveRow.configure(
+            iconName: "dot.radiowaves.left.and.right",
+            iconTint: palette.accent,
+            title: l10n.string(.bgWaveTitle, languageCode: lang),
+            subtitle: isRu ? "Совместное прослушивание (P2P)" : "Listen together over P2P",
+            showsChevron: true,
+            showSeparator: true,
+            palette: palette,
+            onTap: { [weak self] in
+                guard let self else { return }
+                (self.navigationController as? NavigationController)?.pushViewController(beyGramWaveController(context: self.context))
+            }
+        )
+
+        self.mixSettingsRow.configure(
+            iconName: "slider.horizontal.3",
+            iconTint: palette.secondaryText,
+            title: l10n.string(.bgMixSettingsTitle, languageCode: lang),
+            subtitle: isRu ? "Кроссфейды, Bass Swap и BG Beat" : "Crossfades, Bass Swap & BG Beat",
+            showsChevron: true,
+            showSeparator: false,
+            palette: palette,
+            onTap: { [weak self] in
+                guard let self else { return }
+                (self.navigationController as? NavigationController)?.pushViewController(beyGramMixSettingsController(context: self.context))
+            }
+        )
+
+        // Library
+        self.libraryHeader.text = (isRu ? "МЕДИАТЕКА И .BGMUSIC" : "LIBRARY & .BGMUSIC").uppercased()
+        self.libraryHeader.textColor = palette.secondaryText
+        self.libraryCard.apply(palette: palette)
+
+        for subview in self.libraryListStack.arrangedSubviews {
+            self.libraryListStack.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
+        }
+        let playlists = self.libraryStore.load().playlists
+        if playlists.isEmpty {
+            let empty = BeyGramTypography.makeLabel(style: .footnote, weight: .regular, lines: 0)
+            empty.text = isRu ? "Локальных плейлистов пока нет. Вы можете импортировать архив .bgmusic." : "No local playlists yet. You can import a .bgmusic archive."
+            empty.textColor = palette.secondaryText
+            self.libraryListStack.addArrangedSubview(empty)
+        } else {
+            for (idx, playlist) in playlists.enumerated() {
+                let row = BeyGramRowView()
+                row.configure(
+                    iconName: "music.note.list",
+                    iconTint: palette.accent,
+                    title: playlist.title,
+                    subtitle: isRu ? "Треков: \(playlist.tracks.count)" : "\(playlist.tracks.count) tracks",
+                    showSeparator: idx < playlists.count - 1,
+                    palette: palette,
+                    onTap: { [weak self] in
+                        self?.playLocalPlaylist(playlist)
+                    }
+                )
+                self.libraryListStack.addArrangedSubview(row)
+            }
+        }
+        self.importBgMusicButton.configure(
+            title: isRu ? "Импортировать .bgmusic" : "Import .bgmusic",
+            style: .secondary,
+            palette: palette
+        )
+
+        // Recent
+        self.recentHeader.text = (isRu ? "НЕДАВНИЕ ТРЕКИ" : "RECENTLY PLAYED").uppercased()
+        self.recentHeader.textColor = palette.secondaryText
+        self.recentCard.apply(palette: palette)
+        for subview in self.recentCard.contentStack.arrangedSubviews {
+            self.recentCard.contentStack.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
+        }
+        if self.musicState.recentTracks.isEmpty {
+            let row = BeyGramRowView()
+            row.configure(
+                iconName: "clock",
+                iconTint: palette.secondaryText,
+                title: l10n.string(.musicEmptyLibrary, languageCode: lang),
+                showSeparator: false,
+                palette: palette
+            )
+            self.recentCard.contentStack.addArrangedSubview(row)
+        } else {
+            let items = Array(self.musicState.recentTracks.prefix(10))
+            for (idx, track) in items.enumerated() {
+                let row = BeyGramRowView()
+                row.configure(
+                    iconName: track.status == .playing ? "speaker.wave.2.fill" : "music.note",
+                    iconTint: track.status == .playing ? palette.accent : palette.secondaryText,
+                    title: track.title,
+                    subtitle: track.artist,
+                    value: track.bpm.map { "\($0) BPM" },
+                    showsChevron: true,
+                    showSeparator: idx < items.count - 1,
+                    palette: palette,
+                    onTap: { [weak self] in
+                        guard let self else { return }
+                        (self.navigationController as? NavigationController)?.pushViewController(BeyGramNowPlayingViewController(context: self.context))
+                    }
+                )
+                self.recentCard.contentStack.addArrangedSubview(row)
+            }
+        }
+    }
+
+    private func playLocalPlaylist(_ playlist: BGMusicPlaylist) {
+        let urls = playlist.tracks.compactMap { track -> URL? in
+            let candidate = self.libraryStore.rootDirectory.appendingPathComponent(track.fileName)
+            return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
+        }
+        if !urls.isEmpty {
+            BeyGramMusicSession.shared.addTracks(urls: urls)
+            BeyGramMusicSession.shared.play()
+            (self.navigationController as? NavigationController)?.pushViewController(BeyGramNowPlayingViewController(context: self.context))
+        }
+    }
+
+    @objc private func openYandexTapped() {
+        (self.navigationController as? NavigationController)?.pushViewController(beyGramYandexMusicController(context: self.context))
+    }
+
+    @objc private func importBgMusicTapped() {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.zip, .data, .item], asCopy: true)
+        picker.delegate = self
+        self.present(picker, animated: true, completion: nil)
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        guard let url = urls.first else { return }
+        let _ = try? self.libraryStore.importPlaylist(from: url)
+        self.render()
     }
 }
 
-private enum BeyGramMusicCenterSection: Int32 {
-    case nowPlaying
-    case sources
-    case recent
-    case settings
-}
-
-private enum BeyGramMusicCenterEntryId: Hashable {
-    case fixed(Int32)
-    case recent(UInt64)
-}
-
-private enum BeyGramMusicCenterEntry: ItemListNodeEntry {
-    case nowPlayingHeader(PresentationTheme, String)
-    case nowPlayingTrack(PresentationTheme, String, String)
-    case playPauseAction(PresentationTheme, String)
-    case nextAction(PresentationTheme, String)
-
-    case sourcesHeader(PresentationTheme, String)
-    case sourceBGMix(PresentationTheme, String, String)
-    case sourceYandex(PresentationTheme, String, String)
-    case sourceBGWave(PresentationTheme, String, String)
-
-    case recentHeader(PresentationTheme, String)
-    case recentTrack(Int, PresentationTheme, UInt64, String, String)
-    case emptyLibrary(PresentationTheme, String)
-
-    case settingsHeader(PresentationTheme, String)
-    case playbackSettings(PresentationTheme, String)
-
-    var section: ItemListSectionId {
-        switch self {
-        case .nowPlayingHeader, .nowPlayingTrack, .playPauseAction, .nextAction:
-            return BeyGramMusicCenterSection.nowPlaying.rawValue
-        case .sourcesHeader, .sourceBGMix, .sourceYandex, .sourceBGWave:
-            return BeyGramMusicCenterSection.sources.rawValue
-        case .recentHeader, .recentTrack, .emptyLibrary:
-            return BeyGramMusicCenterSection.recent.rawValue
-        case .settingsHeader, .playbackSettings:
-            return BeyGramMusicCenterSection.settings.rawValue
-        }
-    }
-
-    var stableId: BeyGramMusicCenterEntryId {
-        switch self {
-        case .nowPlayingHeader: return .fixed(0)
-        case .nowPlayingTrack: return .fixed(1)
-        case .playPauseAction: return .fixed(2)
-        case .nextAction: return .fixed(3)
-        case .sourcesHeader: return .fixed(10)
-        case .sourceBGMix: return .fixed(11)
-        case .sourceYandex: return .fixed(12)
-        case .sourceBGWave: return .fixed(13)
-        case .recentHeader: return .fixed(20)
-        case .emptyLibrary: return .fixed(21)
-        case let .recentTrack(_, _, id, _, _): return .recent(id)
-        case .settingsHeader: return .fixed(1000)
-        case .playbackSettings: return .fixed(1001)
-        }
-    }
-
-    private var sortOrder: Int {
-        switch self {
-        case .nowPlayingHeader: return 0
-        case .nowPlayingTrack: return 1
-        case .playPauseAction: return 2
-        case .nextAction: return 3
-        case .sourcesHeader: return 10
-        case .sourceBGMix: return 11
-        case .sourceYandex: return 12
-        case .sourceBGWave: return 13
-        case .recentHeader: return 20
-        case .emptyLibrary: return 21
-        case let .recentTrack(index, _, _, _, _): return 100 + index
-        case .settingsHeader: return 10000
-        case .playbackSettings: return 10001
-        }
-    }
-
-    static func == (lhs: BeyGramMusicCenterEntry, rhs: BeyGramMusicCenterEntry) -> Bool {
-        switch (lhs, rhs) {
-        case let (.nowPlayingHeader(lt, lText), .nowPlayingHeader(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.nowPlayingTrack(lt, lTitle, lLabel), .nowPlayingTrack(rt, rTitle, rLabel)):
-            return lt === rt && lTitle == rTitle && lLabel == rLabel
-        case let (.playPauseAction(lt, lTitle), .playPauseAction(rt, rTitle)):
-            return lt === rt && lTitle == rTitle
-        case let (.nextAction(lt, lTitle), .nextAction(rt, rTitle)):
-            return lt === rt && lTitle == rTitle
-        case let (.sourcesHeader(lt, lText), .sourcesHeader(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.sourceBGMix(lt, lTitle, lLabel), .sourceBGMix(rt, rTitle, rLabel)):
-            return lt === rt && lTitle == rTitle && lLabel == rLabel
-        case let (.sourceYandex(lt, lTitle, lLabel), .sourceYandex(rt, rTitle, rLabel)):
-            return lt === rt && lTitle == rTitle && lLabel == rLabel
-        case let (.sourceBGWave(lt, lTitle, lLabel), .sourceBGWave(rt, rTitle, rLabel)):
-            return lt === rt && lTitle == rTitle && lLabel == rLabel
-        case let (.recentHeader(lt, lText), .recentHeader(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.recentTrack(lIdx, lt, lId, lTitle, lLabel), .recentTrack(rIdx, rt, rId, rTitle, rLabel)):
-            return lIdx == rIdx && lt === rt && lId == rId && lTitle == rTitle && lLabel == rLabel
-        case let (.emptyLibrary(lt, lText), .emptyLibrary(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.settingsHeader(lt, lText), .settingsHeader(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.playbackSettings(lt, lTitle), .playbackSettings(rt, rTitle)):
-            return lt === rt && lTitle == rTitle
-        default:
-            return false
-        }
-    }
-
-    static func < (lhs: BeyGramMusicCenterEntry, rhs: BeyGramMusicCenterEntry) -> Bool {
-        return lhs.sortOrder < rhs.sortOrder
-    }
-
-    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
-        let arguments = arguments as! BeyGramMusicCenterArguments
-        switch self {
-        case let .nowPlayingHeader(_, text),
-             let .sourcesHeader(_, text),
-             let .recentHeader(_, text),
-             let .settingsHeader(_, text):
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .nowPlayingTrack(_, title, label):
-            return ItemListDisclosureItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                icon: PresentationResourcesSettings.music,
-                title: title,
-                label: label,
-                sectionId: self.section,
-                style: .blocks,
-                action: arguments.openMix
-            )
-        case let .playPauseAction(_, title):
-            return ItemListActionItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                kind: .generic,
-                alignment: .natural,
-                sectionId: self.section,
-                style: .blocks,
-                action: arguments.togglePlayPause
-            )
-        case let .nextAction(_, title):
-            return ItemListActionItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                kind: .generic,
-                alignment: .natural,
-                sectionId: self.section,
-                style: .blocks,
-                action: arguments.nextTrack
-            )
-        case let .sourceBGMix(_, title, label):
-            return ItemListDisclosureItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                label: label,
-                sectionId: self.section,
-                style: .blocks,
-                action: arguments.openMix
-            )
-        case let .sourceYandex(_, title, label):
-            return ItemListDisclosureItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                label: label,
-                sectionId: self.section,
-                style: .blocks,
-                action: arguments.openYandex
-            )
-        case let .sourceBGWave(_, title, label):
-            return ItemListDisclosureItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                label: label,
-                sectionId: self.section,
-                style: .blocks,
-                action: arguments.openWave
-            )
-        case let .recentTrack(_, _, _, title, label):
-            return ItemListDisclosureItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                label: label,
-                sectionId: self.section,
-                style: .blocks,
-                action: arguments.openMix
-            )
-        case let .emptyLibrary(_, text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case let .playbackSettings(_, title):
-            return ItemListDisclosureItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                label: "",
-                sectionId: self.section,
-                style: .blocks,
-                action: arguments.openMixSettings
-            )
-        }
-    }
-}
-
-private func musicCenterEntries(presentationData: PresentationData, state: BeyGramMusicState) -> [BeyGramMusicCenterEntry] {
-    let lang = presentationData.strings.primaryComponent.languageCode
-    let l10n = BeyGramL10n.shared
-    let theme = presentationData.theme
-    var entries: [BeyGramMusicCenterEntry] = []
-
-    // 1. Now Playing / Mini-player
-    entries.append(.nowPlayingHeader(theme, l10n.string(.musicNowPlaying, languageCode: lang).uppercased()))
-    if let current = state.currentTrack {
-        let status = state.isPlaying ? "▶︎" : "⏸"
-        let durationText = current.duration.map { l10n.formatDuration($0) } ?? ""
-        entries.append(.nowPlayingTrack(theme, "\(status) \(current.title)", durationText))
-        entries.append(.playPauseAction(theme, state.isPlaying ? l10n.string(.musicPause, languageCode: lang) : l10n.string(.musicPlay, languageCode: lang)))
-        if state.queue.count > 1 {
-            entries.append(.nextAction(theme, l10n.string(.musicNext, languageCode: lang)))
-        }
-    } else {
-        entries.append(.nowPlayingTrack(theme, l10n.string(.musicNothingPlaying, languageCode: lang), ""))
-    }
-
-    // 2. Music Sources
-    entries.append(.sourcesHeader(theme, l10n.string(.musicSourcesTitle, languageCode: lang).uppercased()))
-    let queueLabel = state.queue.isEmpty
-        ? ""
-        : l10n.plural(.tracksCount, count: state.queue.count, languageCode: lang)
-    entries.append(.sourceBGMix(theme, l10n.string(.musicSourceBGMix, languageCode: lang), queueLabel))
-
-    let yandexConfigured = BGYandexCredentials.fromBundle().isConfigured
-    let yandexLabel = yandexConfigured ? "" : l10n.string(.commonOff, languageCode: lang)
-    entries.append(.sourceYandex(theme, l10n.string(.musicSourceYandex, languageCode: lang), yandexLabel))
-    entries.append(.sourceBGWave(theme, l10n.string(.musicSourceBGWave, languageCode: lang), l10n.string(.commonExperimental, languageCode: lang)))
-
-    // 3. Recent Tracks / Library
-    entries.append(.recentHeader(theme, l10n.string(.musicRecentTracks, languageCode: lang).uppercased()))
-    if state.recentTracks.isEmpty {
-        entries.append(.emptyLibrary(theme, l10n.string(.musicEmptyLibrary, languageCode: lang)))
-    } else {
-        for (index, track) in state.recentTracks.prefix(10).enumerated() {
-            let durationText = track.duration.map { l10n.formatDuration($0) } ?? ""
-            entries.append(.recentTrack(index, theme, track.id, track.title, durationText))
-        }
-    }
-
-    // 4. Playback Settings
-    entries.append(.settingsHeader(theme, l10n.string(.musicPlaybackSettings, languageCode: lang).uppercased()))
-    entries.append(.playbackSettings(theme, l10n.string(.bgMixSettingsTitle, languageCode: lang)))
-
-    return entries
-}
-
-private extension BeyGramStringKey {
-    static func commonConnectedOrEnabledFallback(isActive: Bool) -> BeyGramStringKey {
-        return isActive ? .commonOn : .commonOff
-    }
-}
-
-/// BeyGram Music Center: home, sources, recent tracks, mini-player controls, and playback settings.
 public func beyGramMusicSettingsController(context: AccountContext) -> ViewController {
-    var pushControllerImpl: ((ViewController) -> Void)?
-
-    let arguments = BeyGramMusicCenterArguments(
-        togglePlayPause: {
-            BeyGramMusicSession.shared.togglePlayPause()
-        },
-        nextTrack: {
-            BeyGramMusicSession.shared.next()
-        },
-        openMix: {
-            pushControllerImpl?(beyGramMixController(context: context))
-        },
-        openWave: {
-            pushControllerImpl?(beyGramWaveController(context: context))
-        },
-        openYandex: {
-            pushControllerImpl?(beyGramYandexMusicController(context: context))
-        },
-        openMixSettings: {
-            pushControllerImpl?(beyGramMixSettingsController(context: context))
-        }
-    )
-
-    let signal = combineLatest(context.sharedContext.presentationData, BeyGramMusicSession.shared.stateSignal)
-    |> deliverOnMainQueue
-    |> map { presentationData, state -> (ItemListControllerState, (ItemListNodeState, Any)) in
-        let lang = presentationData.strings.primaryComponent.languageCode
-        let controllerState = ItemListControllerState(
-            presentationData: ItemListPresentationData(presentationData),
-            title: .text(BeyGramL10n.shared.string(.musicTitle, languageCode: lang)),
-            leftNavigationButton: nil,
-            rightNavigationButton: nil,
-            backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back)
-        )
-        let listState = ItemListNodeState(
-            presentationData: ItemListPresentationData(presentationData),
-            entries: musicCenterEntries(presentationData: presentationData, state: state),
-            style: .blocks
-        )
-        return (controllerState, (listState, arguments))
-    }
-
-    let controller = ItemListController(context: context, state: signal)
-    pushControllerImpl = { [weak controller] next in
-        controller?.push(next)
-    }
-    return controller
+    return BeyGramMusicCenterViewControllerImpl(context: context)
 }

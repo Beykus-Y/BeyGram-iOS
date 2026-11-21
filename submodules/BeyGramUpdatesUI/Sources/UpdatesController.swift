@@ -3,239 +3,121 @@ import UIKit
 import Display
 import SwiftSignalKit
 import TelegramPresentationData
-import ItemListUI
-import PresentationDataUtils
 import AccountContext
+import BeyGramDesign
 import BeyGramKit
 import BeyGramUpdates
 
-private final class UpdatesState {
-    var isChecking = false
-    var result: UpdateCheckResult?
-}
+private final class UpdatesViewControllerImpl: BeyGramScrollViewController {
+    private var isChecking = false
+    private var result: UpdateCheckResult?
 
-private final class UpdatesArguments {
-    let check: () -> Void
-    let openRelease: (URL) -> Void
+    private let currentCard = BeyGramCardView(spacing: 0, insets: UIEdgeInsets(top: 4, left: 16, bottom: 4, right: 16))
+    private let versionRow = BeyGramRowView()
+    private let channelRow = BeyGramRowView()
+    private let commitRow = BeyGramRowView()
 
-    init(check: @escaping () -> Void, openRelease: @escaping (URL) -> Void) {
-        self.check = check
-        self.openRelease = openRelease
-    }
-}
+    private let actionCard = BeyGramCardView(spacing: 10)
+    private let checkButton = BeyGramActionButton(style: .primary)
+    private let statusBadge = BeyGramPillBadge()
+    private let statusLabel = BeyGramTypography.makeLabel(style: .subheadline, weight: .regular, lines: 0)
+    private let releaseButton = BeyGramActionButton(style: .secondary)
 
-private enum UpdatesSection: Int32 {
-    case current
-    case check
-    case available
-}
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        self.currentCard.contentStack.addArrangedSubview(self.versionRow)
+        self.currentCard.contentStack.addArrangedSubview(self.channelRow)
+        self.currentCard.contentStack.addArrangedSubview(self.commitRow)
+        self.stackView.addArrangedSubview(self.currentCard)
 
-private enum UpdatesEntry: ItemListNodeEntry, Equatable {
-    case currentHeader(PresentationTheme, String)
-    case infoRow(Int32, PresentationTheme, String, String)
-    case explanation(PresentationTheme, String)
-    case check(PresentationTheme, String, Bool)
-    case status(PresentationTheme, String)
-    case availableHeader(PresentationTheme, String)
-    case availableVersion(PresentationTheme, String)
-    case release(PresentationTheme, String, URL)
+        self.checkButton.addTarget(self, action: #selector(self.checkTapped), for: .touchUpInside)
+        self.releaseButton.addTarget(self, action: #selector(self.releaseTapped), for: .touchUpInside)
+        self.actionCard.contentStack.addArrangedSubview(self.checkButton)
+        self.actionCard.contentStack.addArrangedSubview(self.statusBadge)
+        self.actionCard.contentStack.addArrangedSubview(self.statusLabel)
+        self.actionCard.contentStack.addArrangedSubview(self.releaseButton)
+        self.stackView.addArrangedSubview(self.actionCard)
 
-    var section: ItemListSectionId {
-        switch self {
-        case .currentHeader, .infoRow:
-            return UpdatesSection.current.rawValue
-        case .explanation, .check, .status:
-            return UpdatesSection.check.rawValue
-        case .availableHeader, .availableVersion, .release:
-            return UpdatesSection.available.rawValue
-        }
+        self.render()
     }
 
-    var stableId: Int64 {
-        switch self {
-        case .currentHeader: return 0
-        case let .infoRow(id, _, _, _): return Int64(id)
-        case .explanation: return 10
-        case .check: return 11
-        case .status: return 12
-        case .availableHeader: return 20
-        case .availableVersion: return 21
-        case .release: return 22
-        }
+    override func applyPresentationData(_ presentationData: PresentationData) {
+        super.applyPresentationData(presentationData)
+        self.render()
     }
 
-    static func == (lhs: UpdatesEntry, rhs: UpdatesEntry) -> Bool {
-        switch (lhs, rhs) {
-        case let (.currentHeader(lt, lText), .currentHeader(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.infoRow(lId, lt, lTitle, lVal), .infoRow(rId, rt, rTitle, rVal)):
-            return lId == rId && lt === rt && lTitle == rTitle && lVal == rVal
-        case let (.explanation(lt, lText), .explanation(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.check(lt, lTitle, lEnabled), .check(rt, rTitle, rEnabled)):
-            return lt === rt && lTitle == rTitle && lEnabled == rEnabled
-        case let (.status(lt, lText), .status(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.availableHeader(lt, lText), .availableHeader(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.availableVersion(lt, lText), .availableVersion(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.release(lt, lTitle, lUrl), .release(rt, rTitle, rUrl)):
-            return lt === rt && lTitle == rTitle && lUrl == rUrl
-        default:
-            return false
-        }
-    }
-
-    static func < (lhs: UpdatesEntry, rhs: UpdatesEntry) -> Bool {
-        return lhs.stableId < rhs.stableId
-    }
-
-    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
-        let arguments = arguments as! UpdatesArguments
-        switch self {
-        case let .currentHeader(_, text), let .availableHeader(_, text):
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .infoRow(_, _, title, value):
-            return ItemListDisclosureItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                label: value,
-                sectionId: self.section,
-                style: .blocks,
-                disclosureStyle: .none,
-                action: nil
-            )
-        case let .explanation(_, text), let .status(_, text), let .availableVersion(_, text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case let .check(_, title, enabled):
-            return ItemListActionItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                kind: enabled ? .generic : .disabled,
-                alignment: .natural,
-                sectionId: self.section,
-                style: .blocks,
-                action: {
-                    if enabled { arguments.check() }
-                }
-            )
-        case let .release(_, title, url):
-            return ItemListActionItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                kind: .generic,
-                alignment: .natural,
-                sectionId: self.section,
-                style: .blocks,
-                action: {
-                    arguments.openRelease(url)
-                }
-            )
-        }
-    }
-}
-
-/// Manual update screen showing installed version/build/channel and checking GitHub Releases.
-public func beyGramUpdatesController(context: AccountContext) -> ViewController {
-    let state = UpdatesState()
-    let revision = ValuePromise<Int>(0, ignoreRepeated: false)
-    var counter = 0
-    let bump: () -> Void = {
-        counter += 1
-        revision.set(counter)
-    }
-    let info = Bundle.main.infoDictionary ?? [:]
-    let installedBuild = Int(info["CFBundleVersion"] as? String ?? "") ?? 0
-    let shortVersion = info["CFBundleShortVersionString"] as? String ?? "0.0.1"
-    let channelRaw = (info["BeyGramBuildChannel"] as? String)?.lowercased()
-    let isDev = channelRaw == "dev" || (info["CFBundleIdentifier"] as? String)?.lowercased().contains("dev") == true
-    let channel: UpdateChannel = isDev ? .dev : .release
-    let commitSha = (info["BeyGramGitCommit"] as? String) ?? (info["GitCommit"] as? String)
-
-    let arguments = UpdatesArguments(
-        check: {
-            guard !state.isChecking else { return }
-            state.isChecking = true
-            state.result = nil
-            bump()
-            Task { @MainActor in
-                state.result = await UpdateCheck.check(
-                    installedVersionName: shortVersion,
-                    installedBuildNumber: installedBuild,
-                    channel: channel
-                )
-                state.isChecking = false
-                bump()
-            }
-        },
-        openRelease: { url in
-            context.sharedContext.applicationBindings.openUrl(url.absoluteString)
-        }
-    )
-
-    let signal = combineLatest(context.sharedContext.presentationData, revision.get())
-    |> deliverOnMainQueue
-    |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
-        let lang = presentationData.strings.primaryComponent.languageCode
+    private func render() {
+        let lang = self.presentationData.strings.primaryComponent.languageCode
         let l10n = BeyGramL10n.shared
-        let theme = presentationData.theme
+        let palette = BeyGramThemePalette(theme: self.presentationData.theme)
 
-        var entries: [UpdatesEntry] = [
-            .currentHeader(theme, l10n.string(.updatesSectionCurrent, languageCode: lang).uppercased()),
-            .infoRow(1, theme, l10n.string(.updatesVersion, languageCode: lang), shortVersion),
-            .infoRow(2, theme, l10n.string(.updatesBuild, languageCode: lang), "\(installedBuild)"),
-            .infoRow(3, theme, l10n.string(.updatesChannel, languageCode: lang), isDev ? l10n.string(.updatesChannelDev, languageCode: lang) : l10n.string(.updatesChannelRelease, languageCode: lang))
-        ]
-        if isDev, let sha = commitSha, !sha.isEmpty {
-            entries.append(.infoRow(4, theme, l10n.string(.updatesCommit, languageCode: lang), String(sha.prefix(8))))
-        }
+        self.title = l10n.string(.updatesTitle, languageCode: lang)
+        self.currentCard.apply(palette: palette)
 
-        let checkTitle = state.isChecking
-            ? l10n.string(.updatesChecking, languageCode: lang)
-            : l10n.string(.updatesCheckButton, languageCode: lang)
-        entries.append(.check(theme, checkTitle, !state.isChecking))
-        entries.append(.explanation(theme, l10n.string(.updatesManualNote, languageCode: lang)))
+        self.versionRow.configure(title: l10n.string(.updatesCurrentVersion, languageCode: lang), value: BeyGramBuildInfo.currentVersionLabel(), showSeparator: true, palette: palette)
+        self.channelRow.configure(title: l10n.string(.updatesCurrentChannel, languageCode: lang), value: BeyGramBuildInfo.channelName(), showSeparator: true, palette: palette)
+        self.commitRow.configure(title: l10n.string(.updatesCurrentCommit, languageCode: lang), value: BeyGramBuildInfo.shortCommit(), showSeparator: false, palette: palette)
 
-        if !state.isChecking {
-            switch state.result {
-            case nil:
-                break
-            case .upToDate?, .noReleases?:
-                entries.append(.status(theme, l10n.string(.updatesUpToDate, languageCode: lang)))
-            case let .available(updateInfo)?:
-                entries.append(.availableHeader(theme, l10n.string(.updatesAvailableTitle, languageCode: lang).uppercased()))
-                var versionSummary = l10n.format(.updatesAvailableVersion, languageCode: lang, "\(updateInfo.versionName) (\(updateInfo.buildNumber))")
-                if let sha = updateInfo.commitSha, !sha.isEmpty {
-                    versionSummary += " · \(String(sha.prefix(8)))"
-                }
-                if let changelog = updateInfo.changelog, !changelog.isEmpty {
-                    versionSummary += "\n\n\(changelog)"
-                }
-                entries.append(.availableVersion(theme, versionSummary))
-                entries.append(.release(theme, l10n.string(.updatesOpenRelease, languageCode: lang), updateInfo.releaseURL))
-            case .failed?:
-                entries.append(.status(theme, l10n.format(.updatesErrorPrefix, languageCode: lang, l10n.string(.commonError, languageCode: lang))))
+        self.actionCard.apply(palette: palette)
+        self.checkButton.configure(
+            title: l10n.string(.updatesCheckAction, languageCode: lang),
+            style: .primary,
+            palette: palette,
+            isLoading: self.isChecking,
+            isEnabled: !self.isChecking
+        )
+
+        self.statusBadge.isHidden = true
+        self.statusLabel.isHidden = false
+        self.releaseButton.isHidden = true
+
+        if self.isChecking {
+            self.statusLabel.text = l10n.string(.updatesStatusChecking, languageCode: lang)
+            self.statusLabel.textColor = palette.secondaryText
+        } else if let result = self.result {
+            switch result {
+            case .upToDate:
+                self.statusBadge.isHidden = false
+                self.statusBadge.configure(text: l10n.string(.updatesStatusUpToDate, languageCode: lang), textColor: palette.success, backgroundColor: palette.successSoft)
+                self.statusLabel.isHidden = true
+            case let .available(info):
+                self.statusBadge.isHidden = false
+                self.statusBadge.configure(text: l10n.string(.updatesAvailableHeader, languageCode: lang), textColor: palette.accent, backgroundColor: palette.accentSoft)
+                self.statusLabel.text = info.version
+                self.statusLabel.textColor = palette.primaryText
+                self.releaseButton.isHidden = false
+                self.releaseButton.configure(title: l10n.string(.updatesOpenRelease, languageCode: lang), style: .secondary, palette: palette)
+            case let .failed(message):
+                self.statusBadge.isHidden = false
+                self.statusBadge.configure(text: l10n.string(.commonError, languageCode: lang), textColor: palette.destructive, backgroundColor: palette.destructiveSoft)
+                self.statusLabel.text = l10n.string(.updatesStatusFailed(message), languageCode: lang)
+                self.statusLabel.textColor = palette.destructive
             }
+        } else {
+            self.statusLabel.text = l10n.string(.updatesManualExplanation, languageCode: lang)
+            self.statusLabel.textColor = palette.secondaryText
         }
-
-        let controllerState = ItemListControllerState(
-            presentationData: ItemListPresentationData(presentationData),
-            title: .text(l10n.string(.updatesTitle, languageCode: lang)),
-            leftNavigationButton: nil,
-            rightNavigationButton: nil,
-            backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back)
-        )
-        let listState = ItemListNodeState(
-            presentationData: ItemListPresentationData(presentationData),
-            entries: entries,
-            style: .blocks
-        )
-        return (controllerState, (listState, arguments))
     }
 
-    return ItemListController(context: context, state: signal)
+    @objc private func checkTapped() {
+        guard !self.isChecking else { return }
+        self.isChecking = true
+        self.render()
+        Task { @MainActor in
+            let manifestURL = BeyGramBuildInfo.channelName() == "dev" ? UpdateManifestSource.devURL : UpdateManifestSource.releaseURL
+            self.result = await UpdateChecker().check(manifestURL: manifestURL, currentVersion: BeyGramBuildInfo.currentVersionLabel())
+            self.isChecking = false
+            self.render()
+        }
+    }
+
+    @objc private func releaseTapped() {
+        if case let .available(info) = self.result {
+            UIApplication.shared.open(info.releasePageURL)
+        }
+    }
+}
+
+public func beyGramUpdatesController(context: AccountContext) -> ViewController {
+    return UpdatesViewControllerImpl(context: context)
 }
