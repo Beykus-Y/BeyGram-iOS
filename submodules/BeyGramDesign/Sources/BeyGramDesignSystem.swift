@@ -410,6 +410,7 @@ open class BeyGramScrollViewController: ViewController {
     public let scrollView = UIScrollView()
     public let stackView = UIStackView()
     private var presentationDisposable: Disposable?
+    private var didSetInitialScrollOffset: Bool = false
     public private(set) var presentationData: PresentationData
 
     public init(context: AccountContext) {
@@ -432,8 +433,13 @@ open class BeyGramScrollViewController: ViewController {
         super.viewDidLoad()
         self.scrollView.alwaysBounceVertical = true
         self.scrollView.keyboardDismissMode = .interactive
+        self.scrollView.contentInsetAdjustmentBehavior = .never
         self.scrollView.translatesAutoresizingMaskIntoConstraints = false
-        self.displayNode.view.addSubview(self.scrollView)
+        if let navView = self.navigationBar?.view {
+            self.displayNode.view.insertSubview(self.scrollView, belowSubview: navView)
+        } else {
+            self.displayNode.view.insertSubview(self.scrollView, at: 0)
+        }
 
         self.stackView.axis = .vertical
         self.stackView.spacing = 14.0
@@ -465,8 +471,13 @@ open class BeyGramScrollViewController: ViewController {
     open override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)
         let topInset = self.navigationLayout(layout: layout).navigationFrame.maxY
-        self.scrollView.contentInset = UIEdgeInsets(top: topInset, left: 0, bottom: layout.intrinsicInsets.bottom + 16, right: 0)
+        let bottomInset = layout.intrinsicInsets.bottom + 16
+        self.scrollView.contentInset = UIEdgeInsets(top: topInset, left: layout.safeInsets.left, bottom: bottomInset, right: layout.safeInsets.right)
         self.scrollView.scrollIndicatorInsets = self.scrollView.contentInset
+        if !self.didSetInitialScrollOffset {
+            self.didSetInitialScrollOffset = true
+            self.scrollView.contentOffset = CGPoint(x: 0, y: -topInset)
+        }
     }
 
     open override var keyCommands: [UIKeyCommand]? {
