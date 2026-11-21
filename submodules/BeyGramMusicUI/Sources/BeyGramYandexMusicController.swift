@@ -9,21 +9,6 @@ import AccountContext
 import BeyGramKit
 import BeyGramYandexMusic
 
-private final class BeyGramYandexServiceStore {
-    static let shared = BeyGramYandexServiceStore()
-
-    let service: BGYandexService
-
-    private init() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        self.service = BGYandexService(
-            credentials: BGYandexCredentials.fromBundle(),
-            cacheDirectory: base.appendingPathComponent("beygram/yandex", isDirectory: true)
-        )
-    }
-}
-
 private enum BeyGramYandexSectionKind {
     case search
     case likes
@@ -320,7 +305,7 @@ private func beyGramYandexEntries(presentationData: PresentationData, state: Bey
 
 /// Yandex Music source connection, authorization, and live backend sections.
 public func beyGramYandexMusicController(context: AccountContext) -> ViewController {
-    let service = BeyGramYandexServiceStore.shared.service
+    let service = BGYandexRuntime.shared
     let consent = BGYandexConsent(defaults: .standard)
 
     var initialName: String?
