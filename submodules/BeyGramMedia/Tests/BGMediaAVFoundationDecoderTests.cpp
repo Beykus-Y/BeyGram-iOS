@@ -1,5 +1,3 @@
-#import <Foundation/Foundation.h>
-
 #include "submodules/BeyGramMedia/Sources/BGMediaAVFoundationDecoder.hpp"
 
 #include <cmath>
@@ -91,9 +89,9 @@ void testM4ADecodeAndWrongExtension(const std::filesystem::path& dir) {
     const auto m4aPath = dir / "tone.m4a";
     writeTestWav(wavPath, 44100, 44100);
 
-    NSString *cmd = [NSString stringWithFormat:@"/usr/bin/afconvert -f m4af -d aac '%s' '%s'",
-                                               wavPath.c_str(), m4aPath.c_str()];
-    const int status = std::system(cmd.UTF8String);
+    const std::string cmd =
+        "/usr/bin/afconvert -f m4af -d aac '" + wavPath.string() + "' '" + m4aPath.string() + "'";
+    const int status = std::system(cmd.c_str());
     CHECK(status == 0);
     if (status != 0) {
         return;
@@ -176,20 +174,18 @@ void testCheckpointCancellationPropagates(const std::filesystem::path& dir) {
 } // namespace
 
 int main() {
-    @autoreleasepool {
-        const auto dir = std::filesystem::temp_directory_path() / "bgmedia_avf_decoder_tests";
-        std::error_code ec;
-        std::filesystem::remove_all(dir, ec);
-        std::filesystem::create_directories(dir, ec);
+    const auto dir = std::filesystem::temp_directory_path() / "bgmedia_avf_decoder_tests";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
 
-        testWavDecodeAndEOF(dir);
-        testM4ADecodeAndWrongExtension(dir);
-        testCorruptFileRedactedDiagnostic(dir);
-        testPcmLimitRefused(dir);
-        testCheckpointCancellationPropagates(dir);
+    testWavDecodeAndEOF(dir);
+    testM4ADecodeAndWrongExtension(dir);
+    testCorruptFileRedactedDiagnostic(dir);
+    testPcmLimitRefused(dir);
+    testCheckpointCancellationPropagates(dir);
 
-        std::filesystem::remove_all(dir, ec);
-    }
+    std::filesystem::remove_all(dir, ec);
     if (gFailures > 0) {
         std::fprintf(stderr, "BGMediaAVFoundationDecoderTests: %d failure(s)\n", gFailures);
         return 1;
