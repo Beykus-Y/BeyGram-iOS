@@ -5,6 +5,12 @@ import Foundation
 public final class BeyGramStealthStore: @unchecked Sendable {
     public static let shared = BeyGramStealthStore(defaults: UserDefaults.standard)
 
+    /// Posted after the settings of one account have changed. It is posted from the thread that made the change, after the
+    /// store's lock is released. `userInfo[BeyGramStealthStore.accountPeerIdUserInfoKey]` holds the account's peer id as an
+    /// `Int64`. Presence listens, so "hide online" applies at once and not at the next presence change.
+    public static let didChangeNotification = Notification.Name("BeyGramStealthStore.didChange")
+    public static let accountPeerIdUserInfoKey = "accountPeerId"
+
     private let defaults: UserDefaults
     private let lock = NSLock()
     private var cache: [Int64: BeyGramStealthSettings] = [:]
@@ -28,14 +34,17 @@ public final class BeyGramStealthStore: @unchecked Sendable {
 
     public func update(accountPeerId: Int64, _ transform: (inout BeyGramStealthSettings) -> Void) {
         self.lock.lock()
-        defer {
-            self.lock.unlock()
-        }
-        var settings = self.cache[accountPeerId] ?? BeyGramStealthStore.load(defaults: self.defaults, accountPeerId: accountPeerId)
+        let previous = self.cache[accountPeerId] ?? BeyGramStealthStore.load(defaults: self.defaults, accountPeerId: accountPeerId)
+        var settings = previous
         transform(&settings)
         self.cache[accountPeerId] = settings
         if let data = try? JSONEncoder().encode(settings) {
             self.defaults.set(data, forKey: BeyGramStealthStore.storageKey(accountPeerId: accountPeerId))
+        }
+        self.lock.unlock()
+        // Posted after the unlock: an observer may read the settings at once without waiting on this lock.
+        if settings != previous {
+            NotificationCenter.default.post(name: BeyGramStealthStore.didChangeNotification, object: nil, userInfo: [BeyGramStealthStore.accountPeerIdUserInfoKey: accountPeerId])
         }
     }
 

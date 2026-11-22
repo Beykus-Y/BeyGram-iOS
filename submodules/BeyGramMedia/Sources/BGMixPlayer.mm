@@ -269,6 +269,7 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     _engine = std::make_unique<bgmedia::mix::MixEngine>(kSampleRate);
     self.observers = [NSHashTable weakObjectsHashTable];
     self.notificationTokens = [NSMutableArray array];
+    self.managesAudioSession = YES;
 
     beygram::media::MixPreparationOptions options;
     options.cacheDirectory = std::filesystem::path(cacheDirectory.UTF8String ?: "");
@@ -397,18 +398,20 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     return beygram::media::transportOf(_session->snapshot().engine) == beygram::media::MixTransport::Playing;
 }
 
-// Activates the audio session and starts the engine unless they run already. Returns NO, with audioError
-// set, when the system refuses; the mix then does not start.
+// Activates the audio session (unless the session manager does, see managesAudioSession) and starts the engine
+// unless they run already. Returns NO, with audioError set, when the system refuses; the mix then does not start.
 - (BOOL)ensureEngineRunning {
     if (self.audioEngine.isRunning) {
         return YES;
     }
-    AVAudioSession *session = [AVAudioSession sharedInstance];
     NSError *error = nil;
-    if (![session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:&error] ||
-        ![session setActive:YES error:&error]) {
-        self.audioError = error.localizedDescription ?: @"The audio session is not available.";
-        return NO;
+    if (self.managesAudioSession) {
+        AVAudioSession *session = [AVAudioSession sharedInstance];
+        if (![session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:&error] ||
+            ![session setActive:YES error:&error]) {
+            self.audioError = error.localizedDescription ?: @"The audio session is not available.";
+            return NO;
+        }
     }
     [self.audioEngine prepare];
     if (![self.audioEngine startAndReturnError:&error]) {
@@ -515,7 +518,8 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     const BOOL systemAllowsResume = (options.unsignedIntegerValue & AVAudioSessionInterruptionOptionShouldResume) != 0;
     const BOOL resume = beygram::media::resumesAfterInterruption(self.resumeAfterInterruption, systemAllowsResume);
     self.resumeAfterInterruption = NO;
-    if (resume) {
+    // A session owned by the app's session manager is resumed by its owner, not here.
+    if (resume && self.managesAudioSession) {
         [self play];
     }
 }
@@ -633,6 +637,15 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
         _session->pause();
     }
     [self stateChanged];
+}
+
+// The session manager calls this when it takes the session away: the mix pauses and the engine stops, so that
+// no engine keeps running on a session that is no longer ours.
+- (void)stopEngine {
+    [self pause];
+    if (self.audioEngine.isRunning) {
+        [self.audioEngine stop];
+    }
 }
 
 - (void)next {

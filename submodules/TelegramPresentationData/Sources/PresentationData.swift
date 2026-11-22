@@ -10,6 +10,7 @@ import AppBundle
 import Sunrise
 import PresentationStrings
 import BeyGramAppearance
+import BeyGramKit
 
 public struct PresentationDateTimeFormat: Equatable {
     public let timeFormat: PresentationTimeFormat
@@ -440,6 +441,7 @@ public func currentPresentationDataAndSettings(accountManager: AccountManager<Te
         } else {
             stringsValue = defaultPresentationStrings
         }
+        BeyGramL10n.shared.setLanguageCode(stringsValue.primaryComponent.languageCode)
         let nameDisplayOrder = contactSettings.nameDisplayOrder
         let nameSortOrder = currentPersonNameSortOrder()
         
@@ -863,6 +865,7 @@ public func updatedPresentationData(accountManager: AccountManager<TelegramAccou
                         } else {
                             stringsValue = defaultPresentationStrings
                         }
+                        BeyGramL10n.shared.setLanguageCode(stringsValue.primaryComponent.languageCode)
                         let nameDisplayOrder = contactSettings.nameDisplayOrder
                         let nameSortOrder = currentPersonNameSortOrder()
                         
@@ -892,6 +895,7 @@ private func bubblelessPresentationData(mediaBox: MediaBox, themeSettings: Prese
     } else {
         stringsValue = defaultPresentationStrings
     }
+    BeyGramL10n.shared.setLanguageCode(stringsValue.primaryComponent.languageCode)
     let nameSortOrder = currentPersonNameSortOrder()
     
     let (chatFontSize, listsFontSize) = resolveFontSize(settings: themeSettings)

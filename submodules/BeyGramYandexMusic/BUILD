@@ -19,6 +19,9 @@ swift_test(
     name = "BeyGramYandexMusicTests",
     srcs = [
         "Tests/BGYandexTests.swift",
+        "Tests/BGYandexAudioCheckTests.swift",
+        "Tests/BGYandexTrackInfoTests.swift",
+        "Tests/BGYandexWaveQueueTests.swift",
     ],
     deps = [
         ":BeyGramYandexMusic",

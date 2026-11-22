@@ -21,7 +21,9 @@ class BuildConfiguration:
         premium_iap_product_id,
         enable_siri,
         enable_icloud,
-        display_name='BeyGram'
+        display_name='BeyGram',
+        yandex_music_client_id='',
+        yandex_music_client_secret=''
     ):
         self.bundle_id = bundle_id
         self.api_id = api_id
@@ -35,6 +37,8 @@ class BuildConfiguration:
         self.enable_siri = enable_siri
         self.enable_icloud = enable_icloud
         self.display_name = display_name
+        self.yandex_music_client_id = yandex_music_client_id
+        self.yandex_music_client_secret = yandex_music_client_secret
 
     def write_to_variables_file(self, bazel_path, use_xcode_managed_codesigning, aps_environment, path):
         string = ''
@@ -54,6 +58,10 @@ class BuildConfiguration:
         string += 'telegram_enable_siri = {}\n'.format(self.enable_siri)
         string += 'telegram_enable_icloud = {}\n'.format(self.enable_icloud)
         string += 'telegram_enable_watch = True\n'
+        safe_yandex_id = str(self.yandex_music_client_id or '').replace('\\', '\\\\').replace('"', '\\"')
+        safe_yandex_secret = str(self.yandex_music_client_secret or '').replace('\\', '\\\\').replace('"', '\\"')
+        string += 'beygram_yandex_client_id = "{}"\n'.format(safe_yandex_id)
+        string += 'beygram_yandex_client_secret = "{}"\n'.format(safe_yandex_secret)
 
         if os.path.exists(path):
             os.remove(path)
@@ -83,6 +91,26 @@ def build_configuration_from_json(path):
         for key in required_keys:
             if key not in configuration_dict:
                 print('Configuration at {} does not contain {}'.format(path, key))
+        yandex_id = str(configuration_dict.get('yandex_music_client_id') or os.environ.get('BGYANDEX_CLIENT_ID') or '').strip()
+        yandex_secret = str(configuration_dict.get('yandex_music_client_secret') or os.environ.get('BGYANDEX_CLIENT_SECRET') or '').strip()
+        if not yandex_id or not yandex_secret:
+            candidate_secret_paths = [
+                os.path.join(os.path.dirname(os.path.abspath(path)), 'secrets.json'),
+                os.path.expanduser('~/beygram-local/secrets.json')
+            ]
+            for secrets_path in candidate_secret_paths:
+                if os.path.isfile(secrets_path):
+                    try:
+                        with open(secrets_path) as secrets_file:
+                            secrets_dict = json.load(secrets_file)
+                        if not yandex_id:
+                            yandex_id = str(secrets_dict.get('yandexMusicClientId') or '').strip()
+                        if not yandex_secret:
+                            yandex_secret = str(secrets_dict.get('yandexMusicClientSecret') or '').strip()
+                    except Exception:
+                        pass
+                    if yandex_id and yandex_secret:
+                        break
         return BuildConfiguration(
             bundle_id=configuration_dict['bundle_id'],
             api_id=configuration_dict['api_id'],
@@ -95,7 +123,9 @@ def build_configuration_from_json(path):
             premium_iap_product_id=configuration_dict['premium_iap_product_id'],
             enable_siri=configuration_dict['enable_siri'],
             enable_icloud=configuration_dict['enable_icloud'],
-            display_name=configuration_dict.get('display_name', 'BeyGram')
+            display_name=configuration_dict.get('display_name', 'BeyGram'),
+            yandex_music_client_id=yandex_id,
+            yandex_music_client_secret=yandex_secret
         )
 
 
