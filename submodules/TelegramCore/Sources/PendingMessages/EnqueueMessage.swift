@@ -785,14 +785,26 @@ public func enqueueMessages(account: Account, peerId: PeerId, messages: [Enqueue
     }
     return signal
     |> mapToSignal { transformed -> Signal<[MessageId?], NoError> in
-        let nowSeconds = Int32(account.network.globalTime)
-        switch beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, nowSeconds: nowSeconds, messages: transformed.map { $0.1 }) {
-        case let .send(batch, stealthDelays: stealthDelays):
-            // The batch keeps the order and the count of the transformed messages, so each message keeps its media flag.
-            let prepared = zip(transformed, batch).map { pair -> (Bool, EnqueueMessage) in (pair.0.0, pair.1) }
-            return enqueueTransformedMessages(account: account, peerId: peerId, messages: prepared, stealthDelays: stealthDelays, nowSeconds: nowSeconds)
-        case let .refused(refusal):
-            return enqueueTransformedRefusedMessages(account: account, peerId: peerId, messages: transformed, refusal: refusal, nowSeconds: nowSeconds)
+        // A channel's direct messages are read from the peer in a transaction. Any other chat needs no lookup.
+        let directMessages: Signal<Bool, NoError>
+        if peerId.namespace == Namespaces.Peer.CloudChannel {
+            directMessages = account.postbox.transaction { transaction -> Bool in
+                return beyGramStealthIsDirectMessages(transaction: transaction, peerId: peerId)
+            }
+        } else {
+            directMessages = .single(false)
+        }
+        return directMessages
+        |> mapToSignal { chatIsDirectMessages -> Signal<[MessageId?], NoError> in
+            let nowSeconds = Int32(account.network.globalTime)
+            switch beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, chatIsDirectMessages: chatIsDirectMessages, nowSeconds: nowSeconds, messages: transformed.map { $0.1 }) {
+            case let .send(batch, stealthDelays: stealthDelays):
+                // The batch keeps the order and the count of the transformed messages, so each message keeps its media flag.
+                let prepared = zip(transformed, batch).map { pair -> (Bool, EnqueueMessage) in (pair.0.0, pair.1) }
+                return enqueueTransformedMessages(account: account, peerId: peerId, messages: prepared, stealthDelays: stealthDelays, nowSeconds: nowSeconds)
+            case let .refused(refusal):
+                return enqueueTransformedRefusedMessages(account: account, peerId: peerId, messages: transformed, refusal: refusal, nowSeconds: nowSeconds)
+            }
         }
     }
 }
@@ -926,7 +938,7 @@ public func resendMessages(account: Account, messageIds: [MessageId], sendNowCon
             }
             // A resend follows the rules of a new send. A batch that cannot be scheduled stays failed, and is not deleted: each of its
             // messages now carries the reason of this resend.
-            let resendBatch: BeyGramStealthBatch = sendNowConsent ? .send(messages, stealthDelays: Array<Int32?>(repeating: nil, count: messages.count)) : beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, nowSeconds: nowSeconds, messages: messages)
+            let resendBatch: BeyGramStealthBatch = sendNowConsent ? .send(messages, stealthDelays: Array<Int32?>(repeating: nil, count: messages.count)) : beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, chatIsDirectMessages: beyGramStealthIsDirectMessages(transaction: transaction, peerId: peerId), nowSeconds: nowSeconds, messages: messages)
             if case let .refused(refusal) = resendBatch {
                 for id in peerRemoveMessageIds {
                     BeyGramStealthRefusalRegistry.shared.record(accountPeerId: account.peerId.toInt64(), messageKey: beyGramStealthMessageKey(id), refusal: refusal, nowSeconds: nowSeconds)

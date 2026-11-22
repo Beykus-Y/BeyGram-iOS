@@ -55,6 +55,15 @@ final class BeyGramStealthTests: XCTestCase {
         XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: .paidStars, nowSeconds: 1000), .refused(.paidStars))
     }
 
+    func testViewOnceAndDirectMessagesAreRefusedAndNameTheirReason() {
+        let settings = BeyGramStealthSettings(serverScheduledSend: true, scheduledSendDelaySeconds: 30)
+        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: .viewOnceOrLiveLocation, nowSeconds: 1000), .refused(.viewOnceOrLiveLocation))
+        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: .directMessages, nowSeconds: 1000), .refused(.directMessages))
+        // The raw values are stored with refused messages, so they must not change.
+        XCTAssertEqual(BeyGramStealthRefusal.viewOnceOrLiveLocation.rawValue, "viewOnceOrLiveLocation")
+        XCTAssertEqual(BeyGramStealthRefusal.directMessages.rawValue, "directMessages")
+    }
+
     func testShortLeadIsRefusedAndNamesItsReason() {
         let settings = BeyGramStealthSettings(serverScheduledSend: true, scheduledSendDelaySeconds: 10)
         XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: nil, nowSeconds: 1000), .refused(.leadTooShort))

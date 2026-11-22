@@ -55,6 +55,8 @@ decides how a waiting message is shown.
 |---|---|---|---|---|---|
 | Secret chat | `secretChat` | the chat is a secret chat | `BeyGram.Stealth.Refusal.SecretChat` | Отложенная отправка недоступна в секретных чатах. Отправьте сообщение сейчас или удалите его. | Stealth sending is not available in secret chats. Send the message now or delete it. |
 | Paid message | `paidStars` | the message is paid (Stars) | `BeyGram.Stealth.Refusal.PaidStars` | Платное сообщение нельзя отправить по расписанию. Отправьте его сейчас или удалите. | A paid message cannot be sent on a schedule. Send it now or delete it. |
+| View-once or live location | `viewOnceOrLiveLocation` | a view-once message, or a live location | `BeyGram.Stealth.Refusal.ViewOnceOrLiveLocation` | Одноразовые медиа и трансляцию геопозиции нельзя отправить по расписанию. Отправьте их сейчас или удалите. | View-once media and live location cannot be sent on a schedule. Send them now or delete them. |
+| Channel direct messages | `directMessages` | the chat is the direct messages of a channel (a monoforum) | `BeyGram.Stealth.Refusal.DirectMessages` | В личных сообщениях канала отложенная отправка недоступна. Отправьте сообщение сейчас или удалите его. | Stealth sending is not available in channel direct messages. Send the message now or delete it. |
 | Short lead | `leadTooShort` | the chosen delay is under 15 s | `BeyGram.Stealth.Refusal.LeadTooShort` | Задержка меньше 15 секунд: Telegram опубликовал бы сообщение сразу. Выберите задержку не меньше 15 секунд и отправьте снова. | The delay is under 15 seconds, so Telegram would publish the message at once. Choose a delay of at least 15 seconds and send again. |
 | Ephemeral | `ephemeral` | an ephemeral (bot) send | `BeyGram.Stealth.Refusal.Ephemeral` | Для этого сообщения отложенная отправка недоступна. Отправьте его сейчас или удалите. | Stealth sending is not available for this message. Send it now or delete it. |
 | Not recorded | `notRecorded` | the scheduled date could not be recorded | `BeyGram.Stealth.Refusal.NotRecorded` | Не удалось подготовить отложенную отправку, сообщение не отправлено. Попробуйте снова. | The delayed send could not be prepared, so the message was not sent. Try again. |
@@ -92,8 +94,8 @@ their settings.
 
 - Thread and topic reads (`readDiscussion`, `readSavedHistory`) follow the read-receipt rule of the chat they belong to. With the rule on, nothing is sent, and the local read state still changes. The UI shows nothing new for this.
 - The local delayed send is a model, not wired to dispatch or to a screen (section 10). The UI must not offer a delay that happens on the device until it is wired.
-- Secret chats and paid messages are refused, not scheduled. View-once media and live locations are not refused yet (Android
-  refuses them). Channel direct messages (monoforums) are not refused yet.
+- Secret chats, paid messages, view-once media, live locations and channel direct messages are refused, not scheduled. Android
+  also refuses a chat with its own paid price; iOS checks only the Stars attribute of a message, which is not verified for such chats.
 - A reason is keyed by the local message id, which Postbox can reuse after a deletion. Show a stealth dialog only for a message
   that is failed now.
 - What a waiting message does across a force quit is not verified on a device.

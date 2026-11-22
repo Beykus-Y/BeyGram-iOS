@@ -17,7 +17,7 @@ enum BeyGramStealthBatch {
 /// message scheduled by hand, so the send pipeline stores it in the scheduled namespace from the start, and the
 /// server's reply cannot show it twice. The date given here is provisional: it is set again when the request is built
 /// (`beyGramStealthAtDispatch`), after the media is uploaded.
-func beyGramStealthBatch(accountPeerId: PeerId, peerId: PeerId, nowSeconds: Int32, messages: [EnqueueMessage]) -> BeyGramStealthBatch {
+func beyGramStealthBatch(accountPeerId: PeerId, peerId: PeerId, chatIsDirectMessages: Bool, nowSeconds: Int32, messages: [EnqueueMessage]) -> BeyGramStealthBatch {
     var result: [EnqueueMessage] = []
     result.reserveCapacity(messages.count)
     var stealthDelays: [Int32?] = []
@@ -26,7 +26,15 @@ func beyGramStealthBatch(accountPeerId: PeerId, peerId: PeerId, nowSeconds: Int3
     let chatCanBeScheduled = peerId.namespace != Namespaces.Peer.SecretChat
     for message in messages {
         var explicitScheduleTime: Int32? = nil
-        var unschedulableReason: BeyGramStealthRefusal? = chatCanBeScheduled ? nil : BeyGramStealthRefusal.secretChat
+        // The reasons come in Android's order (TdStealthScheduler.resolve): the content first, then the chat, then the payment.
+        var unschedulableReason: BeyGramStealthRefusal? = nil
+        if beyGramStealthHasUnschedulableContent(message) {
+            unschedulableReason = .viewOnceOrLiveLocation
+        } else if !chatCanBeScheduled {
+            unschedulableReason = .secretChat
+        } else if chatIsDirectMessages {
+            unschedulableReason = .directMessages
+        }
         for attribute in message.attributes {
             if let scheduleAttribute = attribute as? OutgoingScheduleInfoMessageAttribute {
                 explicitScheduleTime = scheduleAttribute.scheduleTime
@@ -56,6 +64,31 @@ func beyGramStealthBatch(accountPeerId: PeerId, peerId: PeerId, nowSeconds: Int3
         }
     }
     return .send(result, stealthDelays: stealthDelays)
+}
+
+/// Whether Telegram cannot schedule the content of a message: view-once media, or a live location. A view-once message carries
+/// the timer `viewOnceTimeout`, as the message store reads it; a live location is a map with a broadcasting period.
+private func beyGramStealthHasUnschedulableContent(_ message: EnqueueMessage) -> Bool {
+    for attribute in message.attributes {
+        if let timer = attribute as? AutoclearTimeoutMessageAttribute, timer.timeout == viewOnceTimeout {
+            return true
+        }
+        if let timer = attribute as? AutoremoveTimeoutMessageAttribute, timer.timeout == viewOnceTimeout {
+            return true
+        }
+    }
+    if case let .message(_, _, _, mediaReference, _, _, _, _, _, _) = message, let media = mediaReference?.media, let map = media as? TelegramMediaMap, map.liveBroadcastingTimeout != nil {
+        return true
+    }
+    return false
+}
+
+/// Whether `peerId` is the direct messages of a channel (a monoforum), read in `transaction`. Only a channel can be one.
+func beyGramStealthIsDirectMessages(transaction: Transaction, peerId: PeerId) -> Bool {
+    guard peerId.namespace == Namespaces.Peer.CloudChannel, let channel = transaction.getPeer(peerId) as? TelegramChannel else {
+        return false
+    }
+    return channel.flags.contains(.isMonoforum)
 }
 
 /// Marks a message that `transaction` has just stored as failed. A failed message is not pending, so the pending manager
