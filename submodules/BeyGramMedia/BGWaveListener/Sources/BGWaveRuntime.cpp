@@ -79,6 +79,10 @@ bw::WaveSessionState BGWaveRuntime::state() const noexcept {
     return session_->state();
 }
 
+bw::WaveTransportRoute BGWaveRuntime::route() const noexcept {
+    return session_->route();
+}
+
 WaveFailureKind BGWaveRuntime::failureKind() const {
     return classifyWaveFailure(session_->state(),
                                transport_->state(),

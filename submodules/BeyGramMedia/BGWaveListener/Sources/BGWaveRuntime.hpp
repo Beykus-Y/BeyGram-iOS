@@ -64,6 +64,8 @@ public:
     [[nodiscard]] bgmedia::IPcmOutputTap& hostTap() noexcept { return tap_; }
 
     [[nodiscard]] bgmedia::wave::WaveSessionState state() const noexcept;
+    // The transport route of the session, as the facade reports it (P2P or ExternalCall, or None before a route exists).
+    [[nodiscard]] bgmedia::wave::WaveTransportRoute route() const noexcept;
     [[nodiscard]] WaveFailureKind failureKind() const;
     [[nodiscard]] std::string lastError() const;
 
