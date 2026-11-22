@@ -45,12 +45,13 @@ private final class AccountPresenceManagerImpl {
     private func observeStealthSettings() {
         let accountPeerId = self.accountPeerId.toInt64()
         let queue = self.queue
-        self.stealthSettingsObserver = NotificationCenter.default.addObserver(forName: BeyGramStealthStore.didChangeNotification, object: nil, queue: nil, using: { notification in
+        self.stealthSettingsObserver = NotificationCenter.default.addObserver(forName: BeyGramStealthStore.didChangeNotification, object: nil, queue: nil, using: { [weak self] notification in
             // The notification can come from any thread, so the presence work is handed to the presence queue.
+            // NotificationCenter keeps this block until deinit removes the observer, so the block must not hold self strongly.
             guard let changedAccountPeerId = notification.userInfo?[BeyGramStealthStore.accountPeerIdUserInfoKey] as? Int64, changedAccountPeerId == accountPeerId else {
                 return
             }
-            queue.justDispatch { [weak self] in
+            queue.justDispatch {
                 guard let strongSelf = self, strongSelf.wasOnline else {
                     return
                 }
