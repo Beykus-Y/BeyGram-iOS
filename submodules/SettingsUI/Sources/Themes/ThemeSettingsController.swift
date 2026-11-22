@@ -24,6 +24,7 @@ import WallpaperGridScreen
 import PeerNameColorItem
 import DeviceModel
 import BeyGramAppearance
+import BeyGramKit
 
 private final class ThemeSettingsControllerArguments {
     let context: AccountContext
@@ -520,7 +521,14 @@ private func themeSettingsControllerEntries(
     }
     entries.append(.textSize(presentationData.theme, strings.Appearance_TextSizeSetting, textSizeValue))
     entries.append(.bubbleSettings(presentationData.theme, strings.Appearance_BubbleCornersSetting, ""))
-    entries.append(.beyGramStyle(presentationData.theme, "BeyGram Style", BeyGramAppearance.shared.isEnabled ? "BeyGram" : "Telegram"))
+    let beyGramLang = strings.primaryComponent.languageCode
+    entries.append(.beyGramStyle(
+        presentationData.theme,
+        BeyGramL10n.shared.string(.settingsAppearanceTitle, languageCode: beyGramLang),
+        BeyGramAppearance.shared.isEnabled
+            ? BeyGramL10n.shared.string(.appearanceStyleBeyGram, languageCode: beyGramLang)
+            : BeyGramL10n.shared.string(.appearanceStyleTelegram, languageCode: beyGramLang)
+    ))
     entries.append(.powerSaving)
     entries.append(.stickersAndEmoji)
     

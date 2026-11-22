@@ -17,6 +17,7 @@ swift_library(
         "//submodules/Display:Display",
         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
         "//submodules/BeyGramAppearance",
+        "//submodules/BeyGramKit:BeyGramKit",
         "//submodules/TelegramUIPreferences:TelegramUIPreferences",
         "//submodules/MediaResources:MediaResources",
         "//submodules/AppBundle:AppBundle",
