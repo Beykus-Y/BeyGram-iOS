@@ -146,7 +146,9 @@ public struct BGMusicStrictJSON {
         pos += 1 // {
         skipWhitespace()
         var members: [(String, BGMusicJSONValue)] = []
-        var keys = Set<String>()
+        // Keys are compared by their UTF-8 bytes, as the Android reader compares them. Canonically equivalent spellings
+        // (precomposed and decomposed) are therefore different keys here too, not duplicates.
+        var keys = Set<[UInt8]>()
         if pos < bytes.count, bytes[pos] == 0x7D {
             pos += 1
             return .object(members)
@@ -157,7 +159,7 @@ public struct BGMusicStrictJSON {
                 throw Failure.invalid
             }
             let key = try parseString()
-            guard keys.insert(key).inserted else {
+            guard keys.insert(Array(key.utf8)).inserted else {
                 throw Failure.duplicateKey
             }
             skipWhitespace()
@@ -355,8 +357,22 @@ public struct BGMusicStrictJSON {
             guard pos + length <= bytes.count else {
                 throw Failure.invalid
             }
-            let chunk = Array(bytes[pos..<(pos + length)])
-            guard let text = String(bytes: chunk, encoding: .utf8), let scalar = text.unicodeScalars.first, text.unicodeScalars.count == 1 else {
+            // `parse` checked the whole input as UTF-8, so this sequence is valid and only needs decoding.
+            var codePoint = UInt32(byte)
+            if length == 2 {
+                let b1 = UInt32(bytes[pos + 1]) & 0x3F
+                codePoint = ((UInt32(byte) & 0x1F) << 6) | b1
+            } else if length == 3 {
+                let b1 = UInt32(bytes[pos + 1]) & 0x3F
+                let b2 = UInt32(bytes[pos + 2]) & 0x3F
+                codePoint = ((UInt32(byte) & 0x0F) << 12) | (b1 << 6) | b2
+            } else if length == 4 {
+                let b1 = UInt32(bytes[pos + 1]) & 0x3F
+                let b2 = UInt32(bytes[pos + 2]) & 0x3F
+                let b3 = UInt32(bytes[pos + 3]) & 0x3F
+                codePoint = ((UInt32(byte) & 0x07) << 18) | (b1 << 12) | (b2 << 6) | b3
+            }
+            guard let scalar = Unicode.Scalar(codePoint) else {
                 throw Failure.invalid
             }
             scalars.append(scalar)

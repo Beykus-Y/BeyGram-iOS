@@ -31,30 +31,29 @@ public enum BeyGramFeature: String, CaseIterable {
         return false
     }
 
-    /// Название в настройках. Сейчас есть ru и en; для остальных языков возвращается en.
+    /// Название в настройках из единой системы локализации `BeyGramL10n`.
     public func title(languageCode: String?) -> String {
-        let isRussian = languageCode == "ru"
         switch self {
         case .privacyPolicy:
-            return isRussian ? "Приватность: чтение и присутствие" : "Privacy: read receipts and presence"
+            return BeyGramL10n.shared.string(.settingsPrivacyTitle, languageCode: languageCode)
         case .triggerWords:
-            return isRussian ? "Триггер-слова" : "Trigger words"
+            return BeyGramL10n.shared.string(.settingsTriggerWordsTitle, languageCode: languageCode)
         case .chatExport:
-            return isRussian ? "Экспорт чата" : "Chat export"
+            return BeyGramL10n.shared.string(.exportTitle, languageCode: languageCode)
         case .diagnostics:
-            return isRussian ? "Диагностика и отчёты" : "Diagnostics and reports"
+            return BeyGramL10n.shared.string(.settingsDiagnosticsTitle, languageCode: languageCode)
         case .updateCheck:
-            return isRussian ? "Проверка обновлений" : "Update check"
+            return BeyGramL10n.shared.string(.settingsUpdatesTitle, languageCode: languageCode)
         case .mihomoProxy:
-            return isRussian ? "Прокси Mihomo" : "Mihomo proxy"
+            return BeyGramL10n.shared.string(.settingsMihomoTitle, languageCode: languageCode)
         case .bgPush:
-            return isRussian ? "Уведомления BG Push" : "BG Push notifications"
+            return BeyGramL10n.shared.string(.settingsBgPushTitle, languageCode: languageCode)
         case .musicLibrary:
-            return isRussian ? "Музыкальная библиотека и BG Mix" : "Music library and BG Mix"
+            return BeyGramL10n.shared.string(.settingsMusicTitle, languageCode: languageCode)
         case .bgMedia:
-            return isRussian ? "BG Media и BG Wave" : "BG Media and BG Wave"
+            return BeyGramL10n.shared.string(.bgWaveTitle, languageCode: languageCode)
         case .yandexMusic:
-            return isRussian ? "Яндекс Музыка" : "Yandex Music"
+            return BeyGramL10n.shared.string(.yandexTitle, languageCode: languageCode)
         }
     }
 }

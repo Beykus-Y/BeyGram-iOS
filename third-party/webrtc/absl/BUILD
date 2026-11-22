@@ -378,3 +378,69 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+# Abseil sources that RE2 (third-party/re2) needs and the `absl` target above does not compile: absl::Mutex,
+# absl::log, and the Cord, CRC, hash, flags and status pieces they reference. The platform waiters and CRC
+# variants are listed although each file is empty unless its own ABSL_INTERNAL_HAVE_* macro selects it, because
+# the iOS build selects different ones from Linux. Kept apart so the `absl` target is unchanged and no file is
+# compiled twice. Found by linking RE2 and the bridge against the `absl` sources on Linux; see third-party/re2/README.md.
+absl_re2_sources = [
+    "absl/crc/crc32c.cc",
+    "absl/crc/internal/crc.cc",
+    "absl/crc/internal/crc_cord_state.cc",
+    "absl/crc/internal/crc_memcpy_fallback.cc",
+    "absl/crc/internal/crc_memcpy_x86_arm_combined.cc",
+    "absl/crc/internal/crc_x86_arm_combined.cc",
+    "absl/flags/commandlineflag.cc",
+    "absl/flags/internal/private_handle_accessor.cc",
+    "absl/flags/reflection.cc",
+    "absl/hash/internal/low_level_hash.cc",
+    "absl/log/globals.cc",
+    "absl/log/internal/check_op.cc",
+    "absl/log/internal/globals.cc",
+    "absl/log/internal/log_format.cc",
+    "absl/log/internal/log_message.cc",
+    "absl/log/internal/log_sink_set.cc",
+    "absl/log/internal/nullguard.cc",
+    "absl/log/internal/proto.cc",
+    "absl/log/log_sink.cc",
+    "absl/profiling/internal/exponential_biased.cc",
+    "absl/random/internal/randen_round_keys.cc",
+    "absl/status/internal/status_internal.cc",
+    "absl/strings/internal/cord_internal.cc",
+    "absl/strings/internal/cord_rep_btree.cc",
+    "absl/strings/internal/cord_rep_btree_navigator.cc",
+    "absl/strings/internal/cord_rep_btree_reader.cc",
+    "absl/strings/internal/cord_rep_consume.cc",
+    "absl/strings/internal/cord_rep_crc.cc",
+    "absl/strings/internal/cordz_functions.cc",
+    "absl/strings/internal/cordz_handle.cc",
+    "absl/strings/internal/cordz_info.cc",
+    "absl/strings/internal/damerau_levenshtein_distance.cc",
+    "absl/strings/internal/stringify_sink.cc",
+    "absl/synchronization/internal/futex_waiter.cc",
+    "absl/synchronization/internal/kernel_timeout.cc",
+    "absl/synchronization/internal/pthread_waiter.cc",
+    "absl/synchronization/internal/sem_waiter.cc",
+    "absl/synchronization/internal/stdcpp_waiter.cc",
+    "absl/synchronization/internal/waiter_base.cc",
+    "absl/synchronization/internal/win32_waiter.cc",
+    "absl/synchronization/mutex.cc",
+]
+
+cc_library(
+    name = "absl_re2",
+    srcs = absl_re2_sources,
+    hdrs = glob(["absl/**/*.h", "absl/**/*.inc"]),
+    cxxopts = [
+        "-std=c++17",
+    ],
+    deps = [
+        ":absl",
+    ],
+    copts = [
+        "-Ithird-party/webrtc/absl",
+        "-DABSL_ALLOCATOR_NOTHROW=1",
+    ],
+    visibility = ["//visibility:public"],
+)

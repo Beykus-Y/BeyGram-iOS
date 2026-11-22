@@ -2,6 +2,7 @@
 
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
+#import <UIKit/UIKit.h>
 
 #include <cmath>
 #include <cstring>
@@ -23,7 +24,8 @@ namespace {
 
 constexpr uint32_t kSampleRate = 48000;
 constexpr AVAudioFrameCount kScratchFrames = 4096;
-// While the player runs, observers get a new snapshot at most this often.
+// While the mix plays, observers get a new snapshot at most this often. In the background the timer that
+// runs the update loop uses the same interval, because the display link does not fire there.
 constexpr CFTimeInterval kObserverInterval = 0.1;
 // The host tap (BG Wave). Attached and detached on the main thread, entered on the render thread.
 using HostTapSlot = beygram::media::PcmTapSlot<bgmedia::IPcmOutputTap>;
@@ -220,8 +222,17 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
 }
 @property (nonatomic, strong) AVAudioEngine *audioEngine;
 @property (nonatomic, strong) AVAudioSourceNode *sourceNode;
+@property (nonatomic, strong) AVAudioFormat *renderFormat;
 @property (nonatomic, strong, nullable) CADisplayLink *displayLink;
-@property (nonatomic) BOOL engineStarted;
+// Drives the update loop in the background while the mix sounds. Nil in the foreground.
+@property (nonatomic, strong, nullable) NSTimer *backgroundTimer;
+@property (nonatomic) BOOL inBackground;
+// Set when an interruption pauses a sounding mix. The end of the interruption may resume it.
+@property (nonatomic) BOOL resumeAfterInterruption;
+// The system's last refusal to start audio. Reported as lastError until a start succeeds.
+@property (nonatomic, copy, nullable) NSString *audioError;
+// Tokens of the notification observers. invalidate removes them.
+@property (nonatomic, strong) NSMutableArray *notificationTokens;
 // Weak references: an observer that goes away is dropped without a call.
 @property (nonatomic, strong) NSHashTable<id<BGMixPlayerObserver>> *observers;
 @property (nonatomic, strong, nullable) BGMixSnapshot *publishedSnapshot;
@@ -230,6 +241,28 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
 @end
 
 @implementation BGMixPlayer
+
++ (NSURL *)mixDirectory {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSArray<NSURL *> *documents = [fileManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask];
+    NSURL *directory = [documents.firstObject URLByAppendingPathComponent:@"bgmix" isDirectory:YES];
+    [fileManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:nil];
+    return directory;
+}
+
++ (BGMixPlayer *)sharedPlayer {
+    // The app has one player. It is created on the first call, which happens on the main thread.
+    static BGMixPlayer *player = nil;
+    if (player == nil) {
+        NSURL *cacheDirectory = [[self mixDirectory] URLByAppendingPathComponent:@"cache" isDirectory:YES];
+        [[NSFileManager defaultManager] createDirectoryAtURL:cacheDirectory
+                                 withIntermediateDirectories:YES
+                                                  attributes:nil
+                                                       error:nil];
+        player = [[BGMixPlayer alloc] initWithCacheDirectory:cacheDirectory.path];
+    }
+    return player;
+}
 
 - (instancetype)initWithCacheDirectory:(NSString *)cacheDirectory {
     self = [super init];
@@ -241,6 +274,8 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     _engine = std::make_unique<bgmedia::mix::MixEngine>(kSampleRate);
     _hostTap = std::make_unique<HostTapSlot>();
     self.observers = [NSHashTable weakObjectsHashTable];
+    self.notificationTokens = [NSMutableArray array];
+    self.managesAudioSession = YES;
 
     beygram::media::MixPreparationOptions options;
     options.cacheDirectory = std::filesystem::path(cacheDirectory.UTF8String ?: "");
@@ -258,7 +293,8 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
                                    beygram::media::kMixPreparationPcmReserve,
                                    beygram::media::kMixSessionPcmBudget});
 
-    AVAudioFormat *format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:kSampleRate channels:2];
+    self.renderFormat = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:kSampleRate channels:2];
+    AVAudioFormat *format = self.renderFormat;
     bgmedia::mix::MixEngine *engine = _engine.get();
     float *scratch = _scratch;
     HostTapSlot *hostTap = _hostTap.get();
@@ -300,11 +336,52 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     [self.audioEngine attachNode:self.sourceNode];
     [self.audioEngine connect:self.sourceNode to:self.audioEngine.mainMixerNode format:format];
 
+    [self observeSystemEvents];
+
     // The session's update() must run on the main thread once per frame.
     self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
     [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 
     return self;
+}
+
+// Interruptions, route changes, engine restarts and the app's move to the background and back come from
+// the system. They are delivered on the main queue, like every other call to the player. The blocks hold
+// the player weakly; invalidate removes them.
+- (void)observeSystemEvents {
+    __weak BGMixPlayer *weakSelf = self;
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    NSOperationQueue *queue = [NSOperationQueue mainQueue];
+    [self.notificationTokens addObject:[center addObserverForName:AVAudioSessionInterruptionNotification
+                                                            object:nil
+                                                             queue:queue
+                                                        usingBlock:^(NSNotification *note) {
+        [weakSelf handleInterruption:note];
+    }]];
+    [self.notificationTokens addObject:[center addObserverForName:AVAudioSessionRouteChangeNotification
+                                                            object:nil
+                                                             queue:queue
+                                                        usingBlock:^(NSNotification *note) {
+        [weakSelf handleRouteChange:note];
+    }]];
+    [self.notificationTokens addObject:[center addObserverForName:AVAudioEngineConfigurationChangeNotification
+                                                            object:self.audioEngine
+                                                             queue:queue
+                                                        usingBlock:^(NSNotification *note) {
+        [weakSelf handleEngineConfigurationChange];
+    }]];
+    [self.notificationTokens addObject:[center addObserverForName:UIApplicationDidEnterBackgroundNotification
+                                                            object:nil
+                                                             queue:queue
+                                                        usingBlock:^(NSNotification *note) {
+        [weakSelf enterBackground];
+    }]];
+    [self.notificationTokens addObject:[center addObserverForName:UIApplicationWillEnterForegroundNotification
+                                                            object:nil
+                                                             queue:queue
+                                                        usingBlock:^(NSNotification *note) {
+        [weakSelf enterForeground];
+    }]];
 }
 
 - (void)dealloc {
@@ -313,8 +390,9 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     _scratch = nullptr;
 }
 
-- (void)tick:(CADisplayLink *)link {
-    (void)link;
+// Runs the update loop: from the display link in the foreground, from backgroundTimer in the background.
+- (void)tick:(id)sender {
+    (void)sender;
     if (!_session) {
         return;
     }
@@ -322,20 +400,38 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     if (CACurrentMediaTime() - self.lastPublishTime >= kObserverInterval) {
         [self publishSnapshotIfChanged];
     }
+    [self updateBackgroundActivity];
 }
 
-- (void)ensureEngineRunning {
-    if (self.engineStarted) {
-        return;
+- (BOOL)isSounding {
+    if (!_session) {
+        return NO;
     }
-    AVAudioSession *session = AVAudioSession.sharedInstance;
-    [session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:nil];
-    [session setActive:YES error:nil];
+    return beygram::media::transportOf(_session->snapshot().engine) == beygram::media::MixTransport::Playing;
+}
+
+// Activates the audio session (unless the session manager does, see managesAudioSession) and starts the engine
+// unless they run already. Returns NO, with audioError set, when the system refuses; the mix then does not start.
+- (BOOL)ensureEngineRunning {
+    if (self.audioEngine.isRunning) {
+        return YES;
+    }
     NSError *error = nil;
-    [self.audioEngine prepare];
-    if ([self.audioEngine startAndReturnError:&error]) {
-        self.engineStarted = YES;
+    if (self.managesAudioSession) {
+        AVAudioSession *session = [AVAudioSession sharedInstance];
+        if (![session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:&error] ||
+            ![session setActive:YES error:&error]) {
+            self.audioError = error.localizedDescription ?: @"The audio session is not available.";
+            return NO;
+        }
     }
+    [self.audioEngine prepare];
+    if (![self.audioEngine startAndReturnError:&error]) {
+        self.audioError = error.localizedDescription ?: @"The audio engine did not start.";
+        return NO;
+    }
+    self.audioError = nil;
+    return YES;
 }
 
 // Sends the current snapshot to the observers when it differs from the last one sent. Nested calls
@@ -360,6 +456,110 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     }
 }
 
+// Every command ends here. The background driver follows the transport, and observers hear about the
+// change at once.
+- (void)stateChanged {
+    [self updateBackgroundActivity];
+    [self publishSnapshotIfChanged];
+}
+
+// Chooses what drives the mix (BackgroundDrive in BGMediaMixState.hpp). The sounding check runs only in the
+// background: in the foreground the display link runs every frame and nothing needs the check.
+- (void)updateBackgroundActivity {
+    if (!_session) {
+        return;
+    }
+    const BOOL sounding = self.inBackground && [self isSounding];
+    switch (beygram::media::backgroundDriveFor(self.inBackground, sounding)) {
+        case beygram::media::BackgroundDrive::DisplayLink:
+            [self stopBackgroundTimer];
+            break;
+        case beygram::media::BackgroundDrive::Timer:
+            [self startBackgroundTimer];
+            break;
+        case beygram::media::BackgroundDrive::StopEngine:
+            [self stopBackgroundTimer];
+            if (self.audioEngine.isRunning) {
+                [self.audioEngine stop];
+            }
+            break;
+    }
+}
+
+- (void)startBackgroundTimer {
+    if (self.backgroundTimer != nil) {
+        return;
+    }
+    self.backgroundTimer = [NSTimer timerWithTimeInterval:kObserverInterval
+                                                   target:self
+                                                 selector:@selector(tick:)
+                                                 userInfo:nil
+                                                  repeats:YES];
+    // Common modes, so the timer keeps running while a scroll tracks.
+    [[NSRunLoop mainRunLoop] addTimer:self.backgroundTimer forMode:NSRunLoopCommonModes];
+}
+
+- (void)stopBackgroundTimer {
+    [self.backgroundTimer invalidate];
+    self.backgroundTimer = nil;
+}
+
+- (void)enterBackground {
+    self.inBackground = YES;
+    [self updateBackgroundActivity];
+}
+
+- (void)enterForeground {
+    self.inBackground = NO;
+    [self updateBackgroundActivity];
+}
+
+// A call, Siri or another audio owner interrupts the mix. The system stops the engine itself, so the mix
+// pauses, and the end of the interruption resumes it only when it was sounding and the system allows.
+- (void)handleInterruption:(NSNotification *)note {
+    NSNumber *type = note.userInfo[AVAudioSessionInterruptionTypeKey];
+    if (type == nil) {
+        return;
+    }
+    if (type.unsignedIntegerValue == AVAudioSessionInterruptionTypeBegan) {
+        self.resumeAfterInterruption = [self isSounding];
+        [self pause];
+        return;
+    }
+    NSNumber *options = note.userInfo[AVAudioSessionInterruptionOptionKey];
+    const BOOL systemAllowsResume = (options.unsignedIntegerValue & AVAudioSessionInterruptionOptionShouldResume) != 0;
+    const BOOL resume = beygram::media::resumesAfterInterruption(self.resumeAfterInterruption, systemAllowsResume);
+    self.resumeAfterInterruption = NO;
+    // A session owned by the app's session manager is resumed by its owner, not here.
+    if (resume && self.managesAudioSession) {
+        [self play];
+    }
+}
+
+// Headphones or another output went away. The mix pauses rather than carry on through the speaker. Other
+// route changes leave the state alone.
+- (void)handleRouteChange:(NSNotification *)note {
+    NSNumber *reason = note.userInfo[AVAudioSessionRouteChangeReasonKey];
+    if (reason.unsignedIntegerValue == AVAudioSessionRouteChangeReasonOldDeviceUnavailable && [self isSounding]) {
+        [self pause];
+    }
+}
+
+// The system stopped the engine, and the hardware format may have changed. Connect the graph again with the
+// format the source node renders, then start the engine if the mix is sounding. If the system refuses, the
+// mix pauses and lastError says why.
+- (void)handleEngineConfigurationChange {
+    if (!_session) {
+        return;
+    }
+    [self.audioEngine connect:self.sourceNode to:self.audioEngine.mainMixerNode format:self.renderFormat];
+    if ([self isSounding] && ![self ensureEngineRunning]) {
+        _session->pause();
+    }
+    [self stateChanged];
+}
+
+// The current state, read from the engine on each access.
 - (BGMixSnapshot *)snapshot {
     BGMixSnapshot *snapshot = [[BGMixSnapshot alloc] init];
     if (!_session) {
@@ -391,7 +591,8 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     snapshot.transitionActive = _engine->transitionActive() ? YES : NO;
     snapshot.transitionProgress = (float)engine.transitionProgress;
     snapshot.preparingNext = core.preparingNext ? YES : NO;
-    snapshot.lastError = core.lastError.empty() ? nil : stringFromUTF8(core.lastError);
+    // The engine's own error wins. Otherwise the system's last refusal to start audio, if any.
+    snapshot.lastError = core.lastError.empty() ? self.audioError : stringFromUTF8(core.lastError);
     return snapshot;
 }
 
@@ -421,7 +622,7 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
         return 0;
     }
     const uint64_t identifier = _session->addTrack(std::filesystem::path(utf8Path));
-    [self publishSnapshotIfChanged];
+    [self stateChanged];
     return identifier;
 }
 
@@ -430,7 +631,7 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
         return NO;
     }
     const bool removed = _session->removeTrack(identifier);
-    [self publishSnapshotIfChanged];
+    [self stateChanged];
     return removed ? YES : NO;
 }
 
@@ -438,37 +639,45 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     if (_session) {
         _session->clearQueue();
     }
-    [self publishSnapshotIfChanged];
+    [self stateChanged];
 }
 
+// The engine starts first. If the system refuses, the mix does not start and lastError says why.
 - (void)play {
-    [self ensureEngineRunning];
-    if (_session) {
+    if (_session && [self ensureEngineRunning]) {
         _session->play();
     }
-    [self publishSnapshotIfChanged];
+    [self stateChanged];
 }
 
 - (void)pause {
     if (_session) {
         _session->pause();
     }
-    [self publishSnapshotIfChanged];
+    [self stateChanged];
+}
+
+// The session manager calls this when it takes the session away: the mix pauses and the engine stops, so that
+// no engine keeps running on a session that is no longer ours.
+- (void)stopEngine {
+    [self pause];
+    if (self.audioEngine.isRunning) {
+        [self.audioEngine stop];
+    }
 }
 
 - (void)next {
-    [self ensureEngineRunning];
-    if (_session) {
+    if (_session && [self ensureEngineRunning]) {
         _session->next();
     }
-    [self publishSnapshotIfChanged];
+    [self stateChanged];
 }
 
 - (void)stopAll {
     if (_session) {
         _session->stopAll();
     }
-    [self publishSnapshotIfChanged];
+    [self stateChanged];
 }
 
 - (BOOL)seekToPosition:(NSTimeInterval)seconds {
@@ -476,7 +685,7 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
         return NO;
     }
     const bool moved = _session->seekDeck(_session->snapshot().engine.master, seconds);
-    [self publishSnapshotIfChanged];
+    [self stateChanged];
     return moved ? YES : NO;
 }
 
@@ -507,15 +716,22 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
     [self setPcmTap:NULL];
     [self.displayLink invalidate];
     self.displayLink = nil;
+    [self stopBackgroundTimer];
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    for (id token in self.notificationTokens) {
+        [center removeObserver:token];
+    }
+    [self.notificationTokens removeAllObjects];
     [self.observers removeAllObjects];
     self.publishedSnapshot = nil;
+    self.resumeAfterInterruption = NO;
     if (_session) {
         _session->stopAll();
     }
     _session.reset();
-    if (self.engineStarted) {
+    // The render block reads the engine, so the audio engine stops before the engine is destroyed.
+    if (self.audioEngine.isRunning) {
         [self.audioEngine stop];
-        self.engineStarted = NO;
     }
     _engine.reset();
 }

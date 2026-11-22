@@ -20,8 +20,8 @@ public enum BeyGramStealthSendDecision: Equatable, Sendable {
     case unchanged
     /// Send as a server-side scheduled message at this Unix time. Telegram publishes it itself.
     case scheduled(Int32)
-    /// Stealth scheduling is on, but this message cannot be scheduled. It must fail, never go out at once.
-    case refused
+    /// Stealth scheduling is on, but this message cannot be scheduled, for the reason given. Nothing goes out: the batch is stored as failed messages, never sent at once and never dropped.
+    case refused(BeyGramStealthRefusal)
 }
 
 /// Stealth settings of one account.
@@ -81,17 +81,20 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
     /// The decision for one outgoing message.
     /// - Parameters:
     ///   - explicitScheduleTime: the date the user picked, if any. Such a message is already scheduled and is left alone.
-    ///   - isSchedulable: false for secret chats and paid messages, which Telegram cannot schedule.
+    ///   - unschedulableReason: why Telegram cannot schedule this message (a secret chat or a paid message), or nil when it can.
     ///   - nowSeconds: the server clock (`network.globalTime`) at the moment of the request.
-    public func sendDecision(explicitScheduleTime: Int32?, isSchedulable: Bool, nowSeconds: Int32) -> BeyGramStealthSendDecision {
+    public func sendDecision(explicitScheduleTime: Int32?, unschedulableReason: BeyGramStealthRefusal?, nowSeconds: Int32) -> BeyGramStealthSendDecision {
         guard self.serverScheduledSend else {
             return .unchanged
         }
         if explicitScheduleTime != nil {
             return .unchanged
         }
-        guard isSchedulable, self.scheduledSendDelaySeconds >= BeyGramStealthSettings.minimumServerLeadSeconds else {
-            return .refused
+        if let reason = unschedulableReason {
+            return .refused(reason)
+        }
+        guard self.scheduledSendDelaySeconds >= BeyGramStealthSettings.minimumServerLeadSeconds else {
+            return .refused(.leadTooShort)
         }
         return .scheduled(nowSeconds + self.scheduledSendDelaySeconds)
     }

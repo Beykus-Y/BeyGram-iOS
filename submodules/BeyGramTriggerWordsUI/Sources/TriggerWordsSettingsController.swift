@@ -4,260 +4,288 @@ import UserNotifications
 import Display
 import SwiftSignalKit
 import TelegramPresentationData
-import ItemListUI
-import PresentationDataUtils
 import AccountContext
+import BeyGramDesign
 import BeyGramKit
 import BeyGramTriggerWords
 
-/// Screen state that is not stored: the word being typed and the mode for the new rule.
-private final class TriggerWordsDraft {
-    var pattern = ""
-    var mode: TriggerWordMode = .wholeWord
-    var status: String?
-}
+private final class TriggerWordsViewControllerImpl: BeyGramScrollViewController, UITextFieldDelegate {
+    private let store = TriggerWordsStore.shared
+    private var draftPattern = ""
+    private var draftMode: TriggerWordMode = .wholeWord
+    private var statusMessage: String?
 
-private final class TriggerWordsSettingsArguments {
-    let toggleFeature: (Bool) -> Void
-    let setScope: (TriggerWordScope) -> Void
-    let clearFeed: () -> Void
-    let setDraftPattern: (String) -> Void
-    let setDraftMode: (TriggerWordMode) -> Void
-    let addRule: () -> Void
-    let toggleRule: (UUID) -> Void
-    let removeRule: (UUID) -> Void
+    private let featureCard = BeyGramCardView(spacing: 0, insets: UIEdgeInsets(top: 4, left: 16, bottom: 4, right: 16))
+    private let featureRow = BeyGramRowView()
 
-    init(toggleFeature: @escaping (Bool) -> Void, setScope: @escaping (TriggerWordScope) -> Void, clearFeed: @escaping () -> Void,
-         setDraftPattern: @escaping (String) -> Void, setDraftMode: @escaping (TriggerWordMode) -> Void, addRule: @escaping () -> Void,
-         toggleRule: @escaping (UUID) -> Void, removeRule: @escaping (UUID) -> Void) {
-        self.toggleFeature = toggleFeature
-        self.setScope = setScope
-        self.clearFeed = clearFeed
-        self.setDraftPattern = setDraftPattern
-        self.setDraftMode = setDraftMode
-        self.addRule = addRule
-        self.toggleRule = toggleRule
-        self.removeRule = removeRule
-    }
-}
+    private let scopeHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let scopeCard = BeyGramCardView(spacing: 8)
+    private let scopeControl = UISegmentedControl(items: ["Muted", "All"])
 
-private enum TriggerWordsSettingsSection: Int32 {
-    case feature
-    case scope
-    case add
-    case rules
-    case feed
-}
+    private let addHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let addCard = BeyGramCardView(spacing: 10)
+    private let patternField = UITextField()
+    private let modeControl = UISegmentedControl(items: ["Whole Word", "Substring"])
+    private let addButton = BeyGramActionButton(style: .primary)
+    private let statusLabel = BeyGramTypography.makeLabel(style: .footnote, weight: .medium, lines: 0)
 
-/// Entries carry only plain values, so they can be compared. Rules are identified by their UUID.
-private enum TriggerWordsSettingsEntry: ItemListNodeEntry, Equatable {
-    case featureSwitch(Bool)
-    case scopeHeader
-    case scope(TriggerWordScope, Bool)
-    case addHeader
-    case draftPattern(String)
-    case draftMode(TriggerWordMode, Bool)
-    case addAction(Bool)
-    case status(String)
-    case rulesHeader
-    case rule(Int, UUID, String, Bool)
-    case ruleRemove(Int, UUID, String)
-    case noRules
-    case clearFeed(Int)
+    private let rulesHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let rulesCard = BeyGramCardView(spacing: 0, insets: UIEdgeInsets(top: 4, left: 16, bottom: 4, right: 16))
 
-    var section: ItemListSectionId {
-        switch self {
-        case .featureSwitch:
-            return TriggerWordsSettingsSection.feature.rawValue
-        case .scopeHeader, .scope:
-            return TriggerWordsSettingsSection.scope.rawValue
-        case .addHeader, .draftPattern, .draftMode, .addAction, .status:
-            return TriggerWordsSettingsSection.add.rawValue
-        case .rulesHeader, .rule, .ruleRemove, .noRules:
-            return TriggerWordsSettingsSection.rules.rawValue
-        case .clearFeed:
-            return TriggerWordsSettingsSection.feed.rawValue
-        }
+    private let feedHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let feedCard = BeyGramCardView(spacing: 8)
+    private let feedStack = UIStackView()
+    private let clearFeedButton = BeyGramActionButton(style: .destructive)
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        self.setupUI()
+        self.render()
     }
 
-    /// Stable ids: fixed rows use small numbers; a rule's rows use its position in the list, so the ids
-    /// do not depend on per-process hashing.
-    var stableId: Int64 {
-        switch self {
-        case .featureSwitch: return 0
-        case .scopeHeader: return 1
-        case .scope(.onlyMutedChats, _): return 2
-        case .scope(.allChats, _): return 3
-        case .addHeader: return 10
-        case .draftPattern: return 11
-        case .draftMode(.wholeWord, _): return 12
-        case .draftMode(.anywhere, _): return 13
-        case .addAction: return 14
-        case .status: return 15
-        case .rulesHeader: return 20
-        case .noRules: return 21
-        case let .rule(index, _, _, _): return 1000 + Int64(index) * 2
-        case let .ruleRemove(index, _, _): return 1000 + Int64(index) * 2 + 1
-        case .clearFeed: return 30
-        }
+    private func setupUI() {
+        self.featureCard.contentStack.addArrangedSubview(self.featureRow)
+        self.stackView.addArrangedSubview(self.featureCard)
+
+        self.stackView.addArrangedSubview(self.scopeHeader)
+        self.scopeControl.addTarget(self, action: #selector(self.scopeChanged), for: .valueChanged)
+        self.scopeCard.contentStack.addArrangedSubview(self.scopeControl)
+        self.stackView.addArrangedSubview(self.scopeCard)
+
+        self.stackView.addArrangedSubview(self.addHeader)
+        self.patternField.borderStyle = .roundedRect
+        self.patternField.autocorrectionType = .no
+        self.patternField.autocapitalizationType = .none
+        self.patternField.font = BeyGramTypography.font(style: .body)
+        self.patternField.adjustsFontForContentSizeCategory = true
+        self.patternField.delegate = self
+        self.patternField.addTarget(self, action: #selector(self.patternChanged), for: .editingChanged)
+
+        self.modeControl.selectedSegmentIndex = 0
+        self.modeControl.addTarget(self, action: #selector(self.modeChanged), for: .valueChanged)
+        self.addButton.addTarget(self, action: #selector(self.addTapped), for: .touchUpInside)
+
+        self.addCard.contentStack.addArrangedSubview(self.patternField)
+        self.addCard.contentStack.addArrangedSubview(self.modeControl)
+        self.addCard.contentStack.addArrangedSubview(self.addButton)
+        self.addCard.contentStack.addArrangedSubview(self.statusLabel)
+        self.stackView.addArrangedSubview(self.addCard)
+
+        self.stackView.addArrangedSubview(self.rulesHeader)
+        self.stackView.addArrangedSubview(self.rulesCard)
+
+        self.stackView.addArrangedSubview(self.feedHeader)
+        self.feedStack.axis = .vertical
+        self.feedStack.spacing = 0
+        self.feedCard.contentStack.addArrangedSubview(self.feedStack)
+        self.clearFeedButton.addTarget(self, action: #selector(self.clearFeedTapped), for: .touchUpInside)
+        self.feedCard.contentStack.addArrangedSubview(self.clearFeedButton)
+        self.stackView.addArrangedSubview(self.feedCard)
     }
 
-    static func < (lhs: TriggerWordsSettingsEntry, rhs: TriggerWordsSettingsEntry) -> Bool {
-        return lhs.stableId < rhs.stableId
+    override func applyPresentationData(_ presentationData: PresentationData) {
+        super.applyPresentationData(presentationData)
+        self.render()
     }
 
-    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
-        let arguments = arguments as! TriggerWordsSettingsArguments
-        switch self {
-        case let .featureSwitch(value):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Trigger words", value: value, type: .regular, enabled: true, sectionId: self.section, style: .blocks, updated: { newValue in
-                arguments.toggleFeature(newValue)
-            })
-        case .scopeHeader:
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: "Check messages in", sectionId: self.section)
-        case let .scope(scope, selected):
-            let title = scope == .onlyMutedChats ? "Only muted chats" : "All chats"
-            return ItemListCheckboxItem(presentationData: presentationData, systemStyle: .glass, title: title, style: .left, checked: selected, zeroSeparatorInsets: false, sectionId: self.section, action: {
-                arguments.setScope(scope)
-            })
-        case .addHeader:
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: "Add a word", sectionId: self.section)
-        case let .draftPattern(text):
-            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(string: "", textColor: .black), text: text, placeholder: "Word or phrase", type: .regular(capitalization: false, autocorrection: false), spacing: 0.0, clearType: .always, maxLength: TriggerWordRule.maxPatternLength, enabled: true, sectionId: self.section, textUpdated: { updated in
-                arguments.setDraftPattern(updated)
-            }, action: {})
-        case let .draftMode(mode, selected):
-            let title = mode == .wholeWord ? "Whole word" : "Anywhere in text"
-            return ItemListCheckboxItem(presentationData: presentationData, systemStyle: .glass, title: title, style: .left, checked: selected, zeroSeparatorInsets: false, sectionId: self.section, action: {
-                arguments.setDraftMode(mode)
-            })
-        case let .addAction(enabled):
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Add word", kind: enabled ? .generic : .disabled, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.addRule()
-            })
-        case let .status(text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case .rulesHeader:
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: "Words", sectionId: self.section)
-        case let .rule(_, id, text, enabled):
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: text, kind: enabled ? .neutral : .disabled, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.toggleRule(id)
-            })
-        case let .ruleRemove(_, id, text):
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Remove \(text)", kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.removeRule(id)
-            })
-        case .noRules:
-            return ItemListTextItem(presentationData: presentationData, text: .plain("No trigger words yet."), sectionId: self.section)
-        case let .clearFeed(count):
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Clear feed (\(count))", kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.clearFeed()
-            })
-        }
-    }
-}
+    private func render() {
+        let lang = self.presentationData.strings.primaryComponent.languageCode
+        let isRu = lang.lowercased().hasPrefix("ru")
+        let l10n = BeyGramL10n.shared
+        let palette = BeyGramThemePalette(theme: self.presentationData.theme)
 
-private func statusText(for error: TriggerWordValidationError) -> String {
-    switch error {
-    case .emptyPattern: return "The word is empty."
-    case .patternTooLong: return "The word is longer than \(TriggerWordRule.maxPatternLength) characters."
-    case .tooManyRules: return "No more than \(TriggerWordRule.maxRules) words."
-    }
-}
+        self.title = l10n.string(.triggerTitle, languageCode: lang)
 
-private func triggerWordsSettingsEntries(store: TriggerWordsStore, settings: BeyGramSettings, draft: TriggerWordsDraft) -> [TriggerWordsSettingsEntry] {
-    var entries: [TriggerWordsSettingsEntry] = []
-    entries.append(.featureSwitch(settings.isEnabled(.triggerWords)))
-    entries.append(.scopeHeader)
-    entries.append(.scope(.onlyMutedChats, store.state.scope == .onlyMutedChats))
-    entries.append(.scope(.allChats, store.state.scope == .allChats))
-    entries.append(.addHeader)
-    entries.append(.draftPattern(draft.pattern))
-    entries.append(.draftMode(.wholeWord, draft.mode == .wholeWord))
-    entries.append(.draftMode(.anywhere, draft.mode == .anywhere))
-    let trimmed = draft.pattern.trimmingCharacters(in: .whitespacesAndNewlines)
-    entries.append(.addAction(!trimmed.isEmpty))
-    if let status = draft.status {
-        entries.append(.status(status))
-    }
-    entries.append(.rulesHeader)
-    if store.state.rules.isEmpty {
-        entries.append(.noRules)
-    } else {
-        for (index, rule) in store.state.rules.enumerated() {
-            let mode = rule.mode == .wholeWord ? "whole word" : "anywhere in text"
-            let caption = "\(rule.pattern) · \(mode)"
-            entries.append(.rule(index, rule.id, rule.isEnabled ? caption : caption + " · off", rule.isEnabled))
-            entries.append(.ruleRemove(index, rule.id, rule.pattern))
-        }
-    }
-    if !store.state.mentions.isEmpty {
-        entries.append(.clearFeed(store.state.mentions.count))
-    }
-    return entries
-}
+        let enabled = BeyGramSettings.shared.isEnabled(.triggerWords)
+        self.featureCard.apply(palette: palette)
+        self.featureRow.configure(
+            iconName: "text.magnifyingglass",
+            iconTint: enabled ? palette.success : palette.accent,
+            title: l10n.string(.triggerEnable, languageCode: lang),
+            subtitle: isRu ? "Локальное сопоставление слов и фраз" : "Local matching of words and phrases",
+            switchValue: enabled,
+            showSeparator: false,
+            palette: palette,
+            onSwitch: { [weak self] val in
+                BeyGramSettings.shared.setEnabled(val, for: .triggerWords)
+                if val {
+                    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+                }
+                self?.render()
+            }
+        )
 
-/// Settings screen for trigger words: the feature switch, the scope, adding words, enabling and removing them, and clearing the feed.
-/// Editing a word's text means removing it and adding it again.
-public func triggerWordsSettingsController(context: AccountContext) -> ViewController {
-    let store = TriggerWordsStore.shared
-    let settings = BeyGramSettings.shared
-    let draft = TriggerWordsDraft()
-    let revision = ValuePromise<Int>(0, ignoreRepeated: false)
-    var counter = 0
-    let bump: () -> Void = {
-        counter += 1
-        revision.set(counter)
-    }
+        self.scopeHeader.text = l10n.string(.triggerSectionScope, languageCode: lang).uppercased()
+        self.scopeHeader.textColor = palette.secondaryText
+        self.scopeCard.apply(palette: palette)
+        self.scopeControl.setTitle(l10n.string(.triggerScopeMuted, languageCode: lang), forSegmentAt: 0)
+        self.scopeControl.setTitle(l10n.string(.triggerScopeAll, languageCode: lang), forSegmentAt: 1)
+        self.scopeControl.selectedSegmentIndex = self.store.state.scope == .onlyMutedChats ? 0 : 1
 
-    let arguments = TriggerWordsSettingsArguments(toggleFeature: { value in
-        settings.setEnabled(value, for: .triggerWords)
-        if value {
-            // Without permission the alert is added silently and never shown, so ask once when the feature turns on.
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge], completionHandler: { _, _ in })
-        }
-        bump()
-    }, setScope: { scope in
-        store.setScope(scope)
-        bump()
-    }, clearFeed: {
-        store.clearFeed()
-        bump()
-    }, setDraftPattern: { text in
-        // Typing does not re-render: the field keeps its own text.
-        draft.pattern = text
-        draft.status = nil
-    }, setDraftMode: { mode in
-        draft.mode = mode
-        bump()
-    }, addRule: {
-        let trimmed = draft.pattern.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rule = TriggerWordRule(pattern: trimmed, mode: draft.mode)
-        if let error = store.upsertRule(rule) {
-            draft.status = statusText(for: error)
+        self.addHeader.text = l10n.string(.triggerSectionAdd, languageCode: lang).uppercased()
+        self.addHeader.textColor = palette.secondaryText
+        self.addCard.apply(palette: palette)
+        self.patternField.placeholder = l10n.string(.triggerInputPlaceholder, languageCode: lang)
+        self.patternField.backgroundColor = palette.elevatedBackground
+        self.patternField.textColor = palette.primaryText
+        self.modeControl.setTitle(l10n.string(.triggerModeWholeWord, languageCode: lang), forSegmentAt: 0)
+        self.modeControl.setTitle(l10n.string(.triggerModeAnywhere, languageCode: lang), forSegmentAt: 1)
+        self.modeControl.selectedSegmentIndex = self.draftMode == .wholeWord ? 0 : 1
+
+        let canAdd = !self.draftPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        self.addButton.configure(title: l10n.string(.triggerAddAction, languageCode: lang), style: .primary, palette: palette, isEnabled: canAdd)
+        if let statusMessage = self.statusMessage {
+            self.statusLabel.isHidden = false
+            self.statusLabel.text = statusMessage
+            self.statusLabel.textColor = palette.destructive
         } else {
-            draft.pattern = ""
-            draft.status = nil
-        }
-        bump()
-    }, toggleRule: { id in
-        guard var rule = store.state.rules.first(where: { $0.id == id }) else {
-            return
-        }
-        rule.isEnabled.toggle()
-        _ = store.upsertRule(rule)
-        bump()
-    }, removeRule: { id in
-        store.removeRule(id: id)
-        bump()
-    })
-
-    let signal = combineLatest(context.sharedContext.presentationData, revision.get())
-        |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
-            let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Trigger words"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
-            let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: triggerWordsSettingsEntries(store: store, settings: settings, draft: draft), style: .blocks)
-            return (controllerState, (listState, arguments))
+            self.statusLabel.isHidden = true
         }
 
-    return ItemListController(context: context, state: signal)
+        // Rules
+        let rules = self.store.state.rules
+        self.rulesHeader.text = "\(l10n.string(.triggerSectionRules, languageCode: lang).uppercased()) (\(rules.count))"
+        self.rulesHeader.textColor = palette.secondaryText
+        self.rulesCard.apply(palette: palette)
+        for subview in self.rulesCard.contentStack.arrangedSubviews {
+            self.rulesCard.contentStack.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
+        }
+        if rules.isEmpty {
+            let row = BeyGramRowView()
+            row.configure(title: l10n.string(.triggerNoRules, languageCode: lang), showSeparator: false, palette: palette)
+            self.rulesCard.contentStack.addArrangedSubview(row)
+        } else {
+            for (idx, rule) in rules.enumerated() {
+                let row = BeyGramRowView()
+                let modeTitle = rule.mode == .wholeWord ? l10n.string(.triggerModeWholeWord, languageCode: lang) : l10n.string(.triggerModeAnywhere, languageCode: lang)
+                row.configure(
+                    iconName: "tag",
+                    iconTint: rule.isEnabled ? palette.accent : palette.secondaryText,
+                    title: rule.pattern,
+                    subtitle: modeTitle,
+                    switchValue: rule.isEnabled,
+                    showSeparator: idx < rules.count - 1,
+                    palette: palette,
+                    onTap: { [weak self] in
+                        self?.confirmDeleteRule(rule)
+                    },
+                    onSwitch: { [weak self] val in
+                        guard let self else { return }
+                        var updated = rule
+                        updated.isEnabled = val
+                        _ = self.store.upsertRule(updated)
+                        self.render()
+                    }
+                )
+                self.rulesCard.contentStack.addArrangedSubview(row)
+            }
+        }
+
+        // Mentions Feed
+        let mentions = self.store.state.mentions
+        self.feedHeader.text = l10n.string(.triggerSectionFeed, languageCode: lang).uppercased()
+        self.feedHeader.textColor = palette.secondaryText
+        self.feedCard.apply(palette: palette)
+        for subview in self.feedStack.arrangedSubviews {
+            self.feedStack.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
+        }
+        if mentions.isEmpty {
+            let empty = BeyGramTypography.makeLabel(style: .footnote, weight: .regular, lines: 0)
+            empty.text = l10n.string(.triggerFeedEmpty, languageCode: lang)
+            empty.textColor = palette.secondaryText
+            self.feedStack.addArrangedSubview(empty)
+            self.clearFeedButton.isHidden = true
+        } else {
+            for (idx, item) in mentions.prefix(30).enumerated() {
+                let row = BeyGramRowView()
+                let title = (item.senderName?.isEmpty == false ? item.senderName : nil) ?? "Chat \(item.chatId)"
+                let snippet = item.text ?? ""
+                row.configure(
+                    iconName: "bell.fill",
+                    iconTint: palette.accent,
+                    title: title,
+                    subtitle: snippet.isEmpty ? item.matchedPattern : "\(item.matchedPattern): \(snippet)",
+                    showSeparator: idx < min(mentions.count, 30) - 1,
+                    palette: palette
+                )
+                self.feedStack.addArrangedSubview(row)
+            }
+            self.clearFeedButton.isHidden = false
+            self.clearFeedButton.configure(title: l10n.string(.triggerClearFeed, languageCode: lang), style: .destructive, palette: palette)
+        }
+    }
+
+    private func confirmDeleteRule(_ rule: TriggerWordRule) {
+        let lang = self.presentationData.strings.primaryComponent.languageCode
+        let l10n = BeyGramL10n.shared
+        let sheet = ActionSheetController(presentationData: self.presentationData)
+        sheet.setItemGroups([
+            ActionSheetItemGroup(items: [
+                ActionSheetTextItem(title: rule.pattern),
+                ActionSheetButtonItem(title: l10n.string(.commonDelete, languageCode: lang), color: .destructive, action: { [weak self, weak sheet] in
+                    sheet?.dismissAnimated()
+                    self?.store.removeRule(id: rule.id)
+                    self?.render()
+                })
+            ]),
+            ActionSheetItemGroup(items: [
+                ActionSheetButtonItem(title: self.presentationData.strings.Common_Cancel, color: .accent, font: .bold, action: { [weak sheet] in
+                    sheet?.dismissAnimated()
+                })
+            ])
+        ])
+        self.present(sheet, in: .window(.root))
+    }
+
+    @objc private func scopeChanged() {
+        self.store.setScope(self.scopeControl.selectedSegmentIndex == 0 ? .onlyMutedChats : .allChats)
+        self.render()
+    }
+
+    @objc private func patternChanged() {
+        self.draftPattern = self.patternField.text ?? ""
+        self.statusMessage = nil
+        self.render()
+    }
+
+    @objc private func modeChanged() {
+        self.draftMode = self.modeControl.selectedSegmentIndex == 0 ? .wholeWord : .anywhere
+        self.render()
+    }
+
+    @objc private func addTapped() {
+        self.patternField.resignFirstResponder()
+        let lang = self.presentationData.strings.primaryComponent.languageCode
+        let l10n = BeyGramL10n.shared
+        let rule = TriggerWordRule(pattern: self.draftPattern, mode: self.draftMode)
+        if let err = self.store.upsertRule(rule) {
+            switch err {
+            case .emptyPattern:
+                self.statusMessage = l10n.string(.triggerEmptyPatternStatus, languageCode: lang)
+            case .patternTooLong, .tooManyRules:
+                self.statusMessage = l10n.string(.commonError, languageCode: lang)
+            }
+        } else {
+            self.draftPattern = ""
+            self.patternField.text = ""
+            self.statusMessage = nil
+        }
+        self.render()
+    }
+
+    @objc private func clearFeedTapped() {
+        self.store.clearFeed()
+        self.render()
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        self.addTapped()
+        return true
+    }
+}
+
+public func triggerWordsSettingsController(context: AccountContext) -> ViewController {
+    return TriggerWordsViewControllerImpl(context: context)
 }
