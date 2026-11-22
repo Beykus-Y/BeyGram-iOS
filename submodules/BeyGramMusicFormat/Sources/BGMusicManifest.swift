@@ -76,7 +76,20 @@ public struct BGMusicManifest: Equatable {
 
     // MARK: Validation helpers
 
-    /// Lowercased UUID in the 8-4-4-4-12 form, or nil.
+    /// ASCII hex digits only. `Character.isHexDigit` may also accept fullwidth digits, which the spec does not allow.
+    static func isASCIIHexDigit(_ char: Character) -> Bool {
+        guard let code = char.asciiValue else {
+            return false
+        }
+        switch code {
+        case 0x30...0x39, 0x41...0x46, 0x61...0x66:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Lowercased UUID in the 8-4-4-4-12 form, or nil. Any letter case is read; the stored form is lowercase.
     static func canonicalUUID(_ value: String) -> String? {
         let chars = Array(value)
         guard chars.count == 36 else {
@@ -87,24 +100,30 @@ public struct BGMusicManifest: Equatable {
                 if char != "-" {
                     return nil
                 }
-            } else if !char.isHexDigit {
+            } else if !isASCIIHexDigit(char) {
                 return nil
             }
         }
         return value.lowercased()
     }
 
-    /// `sha256:` plus 64 hex digits, lowercased, or nil.
+    /// `sha256:` plus 64 lowercase hex digits, or nil. Other spellings are not normalized: the reader drops such a
+    /// hash (section 3.2 and section 11, decision 4), as the Android reader does.
     static func canonicalAudioHash(_ value: String) -> String? {
         let prefix = "sha256:"
-        guard value.lowercased().hasPrefix(prefix) else {
+        guard value.hasPrefix(prefix) else {
             return nil
         }
-        let digits = String(value.dropFirst(prefix.count))
-        guard digits.count == 64, digits.allSatisfy({ $0.isHexDigit }) else {
+        let digits = Array(value.dropFirst(prefix.count))
+        guard digits.count == 64 else {
             return nil
         }
-        return prefix + digits.lowercased()
+        for char in digits {
+            guard let code = char.asciiValue, (0x30...0x39).contains(code) || (0x61...0x66).contains(code) else {
+                return nil
+            }
+        }
+        return value
     }
 
     /// Telegram username without `@`: 5 to 32 characters, Latin letters, digits and `_`, starting with a letter.
@@ -276,13 +295,31 @@ public struct BGMusicManifest: Equatable {
         guard let titleRaw = stringValue(parsed["title"]) else {
             return .invalid(.badField("title"))
         }
-        let descriptionRaw = stringValue(parsed["description"]) ?? ""
+        // Missing or null reads as empty. Any other non-string is a bad field (section 3.1).
+        let descriptionRaw: String
+        switch parsed["description"] {
+        case nil, .null?:
+            descriptionRaw = ""
+        case let .string(text)?:
+            descriptionRaw = text
+        default:
+            return .invalid(.badField("description"))
+        }
         guard let updatedValue = integerValue(parsed["updated_at"]) else {
             return .invalid(.badField("updated_at"))
         }
+        // Missing or null means no author. An author object must carry a name; normalized() cleans and checks it.
         var authorName: String?
-        if case .object? = parsed["author"] {
-            authorName = stringValue(parsed["author"]?["name"])
+        switch parsed["author"] {
+        case nil, .null?:
+            authorName = nil
+        case .object?:
+            guard let name = stringValue(parsed["author"]?["name"]) else {
+                return .invalid(.badField("author.name"))
+            }
+            authorName = name
+        default:
+            return .invalid(.badField("author"))
         }
         guard case let .array(trackValues)? = parsed["tracks"] else {
             return .invalid(.badField("tracks"))
@@ -292,24 +329,27 @@ public struct BGMusicManifest: Equatable {
         }
         var tracks: [BGMusicTrack] = []
         for raw in trackValues {
+            // artist and album are required, but may be empty (section 3.2).
             guard let id = stringValue(raw["id"]), let title = stringValue(raw["title"]),
+                  let artist = stringValue(raw["artist"]), let album = stringValue(raw["album"]),
                   let duration = integerValue(raw["duration_sec"]) else {
                 return .invalid(.badField("tracks"))
             }
-            let hash = stringValue(raw["audio_hash"])
+            // A malformed or unknown-algorithm hash is ignored instead of failing the whole file (section 11, decision 4).
+            let hash = stringValue(raw["audio_hash"]).flatMap { canonicalAudioHash($0) }
             var sources: [BGMusicSource] = []
             switch raw["sources"] {
             case nil, .null?:
                 break
             case let .array(items)?:
                 for item in items {
-                    // Unknown types and broken hints are dropped without touching the rest of the file.
-                    guard stringValue(item["type"]) == "telegram_public",
-                          let username = stringValue(item["username"]),
-                          let messageId = integerValue(item["message_id"]) else {
-                        continue
+                    // Hints are only hints: broken and unknown ones are dropped, and at most eight valid ones are kept.
+                    if sources.count >= maxSourcesPerTrack {
+                        break
                     }
-                    sources.append(.telegramPublic(username: username, messageId: messageId))
+                    if let source = readSourceHint(item) {
+                        sources.append(source)
+                    }
                 }
             default:
                 return .invalid(.badField("tracks.sources"))
@@ -317,8 +357,8 @@ public struct BGMusicManifest: Equatable {
             tracks.append(BGMusicTrack(
                 id: id,
                 title: title,
-                artist: stringValue(raw["artist"]) ?? "",
-                album: stringValue(raw["album"]) ?? "",
+                artist: artist,
+                album: album,
                 durationSec: duration,
                 audioHash: hash,
                 sources: sources
@@ -340,6 +380,24 @@ public struct BGMusicManifest: Equatable {
         } catch {
             return .invalid(.badField("manifest"))
         }
+    }
+
+    /// One source hint from the file, or nil for an unknown type or a broken hint (section 5). A leading `@` and
+    /// surrounding spaces are accepted, as the Android reader accepts them; the stored form has neither.
+    private static func readSourceHint(_ item: BGMusicJSONValue) -> BGMusicSource? {
+        guard stringValue(item["type"]) == "telegram_public",
+              let rawUsername = stringValue(item["username"]),
+              let messageId = integerValue(item["message_id"]) else {
+            return nil
+        }
+        var username = rawUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+        if username.hasPrefix("@") {
+            username = String(username.dropFirst())
+        }
+        guard isValidUsername(username), messageId >= 1, messageId <= 2_147_483_647 else {
+            return nil
+        }
+        return .telegramPublic(username: username, messageId: messageId)
     }
 
     /// A JSON integer that fits Int64. Fractions and exponents are refused, since v1 has no such fields.

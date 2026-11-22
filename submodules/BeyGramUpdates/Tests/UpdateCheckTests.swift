@@ -3,36 +3,140 @@ import XCTest
 
 final class UpdateCheckTests: XCTestCase {
     private let sha = String(repeating: "a", count: 64)
-    private let url = URL(string: "https://example.invalid/release")!
+    private let url = URL(string: "https://github.com/Beykus-Y/BeyGram-iOS/releases/tag/v0.0.2")!
 
-    private func manifest(versionCode: Int = 7, versionName: String = "0.0.0.7", sha256: String? = nil) -> StableUpdateManifest {
-        StableUpdateManifest(schema: 1, versionName: versionName, versionCode: versionCode, apkName: "x.apk", size: 100, sha256: sha256 ?? sha)
+    private func manifest(
+        schema: Int = 1,
+        platform: String = "ios",
+        channel: String = "dev",
+        versionName: String = "0.0.2",
+        buildNumber: Int = 1005,
+        ipaName: String = "BeyGram-DEV.ipa",
+        commitSha: String? = "deadbeef",
+        changelog: String? = "Fixes",
+        sha256: String? = nil
+    ) -> IOSUpdateManifest {
+        IOSUpdateManifest(
+            schema: schema,
+            platform: platform,
+            channel: channel,
+            versionName: versionName,
+            buildNumber: buildNumber,
+            ipaName: ipaName,
+            commitSha: commitSha,
+            changelog: changelog,
+            size: 1024,
+            sha256: sha256 ?? sha
+        )
     }
 
-    func testNewerManifestIsAvailable() {
-        XCTAssertEqual(UpdateCheck.evaluate(manifest: manifest(versionCode: 7), installedVersionCode: 6, releaseURL: url),
-                       .available(versionName: "0.0.0.7", releaseURL: url))
+    func testRepositoryPointsToBeyGramIOS() {
+        XCTAssertTrue(UpdateCheck.releasesAPI.absoluteString.contains("Beykus-Y/BeyGram-iOS"))
+        XCTAssertFalse(UpdateCheck.releasesAPI.absoluteString.contains("/BeyGram/releases"))
     }
 
-    func testSameVersionIsUpToDate() {
-        XCTAssertEqual(UpdateCheck.evaluate(manifest: manifest(versionCode: 7), installedVersionCode: 7, releaseURL: url), .upToDate)
+    func testNoReleasesReturnsNoReleases() throws {
+        let emptyJSON = Data("[]".utf8)
+        let selected = try UpdateCheck.selectCompatibleRelease(fromReleasesJSON: emptyJSON, channel: .dev)
+        XCTAssertNil(selected)
     }
 
-    func testInvalidHashFails() {
-        XCTAssertEqual(UpdateCheck.evaluate(manifest: manifest(sha256: "ABC"), installedVersionCode: 1, releaseURL: url), .failed)
+    func testOutdatedVersionAndBuildReturnsAvailable() {
+        let m = manifest(versionName: "0.0.2", buildNumber: 1006)
+        let result = UpdateCheck.evaluate(
+            manifest: m,
+            installedVersionName: "0.0.1",
+            installedBuildNumber: 1004,
+            installedChannel: .dev,
+            availableAssetNames: ["BeyGram-DEV.ipa", "BeyGram-ios-dev-update.json"],
+            releaseURL: url
+        )
+        XCTAssertEqual(result, .available(UpdateAvailableInfo(
+            versionName: "0.0.2",
+            buildNumber: 1006,
+            channel: .dev,
+            commitSha: "deadbeef",
+            changelog: "Fixes",
+            releaseURL: url
+        )))
     }
 
-    func testUppercaseHashIsRejected() {
-        let upper = String(repeating: "A", count: 64)
-        XCTAssertFalse(manifest(sha256: upper).isValid)
+    func testSameVersionNewerBuildReturnsAvailable() {
+        let m = manifest(versionName: "0.0.1", buildNumber: 1005)
+        let result = UpdateCheck.evaluate(
+            manifest: m,
+            installedVersionName: "0.0.1",
+            installedBuildNumber: 1004,
+            installedChannel: .dev,
+            availableAssetNames: ["BeyGram-DEV.ipa"],
+            releaseURL: url
+        )
+        XCTAssertEqual(result, .available(UpdateAvailableInfo(
+            versionName: "0.0.1",
+            buildNumber: 1005,
+            channel: .dev,
+            commitSha: "deadbeef",
+            changelog: "Fixes",
+            releaseURL: url
+        )))
     }
 
-    func testWrongSchemaIsRejected() {
-        let bad = StableUpdateManifest(schema: 2, versionName: "1.0", versionCode: 1, apkName: "x", size: 1, sha256: sha)
-        XCTAssertFalse(bad.isValid)
+    func testSameVersionAndBuildReturnsUpToDate() {
+        let m = manifest(versionName: "0.0.1", buildNumber: 1005)
+        let result = UpdateCheck.evaluate(
+            manifest: m,
+            installedVersionName: "0.0.1",
+            installedBuildNumber: 1005,
+            installedChannel: .dev,
+            availableAssetNames: ["BeyGram-DEV.ipa"],
+            releaseURL: url
+        )
+        XCTAssertEqual(result, .upToDate)
     }
 
-    func testVersionNameWithLettersIsRejected() {
-        XCTAssertFalse(manifest(versionName: "0.0.0.7-beta").isValid)
+    func testAndroidPlatformAndApkAreRejected() {
+        let androidPlatform = manifest(platform: "android")
+        XCTAssertFalse(androidPlatform.isValid)
+        XCTAssertEqual(UpdateCheck.evaluate(
+            manifest: androidPlatform,
+            installedVersionName: "0.0.1",
+            installedBuildNumber: 1,
+            installedChannel: .dev,
+            releaseURL: url
+        ), .failed)
+
+        let apkAsset = manifest(ipaName: "BeyGram.apk")
+        XCTAssertFalse(apkAsset.isValid)
+
+        let m = manifest()
+        let onlyApkAssets = UpdateCheck.evaluate(
+            manifest: m,
+            installedVersionName: "0.0.1",
+            installedBuildNumber: 1,
+            installedChannel: .dev,
+            availableAssetNames: ["BeyGram.apk", "BeyGram-stable-update.json"],
+            releaseURL: url
+        )
+        XCTAssertEqual(onlyApkAssets, .failed)
+    }
+
+    func testChannelMismatchIsRejected() {
+        let m = manifest(channel: "release")
+        let result = UpdateCheck.evaluate(
+            manifest: m,
+            installedVersionName: "0.0.1",
+            installedBuildNumber: 1,
+            installedChannel: .dev,
+            availableAssetNames: ["BeyGram-DEV.ipa"],
+            releaseURL: url
+        )
+        XCTAssertEqual(result, .failed)
+    }
+
+    func testMalformedManifestIsRejected() {
+        XCTAssertFalse(manifest(schema: 2).isValid)
+        XCTAssertFalse(manifest(sha256: "ABC").isValid)
+        XCTAssertFalse(manifest(versionName: "0.0.1-beta").isValid)
+        XCTAssertThrowsError(try UpdateCheck.selectCompatibleRelease(fromReleasesJSON: Data("not-json".utf8), channel: .dev))
     }
 }
