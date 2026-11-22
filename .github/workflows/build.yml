@@ -123,6 +123,15 @@ jobs:
           cache: true
           cache-dependency-path: 'submodules/BeyGramProxy/core/go.sum'
 
+      - name: Expose Go to the Mihomo genrule
+        run: |
+          # Bazel genrules run with PATH=/bin:/usr/bin:/usr/local/bin, so the Go that setup-go adds to the job
+          # PATH is invisible to build-bazel.sh. Its find_go checks /usr/local/bin/go, so a wrapper goes there.
+          real_go="$(command -v go)"
+          printf '#!/bin/sh\nexec "%s" "$@"\n' "$real_go" | sudo tee /usr/local/bin/go >/dev/null
+          sudo chmod 755 /usr/local/bin/go
+          /usr/local/bin/go version
+
       - name: Run Mihomo Go unit tests
         run: |
           cd submodules/BeyGramProxy/core
@@ -186,9 +195,11 @@ jobs:
             --bundleId "${{ steps.meta.outputs.bundle_id }}" \
             --teamId "C67CF9S4VU" \
             --outDir "$RUNNER_TEMP/sideload-codesigning"
+          # --continueOnError (Bazel --keep_going) reports every error of the run, so one run lists them all.
           python3 -u build-system/Make/Make.py \
             --cacheDir="$HOME/telegram-bazel-cache" \
             build \
+            --continueOnError \
             --configurationPath="$RUNNER_TEMP/beygram-ci-config.json" \
             --codesigningInformationPath="$RUNNER_TEMP/sideload-codesigning" \
             --disableExtensions \
