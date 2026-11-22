@@ -60,6 +60,8 @@ load(
     "telegram_team_id",
     "telegram_enable_icloud",
     "telegram_enable_siri",
+    "beygram_yandex_client_id",
+    "beygram_yandex_client_secret",
 )
 
 load("@build_bazel_rules_apple//apple:resources.bzl",
@@ -1876,9 +1878,15 @@ plist_fragment(
     <true/>
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
+    <key>BGYandexClientId</key>
+    <string>{beygram_yandex_client_id}</string>
+    <key>BGYandexClientSecret</key>
+    <string>{beygram_yandex_client_secret}</string>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
         telegram_display_name = telegram_display_name,
+        beygram_yandex_client_id = beygram_yandex_client_id,
+        beygram_yandex_client_secret = beygram_yandex_client_secret,
     )
 )
 

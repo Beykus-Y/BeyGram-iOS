@@ -1,5 +1,6 @@
 import Foundation
 import Postbox
+import BeyGramStealth
 internal import TelegramApi
 import SwiftSignalKit
 import Emoji
@@ -758,11 +759,24 @@ private func opportunisticallyTransformOutgoingMedia(network: Network, postbox: 
     return combineLatest(signals)
 }
 
-public func enqueueMessages(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {
-    // BeyGram stealth: may turn the sends into server-scheduled messages, or refuse the batch (submodules/BeyGramStealth).
-    guard let messages = beyGramStealthPreparedMessages(accountPeerId: account.peerId, peerId: peerId, nowSeconds: Int32(account.network.globalTime), messages: messages) else {
-        return .single(Array(repeating: nil, count: messages.count))
+/// A batch that BeyGram stealth sending refuses (submodules/BeyGramStealth). The media is already transformed, so the batch
+/// is stored in the chat as it is, and each stored message is marked failed in the same transaction. A failed message is
+/// not pending, so nothing goes out. The user resends it, which follows the stealth rules again, or deletes it.
+private func enqueueTransformedRefusedMessages(account: Account, peerId: PeerId, messages: [(Bool, EnqueueMessage)], refusal: BeyGramStealthRefusal, nowSeconds: Int32) -> Signal<[MessageId?], NoError> {
+    return account.postbox.transaction { transaction -> [MessageId?] in
+        let ids = enqueueMessages(transaction: transaction, account: account, peerId: peerId, messages: messages)
+        for case let id? in ids {
+            beyGramStealthMarkFailed(transaction: transaction, id: id)
+            BeyGramStealthRefusalRegistry.shared.record(accountPeerId: account.peerId.toInt64(), messageKey: beyGramStealthMessageKey(id), refusal: refusal, nowSeconds: nowSeconds)
+        }
+        return ids
     }
+}
+
+public func enqueueMessages(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {
+    // The media is transformed first (uploaded when it is not yet in the cloud). Only then does BeyGram stealth decide, so
+    // a send's delay counts from the moment its content is ready, as on Android (upload first, then the date). A batch that
+    // cannot be scheduled is stored as failed messages instead, so it neither goes out nor disappears.
     let signal: Signal<[(Bool, EnqueueMessage)], NoError>
     if let transformOutgoingMessageMedia = account.transformOutgoingMessageMedia {
         signal = opportunisticallyTransformOutgoingMedia(network: account.network, postbox: account.postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messages: messages, userInteractive: true)
@@ -770,41 +784,55 @@ public func enqueueMessages(account: Account, peerId: PeerId, messages: [Enqueue
         signal = .single(messages.map { (false, $0) })
     }
     return signal
-    |> mapToSignal { messages -> Signal<[MessageId?], NoError> in
-        return account.postbox.transaction { transaction -> ([MessageId?], [MessageId]) in
-            var resultIds = Array<MessageId?>(repeating: nil, count: messages.count)
-            var ephemeralMessageIds: [MessageId] = []
-            var normalMessages: [(Bool, EnqueueMessage)] = []
-            var normalMessageIndices: [Int] = []
-
-            for i in 0 ..< messages.count {
-                let (transformedMedia, message) = messages[i]
-                if let botPeerId = ephemeralBotPeerIdForEnqueuedMessage(transaction: transaction, accountPeerId: account.peerId, message: message) {
-                    if let messageId = enqueueEphemeralOutgoingMessage(transaction: transaction, account: account, peerId: peerId, transformedMedia: transformedMedia, message: message, botPeerId: botPeerId) {
-                        resultIds[i] = messageId
-                        ephemeralMessageIds.append(messageId)
-                    }
-                } else {
-                    normalMessages.append((transformedMedia, message))
-                    normalMessageIndices.append(i)
-                }
-            }
-
-            if !normalMessages.isEmpty {
-                let normalIds = enqueueMessages(transaction: transaction, account: account, peerId: peerId, messages: normalMessages)
-                for i in 0 ..< min(normalIds.count, normalMessageIndices.count) {
-                    resultIds[normalMessageIndices[i]] = normalIds[i]
-                }
-            }
-
-            return (resultIds, ephemeralMessageIds)
+    |> mapToSignal { transformed -> Signal<[MessageId?], NoError> in
+        let nowSeconds = Int32(account.network.globalTime)
+        switch beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, nowSeconds: nowSeconds, messages: transformed.map { $0.1 }) {
+        case let .send(batch, stealthDelays: stealthDelays):
+            // The batch keeps the order and the count of the transformed messages, so each message keeps its media flag.
+            let prepared = zip(transformed, batch).map { pair -> (Bool, EnqueueMessage) in (pair.0.0, pair.1) }
+            return enqueueTransformedMessages(account: account, peerId: peerId, messages: prepared, stealthDelays: stealthDelays, nowSeconds: nowSeconds)
+        case let .refused(refusal):
+            return enqueueTransformedRefusedMessages(account: account, peerId: peerId, messages: transformed, refusal: refusal, nowSeconds: nowSeconds)
         }
-        |> map { resultIds, ephemeralMessageIds -> [MessageId?] in
-            for messageId in ephemeralMessageIds {
-                let _ = _internal_sendEphemeralOutgoingMessage(account: account, messageId: messageId).startStandalone()
+    }
+}
+
+private func enqueueTransformedMessages(account: Account, peerId: PeerId, messages: [(Bool, EnqueueMessage)], stealthDelays: [Int32?], nowSeconds: Int32) -> Signal<[MessageId?], NoError> {
+    return account.postbox.transaction { transaction -> ([MessageId?], [MessageId]) in
+        var resultIds = Array<MessageId?>(repeating: nil, count: messages.count)
+        var ephemeralMessageIds: [MessageId] = []
+        var normalMessages: [(Bool, EnqueueMessage)] = []
+        var normalMessageIndices: [Int] = []
+
+        for i in 0 ..< messages.count {
+            let (transformedMedia, message) = messages[i]
+            if let botPeerId = ephemeralBotPeerIdForEnqueuedMessage(transaction: transaction, accountPeerId: account.peerId, message: message) {
+                if let messageId = enqueueEphemeralOutgoingMessage(transaction: transaction, account: account, peerId: peerId, transformedMedia: transformedMedia, message: message, botPeerId: botPeerId) {
+                    resultIds[i] = messageId
+                    ephemeralMessageIds.append(messageId)
+                }
+            } else {
+                normalMessages.append((transformedMedia, message))
+                normalMessageIndices.append(i)
             }
-            return resultIds
         }
+
+        if !normalMessages.isEmpty {
+            let normalIds = enqueueMessages(transaction: transaction, account: account, peerId: peerId, messages: normalMessages)
+            for i in 0 ..< min(normalIds.count, normalMessageIndices.count) {
+                resultIds[normalMessageIndices[i]] = normalIds[i]
+            }
+        }
+
+        // A message that stealth refused is stored failed, and the ephemeral path below must not send it.
+        let failedIds = beyGramStealthRecordScheduled(transaction: transaction, accountPeerId: account.peerId, ids: resultIds, stealthDelays: stealthDelays, nowSeconds: nowSeconds, refusedIds: Set(ephemeralMessageIds))
+        return (resultIds, ephemeralMessageIds.filter { !failedIds.contains($0) })
+    }
+    |> map { resultIds, ephemeralMessageIds -> [MessageId?] in
+        for messageId in ephemeralMessageIds {
+            let _ = _internal_sendEphemeralOutgoingMessage(account: account, messageId: messageId).startStandalone()
+        }
+        return resultIds
     }
 }
 
@@ -838,7 +866,11 @@ public func enqueueWelcomeMessages(account: Account, peerId: PeerId, messages: [
     }
 }
 
-public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<Void, NoError> {
+/// Resends failed messages as they were. With BeyGram stealth sending on, a resend follows the rules of a new send: a
+/// message that can be scheduled is scheduled, and a batch that cannot be stays failed and untouched, for the user to
+/// decide. `sendNowConsent` is the user's agreement to send now, outside stealth sending.
+public func resendMessages(account: Account, messageIds: [MessageId], sendNowConsent: Bool = false) -> Signal<Void, NoError> {
+    let nowSeconds = Int32(account.network.globalTime)
     return account.postbox.transaction { transaction -> Void in
         var removeMessageIds: [MessageId] = []
         for (peerId, ids) in messagesIdsGroupedByPeerId(messageIds) {
@@ -856,9 +888,10 @@ public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<
             }
             
             var messages: [EnqueueMessage] = []
+            var peerRemoveMessageIds: [MessageId] = []
             for id in ids {
                 if let message = transaction.getMessage(id), !message.flags.contains(.Incoming) {
-                    removeMessageIds.append(id)
+                    peerRemoveMessageIds.append(id)
                     
                     var filteredAttributes: [MessageAttribute] = []
                     var replyToMessageId: EngineMessageReplySubject?
@@ -891,7 +924,20 @@ public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<
                     }
                 }
             }
-            let _ = enqueueMessages(transaction: transaction, account: account, peerId: peerId, messages: messages.map { (false, $0) })
+            // A resend follows the rules of a new send. A batch that cannot be scheduled stays failed, and is not deleted: each of its
+            // messages now carries the reason of this resend.
+            let resendBatch: BeyGramStealthBatch = sendNowConsent ? .send(messages, stealthDelays: Array<Int32?>(repeating: nil, count: messages.count)) : beyGramStealthBatch(accountPeerId: account.peerId, peerId: peerId, nowSeconds: nowSeconds, messages: messages)
+            if case let .refused(refusal) = resendBatch {
+                for id in peerRemoveMessageIds {
+                    BeyGramStealthRefusalRegistry.shared.record(accountPeerId: account.peerId.toInt64(), messageKey: beyGramStealthMessageKey(id), refusal: refusal, nowSeconds: nowSeconds)
+                }
+            }
+            guard case let .send(preparedMessages, stealthDelays: stealthDelays) = resendBatch else {
+                continue
+            }
+            removeMessageIds.append(contentsOf: peerRemoveMessageIds)
+            let enqueuedIds = enqueueMessages(transaction: transaction, account: account, peerId: peerId, messages: preparedMessages.map { (false, $0) })
+            beyGramStealthRecordScheduled(transaction: transaction, accountPeerId: account.peerId, ids: enqueuedIds, stealthDelays: stealthDelays, nowSeconds: nowSeconds, refusedIds: [])
         }
         _internal_deleteMessages(transaction: transaction, mediaBox: account.postbox.mediaBox, ids: removeMessageIds, deleteMedia: false)
     }

@@ -83,6 +83,10 @@ public enum BeyGramStringKey: String, CaseIterable {
     case privacyHowItWorksTitle = "privacy.howItWorks.title"
     case privacyHowItWorksBody = "privacy.howItWorks.body"
     case privacyDisclaimer = "privacy.disclaimer"
+    case stealthRefusedTitle = "stealth.refused.title"
+    case stealthRefusedBody = "stealth.refused.body"
+    case stealthSendNowAction = "stealth.sendNow.action"
+    case stealthSendNowConfirm = "stealth.sendNow.confirm"
 
     // Mihomo
     case mihomoTitle = "mihomo.title"
@@ -113,6 +117,7 @@ public enum BeyGramStringKey: String, CaseIterable {
     case mihomoSortLatency = "mihomo.sort.latency"
     case mihomoAutoSelect = "mihomo.autoSelect"
     case mihomoMeasureDelays = "mihomo.measureDelays"
+    case mihomoMeasureProgressFormat = "mihomo.measureProgress.format"
     case mihomoEmptyServers = "mihomo.emptyServers"
     case mihomoSectionDetails = "mihomo.section.details"
     case mihomoLocalAddressTitle = "mihomo.localAddress.title"

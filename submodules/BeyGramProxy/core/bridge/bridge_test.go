@@ -4,12 +4,18 @@
 package bridge
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/metacubex/mihomo/common/utils"
+	C "github.com/metacubex/mihomo/constant"
+	"github.com/metacubex/mihomo/tunnel"
 
 	"beygram/mihomoproxy/normalize"
 )
@@ -142,4 +148,54 @@ func TestInletLifecycle(t *testing.T) {
 		_ = conn.Close()
 		t.Fatalf("the inlet on %s still accepts connections after stop", address)
 	}
+}
+
+// blockingProxy stands in for a node whose probe waits until the probe's context ends. started is told when a probe begins.
+type blockingProxy struct {
+	C.Proxy
+	started chan<- struct{}
+}
+
+func (p blockingProxy) URLTest(ctx context.Context, _ string, _ utils.IntRanges[uint16]) (uint16, error) {
+	select {
+	case p.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return 0, ctx.Err()
+}
+
+// A probe waits on the network, so it must not hold the core mutex: another action has to answer while it waits.
+func TestProbeDoesNotHoldTheCoreMutex(t *testing.T) {
+	started := make(chan struct{}, 1)
+	original := tunnel.Proxies()
+	tunnel.UpdateProxies(map[string]C.Proxy{"slow": blockingProxy{started: started}}, tunnel.Providers())
+	defer tunnel.UpdateProxies(original, tunnel.Providers())
+
+	core := New()
+	probe := make(chan []byte, 1)
+	go func() {
+		probe <- core.Invoke([]byte(`{"id":"probe","method":"testDelay","data":{"proxy-name":"slow","timeout":4000}}`))
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the probe never started")
+	}
+
+	other := make(chan []byte, 1)
+	go func() {
+		other <- core.Invoke([]byte(`{"id":"other","method":"proxies","data":{"group":"missing"}}`))
+	}()
+	select {
+	case <-other:
+	case <-time.After(2 * time.Second):
+		t.Fatal("an action waited for a probe that was still running")
+	}
+	select {
+	case <-probe:
+		t.Fatal("the probe ended before the other action returned, so the two did not overlap")
+	default:
+	}
+	<-probe
 }

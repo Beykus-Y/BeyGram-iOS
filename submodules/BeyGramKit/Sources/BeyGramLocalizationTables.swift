@@ -89,6 +89,10 @@ public enum BeyGramLocalizationTables {
         .privacyHowItWorksTitle: "How Stealth Mode works",
         .privacyHowItWorksBody: "When scheduled stealth send is enabled, messages are sent to Telegram servers as scheduled messages and published after the chosen delay. While waiting, you can edit, reschedule, or cancel them in the chat's scheduled messages.\n\nLocal delay vs. server scheduling: server-side scheduled send avoids keeping the app awake in the background, but Telegram servers still receive the message upon send.\n\nNote: Stealth Mode reduces visibility signals, but cannot guarantee absolute invisibility across all Telegram server events.",
         .privacyDisclaimer: "Reduces online presence signals; does not guarantee absolute invisibility.",
+        .stealthRefusedTitle: "Stealth send unavailable",
+        .stealthRefusedBody: "This message cannot be scheduled in Stealth Mode (secret chats and paid messages do not support scheduled sending). Sending it now will publish immediately and may reveal your activity.",
+        .stealthSendNowAction: "Send without Stealth",
+        .stealthSendNowConfirm: "Send now",
 
         // Mihomo
         .mihomoTitle: "Connection & Mihomo",
@@ -119,6 +123,7 @@ public enum BeyGramLocalizationTables {
         .mihomoSortLatency: "Latency",
         .mihomoAutoSelect: "Auto-select fastest server",
         .mihomoMeasureDelays: "Check latency",
+        .mihomoMeasureProgressFormat: "Checking %d/%d…",
         .mihomoEmptyServers: "No servers loaded. Add and update a subscription above.",
         .mihomoSectionDetails: "Connection Details",
         .mihomoLocalAddressTitle: "Local SOCKS5 inlet",
@@ -380,6 +385,10 @@ public enum BeyGramLocalizationTables {
         .privacyHowItWorksTitle: "Как работает невидимка",
         .privacyHowItWorksBody: "При включении отложенной отправки сообщение уходит на сервер Telegram как запланированное и публикуется через выбранное время. Пока оно ждёт, его можно изменить, перенести или отменить в отложенных сообщениях чата.\n\nЛокальная задержка и серверная отложенная отправка: серверная отправка не требует удержания приложения в фоне, но сервер Telegram получает сообщение в момент отправки.\n\nВажно: режим невидимки снижает риск показать активность в сети, но не гарантирует абсолютную невидимость.",
         .privacyDisclaimer: "Снижает сигналы активности в сети, но не гарантирует абсолютную невидимость.",
+        .stealthRefusedTitle: "Отложенная отправка недоступна",
+        .stealthRefusedBody: "Это сообщение нельзя запланировать в режиме невидимки (секретные чаты и платные сообщения не поддерживают отложенную отправку). Обычная отправка опубликует его сразу и может показать вашу активность.",
+        .stealthSendNowAction: "Отправить без невидимки",
+        .stealthSendNowConfirm: "Отправить сейчас",
 
         // Mihomo
         .mihomoTitle: "Подключение и Mihomo",
@@ -410,6 +419,7 @@ public enum BeyGramLocalizationTables {
         .mihomoSortLatency: "По задержке",
         .mihomoAutoSelect: "Автовыбор лучшего сервера",
         .mihomoMeasureDelays: "Проверить задержку",
+        .mihomoMeasureProgressFormat: "Проверка %d/%d…",
         .mihomoEmptyServers: "Серверы не загружены. Добавьте и обновите подписку выше.",
         .mihomoSectionDetails: "Подробности подключения",
         .mihomoLocalAddressTitle: "Локальный SOCKS5-вход",

@@ -1129,6 +1129,11 @@ extension ChatControllerImpl {
                         }
                         if case .scheduledMessages = strongSelf.presentationInterfaceState.subject {
                         } else {
+                            if messageIds.contains(where: { $0?.namespace == Namespaces.Message.ScheduledCloud }), let action = strongSelf.layoutActionOnViewTransitionAction {
+                                strongSelf.layoutActionOnViewTransitionAction = nil
+                                strongSelf.chatDisplayNode.historyNode.layoutActionOnViewTransition = nil
+                                action()
+                            }
                             strongSelf.chatDisplayNode.historyNode.scrollToEndOfHistory()
                             
                             if shouldOpenScheduledMessages {

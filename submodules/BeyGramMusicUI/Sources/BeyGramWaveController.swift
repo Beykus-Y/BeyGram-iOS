@@ -3,223 +3,123 @@ import UIKit
 import Display
 import SwiftSignalKit
 import TelegramPresentationData
-import ItemListUI
-import PresentationDataUtils
 import AccountContext
+import BeyGramDesign
 import BeyGramKit
 import BeyGramMedia
 
-private final class BeyGramWaveArguments {
-    let updateInvite: (String) -> Void
-    let checkInvite: () -> Void
-    let createWave: () -> Void
+private final class BeyGramWaveViewControllerImpl: BeyGramScrollViewController, UITextFieldDelegate {
+    private var inviteText = ""
+    private var validationResult: Bool?
 
-    init(updateInvite: @escaping (String) -> Void, checkInvite: @escaping () -> Void, createWave: @escaping () -> Void) {
-        self.updateInvite = updateInvite
-        self.checkInvite = checkInvite
-        self.createWave = createWave
+    private let heroCard = BeyGramCardView(spacing: 10)
+    private let heroIcon = UIImageView()
+    private let heroTitle = BeyGramTypography.makeLabel(style: .headline, weight: .semibold, lines: 0)
+    private let statusBadge = BeyGramPillBadge()
+    private let heroBody = BeyGramTypography.makeLabel(style: .subheadline, weight: .regular, lines: 0)
+
+    private let inviteHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let inviteCard = BeyGramCardView(spacing: 10)
+    private let inviteField = UITextField()
+    private let checkButton = BeyGramActionButton(style: .primary)
+    private let resultBadge = BeyGramPillBadge()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        self.heroIcon.image = UIImage(systemName: "dot.radiowaves.left.and.right")
+        self.heroIcon.contentMode = .scaleAspectFit
+        self.heroIcon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            self.heroIcon.widthAnchor.constraint(equalToConstant: 26),
+            self.heroIcon.heightAnchor.constraint(equalToConstant: 26)
+        ])
+        let heroTop = UIStackView(arrangedSubviews: [self.heroIcon, self.heroTitle, UIView(), self.statusBadge])
+        heroTop.axis = .horizontal
+        heroTop.alignment = .center
+        heroTop.spacing = 10
+        self.heroCard.contentStack.addArrangedSubview(heroTop)
+        self.heroCard.contentStack.addArrangedSubview(self.heroBody)
+        self.stackView.addArrangedSubview(self.heroCard)
+
+        self.stackView.addArrangedSubview(self.inviteHeader)
+        self.inviteField.borderStyle = .roundedRect
+        self.inviteField.autocorrectionType = .no
+        self.inviteField.autocapitalizationType = .none
+        self.inviteField.font = BeyGramTypography.font(style: .body)
+        self.inviteField.adjustsFontForContentSizeCategory = true
+        self.inviteField.delegate = self
+        self.inviteField.addTarget(self, action: #selector(self.inviteChanged), for: .editingChanged)
+        self.checkButton.addTarget(self, action: #selector(self.checkTapped), for: .touchUpInside)
+
+        self.inviteCard.contentStack.addArrangedSubview(self.inviteField)
+        self.inviteCard.contentStack.addArrangedSubview(self.checkButton)
+        self.inviteCard.contentStack.addArrangedSubview(self.resultBadge)
+        self.stackView.addArrangedSubview(self.inviteCard)
+
+        self.render()
     }
-}
 
-private enum BeyGramWaveSection: Int32 {
-    case availability
-    case session
-    case invite
-}
+    override func applyPresentationData(_ presentationData: PresentationData) {
+        super.applyPresentationData(presentationData)
+        self.render()
+    }
 
-private enum BeyGramWaveEntry: ItemListNodeEntry {
-    case availabilityHeader(PresentationTheme, String)
-    case availabilityBody(PresentationTheme, String)
-    case sessionHeader(PresentationTheme, String)
-    case sessionStatus(PresentationTheme, String, String)
-    case createWave(PresentationTheme, String)
-    case inviteHeader(PresentationTheme, String)
-    case inviteField(PresentationTheme, String, String)
-    case checkInvite(PresentationTheme, String, Bool)
-    case inviteResult(PresentationTheme, String)
+    private func render() {
+        let lang = self.presentationData.strings.primaryComponent.languageCode
+        let l10n = BeyGramL10n.shared
+        let palette = BeyGramThemePalette(theme: self.presentationData.theme)
 
-    var section: ItemListSectionId {
-        switch self {
-        case .availabilityHeader, .availabilityBody:
-            return BeyGramWaveSection.availability.rawValue
-        case .sessionHeader, .sessionStatus, .createWave:
-            return BeyGramWaveSection.session.rawValue
-        case .inviteHeader, .inviteField, .checkInvite, .inviteResult:
-            return BeyGramWaveSection.invite.rawValue
+        self.title = l10n.string(.bgWaveTitle, languageCode: lang)
+
+        self.heroCard.apply(palette: palette)
+        self.heroIcon.tintColor = palette.warning
+        self.heroTitle.text = l10n.string(.bgWaveUnavailableTitle, languageCode: lang)
+        self.heroTitle.textColor = palette.primaryText
+        self.statusBadge.configure(text: l10n.string(.bgWaveStatusDisconnected, languageCode: lang), textColor: palette.secondaryText, backgroundColor: palette.separator.withAlphaComponent(0.2))
+        self.heroBody.text = l10n.string(.bgWaveUnavailableBody, languageCode: lang)
+        self.heroBody.textColor = palette.secondaryText
+
+        self.inviteHeader.text = l10n.string(.bgWaveJoinByInvite, languageCode: lang).uppercased()
+        self.inviteHeader.textColor = palette.secondaryText
+        self.inviteCard.apply(palette: palette)
+        self.inviteField.placeholder = l10n.string(.bgWaveInvitePlaceholder, languageCode: lang)
+        self.inviteField.backgroundColor = palette.elevatedBackground
+        self.inviteField.textColor = palette.primaryText
+
+        let canCheck = !self.inviteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        self.checkButton.configure(title: l10n.string(.bgWaveCheckInvite, languageCode: lang), style: .primary, palette: palette, isEnabled: canCheck)
+
+        if let isValid = self.validationResult {
+            self.resultBadge.isHidden = false
+            self.resultBadge.configure(
+                text: l10n.string(isValid ? .bgWaveInviteValid : .bgWaveInviteInvalid, languageCode: lang),
+                textColor: isValid ? palette.success : palette.destructive,
+                backgroundColor: isValid ? palette.successSoft : palette.destructiveSoft
+            )
+        } else {
+            self.resultBadge.isHidden = true
         }
     }
 
-    var stableId: Int32 {
-        switch self {
-        case .availabilityHeader: return 0
-        case .availabilityBody: return 1
-        case .sessionHeader: return 2
-        case .sessionStatus: return 3
-        case .createWave: return 4
-        case .inviteHeader: return 5
-        case .inviteField: return 6
-        case .checkInvite: return 7
-        case .inviteResult: return 8
-        }
+    @objc private func inviteChanged() {
+        self.inviteText = self.inviteField.text ?? ""
+        self.validationResult = nil
+        self.render()
     }
 
-    static func == (lhs: BeyGramWaveEntry, rhs: BeyGramWaveEntry) -> Bool {
-        switch (lhs, rhs) {
-        case let (.availabilityHeader(lt, lText), .availabilityHeader(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.availabilityBody(lt, lText), .availabilityBody(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.sessionHeader(lt, lText), .sessionHeader(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.sessionStatus(lt, lTitle, lVal), .sessionStatus(rt, rTitle, rVal)):
-            return lt === rt && lTitle == rTitle && lVal == rVal
-        case let (.createWave(lt, lTitle), .createWave(rt, rTitle)):
-            return lt === rt && lTitle == rTitle
-        case let (.inviteHeader(lt, lText), .inviteHeader(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.inviteField(lt, lText, lPlaceholder), .inviteField(rt, rText, rPlaceholder)):
-            return lt === rt && lText == rText && lPlaceholder == rPlaceholder
-        case let (.checkInvite(lt, lTitle, lEnabled), .checkInvite(rt, rTitle, rEnabled)):
-            return lt === rt && lTitle == rTitle && lEnabled == rEnabled
-        case let (.inviteResult(lt, lText), .inviteResult(rt, rText)):
-            return lt === rt && lText == rText
-        default:
-            return false
-        }
+    @objc private func checkTapped() {
+        self.inviteField.resignFirstResponder()
+        self.validationResult = BGWaveLinkLooksValid(self.inviteText)
+        self.render()
     }
 
-    static func < (lhs: BeyGramWaveEntry, rhs: BeyGramWaveEntry) -> Bool {
-        return lhs.stableId < rhs.stableId
-    }
-
-    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
-        let arguments = arguments as! BeyGramWaveArguments
-        switch self {
-        case let .availabilityHeader(_, text), let .sessionHeader(_, text), let .inviteHeader(_, text):
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .availabilityBody(_, text), let .inviteResult(_, text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case let .sessionStatus(_, title, value):
-            return ItemListDisclosureItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                label: value,
-                sectionId: self.section,
-                style: .blocks,
-                disclosureStyle: .none,
-                action: nil
-            )
-        case let .createWave(_, title):
-            return ItemListActionItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                kind: .disabled,
-                alignment: .natural,
-                sectionId: self.section,
-                style: .blocks,
-                action: arguments.createWave
-            )
-        case let .inviteField(_, text, placeholder):
-            return ItemListSingleLineInputItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: NSAttributedString(string: "", textColor: presentationData.theme.list.itemPrimaryTextColor),
-                text: text,
-                placeholder: placeholder,
-                type: .regular(capitalization: false, autocorrection: false),
-                spacing: 0.0,
-                clearType: .always,
-                sectionId: self.section,
-                textUpdated: arguments.updateInvite,
-                action: arguments.checkInvite
-            )
-        case let .checkInvite(_, title, enabled):
-            return ItemListActionItem(
-                presentationData: presentationData,
-                systemStyle: .glass,
-                title: title,
-                kind: enabled ? .generic : .disabled,
-                alignment: .natural,
-                sectionId: self.section,
-                style: .blocks,
-                action: {
-                    if enabled { arguments.checkInvite() }
-                }
-            )
-        }
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        self.checkTapped()
+        return true
     }
 }
 
 /// Native BG Wave screen prepared for shared-listening transport without simulating fake connections.
 public func beyGramWaveController(context: AccountContext) -> ViewController {
-    let inviteText = Atomic<String>(value: "")
-    let validationResult = Atomic<Bool?>(value: nil)
-    let revision = ValuePromise<Int>(0, ignoreRepeated: false)
-    var counter = 0
-    let bump: () -> Void = {
-        counter += 1
-        revision.set(counter)
-    }
-
-    let arguments = BeyGramWaveArguments(
-        updateInvite: { text in
-            _ = inviteText.swap(text)
-            _ = validationResult.swap(nil)
-            bump()
-        },
-        checkInvite: {
-            let current = inviteText.with { $0 }
-            _ = validationResult.swap(BGWaveLinkLooksValid(current))
-            bump()
-        },
-        createWave: {}
-    )
-
-    let signal = combineLatest(context.sharedContext.presentationData, revision.get())
-    |> deliverOnMainQueue
-    |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
-        let lang = presentationData.strings.primaryComponent.languageCode
-        let l10n = BeyGramL10n.shared
-        let theme = presentationData.theme
-        let currentInvite = inviteText.with { $0 }
-        let isValid = validationResult.with { $0 }
-
-        var entries: [BeyGramWaveEntry] = [
-            .availabilityHeader(theme, l10n.string(.bgWaveUnavailableTitle, languageCode: lang).uppercased()),
-            .availabilityBody(theme, l10n.string(.bgWaveUnavailableBody, languageCode: lang)),
-            .sessionHeader(theme, l10n.string(.bgWaveCurrentSession, languageCode: lang).uppercased()),
-            .sessionStatus(theme, l10n.string(.bgWaveCurrentSession, languageCode: lang), l10n.string(.bgWaveStatusDisconnected, languageCode: lang)),
-            .createWave(theme, "\(l10n.string(.bgWaveCreateWave, languageCode: lang)) (\(l10n.string(.commonExperimental, languageCode: lang)))"),
-            .inviteHeader(theme, l10n.string(.bgWaveJoinByInvite, languageCode: lang).uppercased()),
-            .inviteField(theme, currentInvite, l10n.string(.bgWaveInvitePlaceholder, languageCode: lang)),
-            .checkInvite(theme, l10n.string(.bgWaveCheckInvite, languageCode: lang), !currentInvite.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        ]
-
-        if let isValid {
-            entries.append(.inviteResult(
-                theme,
-                isValid
-                    ? l10n.string(.bgWaveInviteValid, languageCode: lang)
-                    : l10n.string(.bgWaveInviteInvalid, languageCode: lang)
-            ))
-        }
-
-        let controllerState = ItemListControllerState(
-            presentationData: ItemListPresentationData(presentationData),
-            title: .text(l10n.string(.bgWaveTitle, languageCode: lang)),
-            leftNavigationButton: nil,
-            rightNavigationButton: nil,
-            backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back)
-        )
-        let listState = ItemListNodeState(
-            presentationData: ItemListPresentationData(presentationData),
-            entries: entries,
-            style: .blocks
-        )
-        return (controllerState, (listState, arguments))
-    }
-
-    return ItemListController(context: context, state: signal)
+    return BeyGramWaveViewControllerImpl(context: context)
 }

@@ -33,19 +33,37 @@ bool prepareMixTrack(const std::filesystem::path& path,
         return false;
     }
 
-    report(progress, 0.02f, "decoding audio");
+    // Each stage sets its fraction and name before it runs; the checkpoint reports them again,
+    // which is where a cancelled job throws.
+    float stageFraction = 0.0f;
+    std::string_view stageName = "decoding audio";
+    const auto enter = [&](float fraction, std::string_view stage) {
+        stageFraction = fraction;
+        stageName = stage;
+        report(progress, fraction, stage);
+    };
+    const MixCheckpoint checkpoint = [&] {
+        report(progress, stageFraction, stageName);
+    };
+
+    enter(0.02f, "decoding audio");
     bgmedia::AudioData decoded;
-    if (!decode(path, decoded, error)) {
+    if (!decode(path, options.maxPcmBytes, checkpoint, decoded, error)) {
         return false;
     }
     if (!decoded.valid()) {
         error = "Decoded audio is empty or has an unsupported layout.";
         return false;
     }
+    if (!mixerPcmFits(decoded.frameCount(), decoded.sampleRate,
+                      options.targetSampleRate, decoded.channels,
+                      options.maxPcmBytes)) {
+        error = "mixer PCM exceeds the in-memory limit";
+        return false;
+    }
 
     std::string pcmError;
-    const bgmedia::PcmBuffer pcm =
-        bgmedia::PcmBuffer::fromAudio(decoded, &pcmError);
+    bgmedia::PcmBuffer pcm = bgmedia::PcmBuffer::fromAudio(decoded, &pcmError);
     if (!pcm.valid()) {
         error = "Could not prepare PCM: " + pcmError;
         return false;
@@ -53,7 +71,7 @@ bool prepareMixTrack(const std::filesystem::path& path,
 
     const bool useCache = options.useCache && !options.cacheDirectory.empty();
 
-    report(progress, 0.22f, "checking cache");
+    enter(0.22f, "checking cache");
     std::optional<bgmedia::AnalysisResult> cached;
     if (useCache) {
         bgmedia::AnalysisCache cache(options.cacheDirectory);
@@ -66,10 +84,10 @@ bool prepareMixTrack(const std::filesystem::path& path,
     auto analysis = std::make_shared<bgmedia::AnalysisResult>();
     if (cached) {
         *analysis = std::move(*cached);
-        report(progress, 0.78f, "loaded analysis from cache");
+        enter(0.78f, "loaded analysis from cache");
     } else {
         bgmedia::Analyzer analyzer(options.analysis);
-        report(progress, 0.25f, "analysing");
+        enter(0.25f, "analysing");
         bgmedia::AnalysisReport analysisReport = analyzer.analyze(
             pcm, [&](float fraction, const std::string& stage) {
                 report(progress, 0.25f + 0.52f * fraction, stage);
@@ -82,14 +100,14 @@ bool prepareMixTrack(const std::filesystem::path& path,
         }
         *analysis = std::move(analysisReport.result);
         if (useCache) {
-            report(progress, 0.79f, "saving analysis cache");
+            enter(0.79f, "saving analysis cache");
             bgmedia::AnalysisCache cache(options.cacheDirectory);
             std::string cacheError;
             (void)cache.store(*analysis, pcm, options.analysis, &cacheError);
         }
     }
 
-    report(progress, 0.82f, "building feature map");
+    enter(0.82f, "building feature map");
     std::optional<bgmedia::mix::MixFeatureMap> cachedFeatures;
     if (useCache) {
         bgmedia::mix::MixFeatureCache featureCache(options.cacheDirectory);
@@ -103,7 +121,8 @@ bool prepareMixTrack(const std::filesystem::path& path,
     if (cachedFeatures) {
         *features = std::move(*cachedFeatures);
     } else {
-        bgmedia::mix::MixFeatureExtractor extractor(options.features);
+        bgmedia::mix::MixFeatureExtractor extractor(options.features, nullptr,
+                                                    checkpoint);
         *features = extractor.extract(decoded, pcm, *analysis);
         if (useCache && features->valid()) {
             bgmedia::mix::MixFeatureCache featureCache(options.cacheDirectory);
@@ -113,11 +132,15 @@ bool prepareMixTrack(const std::filesystem::path& path,
         }
     }
 
-    report(progress, 0.90f, "preparing mixer audio");
+    // The analysis and feature caches are done: release the mono buffer before the mixer output
+    // is allocated, and hand the decoded source over instead of copying it.
+    pcm = {};
+    enter(0.90f, "preparing mixer audio");
     std::string trackError;
     auto track = std::make_shared<bgmedia::mix::PcmTrack>(
-        bgmedia::mix::PcmTrack::fromAudio(decoded, options.targetSampleRate,
-                                          &trackError));
+        bgmedia::mix::PcmTrack::fromAudio(std::move(decoded),
+                                          options.targetSampleRate, &trackError,
+                                          checkpoint));
     if (!track->valid()) {
         error = "Could not prepare mixer audio: " + trackError;
         return false;
@@ -126,7 +149,7 @@ bool prepareMixTrack(const std::filesystem::path& path,
     out.audio = std::move(track);
     out.analysis = std::move(analysis);
     out.features = std::move(features);
-    report(progress, 1.0f, "ready");
+    enter(1.0f, "ready");
     return true;
 }
 

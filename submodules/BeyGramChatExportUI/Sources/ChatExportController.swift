@@ -4,270 +4,208 @@ import Display
 import SwiftSignalKit
 import TelegramCore
 import TelegramPresentationData
-import ItemListUI
-import PresentationDataUtils
 import AccountContext
 import UniformTypeIdentifiers
 import BeyGramChatExport
 import BeyGramChatExportTelegram
+import BeyGramDesign
 import BeyGramKit
 
-private final class ChatExportRun {
-    var format: ChatExportFormat = .json
-    var status: String?
-    var isRunning = false
-    var task: Task<Void, Never>?
-    var fileURL: URL?
-    var handle: FileHandle?
-    var folderURL: URL?
-}
+private final class ChatExportViewControllerImpl: BeyGramScrollViewController, UIDocumentPickerDelegate {
+    private let peerId: EnginePeer.Id
+    private let chatTitle: String
+    private let accountLabel: String
+    private let hasProtectedContent: Bool
 
-private final class ChatExportArguments {
-    let setFormat: (ChatExportFormat) -> Void
-    let chooseFolder: () -> Void
-    let cancel: () -> Void
+    private var format: ChatExportFormat = .json
+    private var status: String?
+    private var isRunning = false
+    private var exportTask: Task<Void, Never>?
+    private var handle: FileHandle?
+    private var folderURL: URL?
 
-    init(setFormat: @escaping (ChatExportFormat) -> Void, chooseFolder: @escaping () -> Void, cancel: @escaping () -> Void) {
-        self.setFormat = setFormat
-        self.chooseFolder = chooseFolder
-        self.cancel = cancel
+    private let headerCard = BeyGramCardView(spacing: 8)
+    private let chatTitleLabel = BeyGramTypography.makeLabel(style: .headline, weight: .semibold, lines: 2)
+    private let noticeLabel = BeyGramTypography.makeLabel(style: .footnote, weight: .regular, lines: 0)
+
+    private let formatHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let formatCard = BeyGramCardView(spacing: 10)
+    private let formatControl = UISegmentedControl(items: ["JSON", "HTML"])
+
+    private let actionCard = BeyGramCardView(spacing: 10)
+    private let exportButton = BeyGramActionButton(style: .primary)
+    private let cancelButton = BeyGramActionButton(style: .destructive)
+    private let statusLabel = BeyGramTypography.makeLabel(style: .subheadline, weight: .medium, lines: 0)
+
+    init(context: AccountContext, peerId: EnginePeer.Id, chatTitle: String, accountLabel: String, hasProtectedContent: Bool) {
+        self.peerId = peerId
+        self.chatTitle = chatTitle
+        self.accountLabel = accountLabel
+        self.hasProtectedContent = hasProtectedContent
+        super.init(context: context)
     }
-}
 
-private enum ChatExportSection: Int32 {
-    case format
-    case run
-}
+    deinit {
+        self.exportTask?.cancel()
+        try? self.handle?.close()
+        self.folderURL?.stopAccessingSecurityScopedResource()
+    }
 
-private enum ChatExportEntry: ItemListNodeEntry, Equatable {
-    case formatHeader(PresentationTheme, String)
-    case json(PresentationTheme, String, Bool)
-    case html(PresentationTheme, String, Bool)
-    case chooseFolder(PresentationTheme, String, Bool)
-    case notice(PresentationTheme, String)
-    case status(PresentationTheme, String)
-    case cancel(PresentationTheme, String)
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        self.headerCard.contentStack.addArrangedSubview(self.chatTitleLabel)
+        self.headerCard.contentStack.addArrangedSubview(self.noticeLabel)
+        self.stackView.addArrangedSubview(self.headerCard)
 
-    var section: ItemListSectionId {
-        switch self {
-        case .formatHeader, .json, .html: return ChatExportSection.format.rawValue
-        case .chooseFolder, .notice, .status, .cancel: return ChatExportSection.run.rawValue
+        self.stackView.addArrangedSubview(self.formatHeader)
+        self.formatControl.selectedSegmentIndex = 0
+        self.formatControl.addTarget(self, action: #selector(self.formatChanged), for: .valueChanged)
+        self.formatCard.contentStack.addArrangedSubview(self.formatControl)
+        self.stackView.addArrangedSubview(self.formatCard)
+
+        self.exportButton.addTarget(self, action: #selector(self.chooseFolderTapped), for: .touchUpInside)
+        self.cancelButton.addTarget(self, action: #selector(self.cancelTapped), for: .touchUpInside)
+        self.actionCard.contentStack.addArrangedSubview(self.exportButton)
+        self.actionCard.contentStack.addArrangedSubview(self.statusLabel)
+        self.actionCard.contentStack.addArrangedSubview(self.cancelButton)
+        self.stackView.addArrangedSubview(self.actionCard)
+
+        self.render()
+    }
+
+    override func applyPresentationData(_ presentationData: PresentationData) {
+        super.applyPresentationData(presentationData)
+        self.render()
+    }
+
+    private func render() {
+        let lang = self.presentationData.strings.primaryComponent.languageCode
+        let l10n = BeyGramL10n.shared
+        let palette = BeyGramThemePalette(theme: self.presentationData.theme)
+
+        self.title = l10n.string(.exportTitle, languageCode: lang)
+
+        self.headerCard.apply(palette: palette)
+        self.chatTitleLabel.text = self.chatTitle
+        self.chatTitleLabel.textColor = palette.primaryText
+        self.noticeLabel.text = l10n.string(.exportProtectedNotice, languageCode: lang)
+        self.noticeLabel.textColor = palette.secondaryText
+
+        self.formatHeader.text = l10n.string(.exportSectionFormat, languageCode: lang).uppercased()
+        self.formatHeader.textColor = palette.secondaryText
+        self.formatCard.apply(palette: palette)
+        self.formatControl.setTitle(l10n.string(.exportFormatJson, languageCode: lang), forSegmentAt: 0)
+        self.formatControl.setTitle(l10n.string(.exportFormatHtml, languageCode: lang), forSegmentAt: 1)
+        self.formatControl.isEnabled = !self.isRunning
+
+        self.actionCard.apply(palette: palette)
+        self.exportButton.configure(
+            title: l10n.string(.exportChooseFolder, languageCode: lang),
+            style: .primary,
+            palette: palette,
+            isLoading: self.isRunning,
+            isEnabled: !self.isRunning
+        )
+        if let status = self.status {
+            self.statusLabel.isHidden = false
+            self.statusLabel.text = status
+            self.statusLabel.textColor = palette.secondaryText
+        } else {
+            self.statusLabel.isHidden = true
         }
+        self.cancelButton.isHidden = !self.isRunning
+        self.cancelButton.configure(title: l10n.string(.exportCancel, languageCode: lang), style: .destructive, palette: palette)
     }
 
-    var stableId: Int64 {
-        switch self {
-        case .formatHeader: return 0
-        case .json: return 1
-        case .html: return 2
-        case .chooseFolder: return 10
-        case .notice: return 11
-        case .status: return 12
-        case .cancel: return 13
-        }
+    @objc private func formatChanged() {
+        self.format = self.formatControl.selectedSegmentIndex == 0 ? .json : .html
+        self.render()
     }
 
-    static func == (lhs: ChatExportEntry, rhs: ChatExportEntry) -> Bool {
-        switch (lhs, rhs) {
-        case let (.formatHeader(lt, lText), .formatHeader(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.json(lt, lTitle, lSel), .json(rt, rTitle, rSel)):
-            return lt === rt && lTitle == rTitle && lSel == rSel
-        case let (.html(lt, lTitle, lSel), .html(rt, rTitle, rSel)):
-            return lt === rt && lTitle == rTitle && lSel == rSel
-        case let (.chooseFolder(lt, lTitle, lEnabled), .chooseFolder(rt, rTitle, rEnabled)):
-            return lt === rt && lTitle == rTitle && lEnabled == rEnabled
-        case let (.notice(lt, lText), .notice(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.status(lt, lText), .status(rt, rText)):
-            return lt === rt && lText == rText
-        case let (.cancel(lt, lTitle), .cancel(rt, rTitle)):
-            return lt === rt && lTitle == rTitle
-        default:
-            return false
-        }
+    @objc private func chooseFolderTapped() {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.folder], asCopy: false)
+        picker.delegate = self
+        self.present(picker, animated: true, completion: nil)
     }
 
-    static func < (lhs: ChatExportEntry, rhs: ChatExportEntry) -> Bool {
-        return lhs.stableId < rhs.stableId
-    }
-
-    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
-        let arguments = arguments as! ChatExportArguments
-        switch self {
-        case let .formatHeader(_, text):
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .json(_, title, selected):
-            return ItemListCheckboxItem(presentationData: presentationData, systemStyle: .glass, title: title, style: .left, checked: selected, zeroSeparatorInsets: false, sectionId: self.section, action: {
-                arguments.setFormat(.json)
-            })
-        case let .html(_, title, selected):
-            return ItemListCheckboxItem(presentationData: presentationData, systemStyle: .glass, title: title, style: .left, checked: selected, zeroSeparatorInsets: false, sectionId: self.section, action: {
-                arguments.setFormat(.html)
-            })
-        case let .chooseFolder(_, title, enabled):
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: title, kind: enabled ? .generic : .disabled, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                if enabled { arguments.chooseFolder() }
-            })
-        case let .notice(_, text), let .status(_, text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case let .cancel(_, title):
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: title, kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.cancel)
-        }
-    }
-}
-
-private final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
-    let onPick: (URL) -> Void
-
-    init(onPick: @escaping (URL) -> Void) {
-        self.onPick = onPick
+    @objc private func cancelTapped() {
+        self.exportTask?.cancel()
     }
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        if let url = urls.first {
-            self.onPick(url)
-        }
-    }
-}
-
-/// Export screen for one chat using unified BeyGram localization.
-public func chatExportController(context: AccountContext, peerId: EnginePeer.Id, chatTitle: String, accountLabel: String, hasProtectedContent: Bool) -> ViewController {
-    let run = ChatExportRun()
-    let revision = ValuePromise<Int>(0, ignoreRepeated: false)
-    var counter = 0
-    let bump: () -> Void = {
-        counter += 1
-        revision.set(counter)
-    }
-    var presentPicker: ((UIDocumentPickerViewController) -> Void)?
-    var folderDelegate: FolderPickerDelegate?
-
-    func currentLang() -> String {
-        return context.sharedContext.currentPresentationData.with { $0 }.strings.primaryComponent.languageCode
+        guard let folder = urls.first else { return }
+        self.startExport(folder: folder)
     }
 
-    func finishRun(message: String?) {
-        run.isRunning = false
-        run.status = message
-        run.task = nil
-        try? run.handle?.close()
-        run.handle = nil
-        run.folderURL?.stopAccessingSecurityScopedResource()
-        run.folderURL = nil
-        bump()
-    }
-
-    func startExport(folder: URL) {
-        let lang = currentLang()
+    private func startExport(folder: URL) {
+        let lang = self.presentationData.strings.primaryComponent.languageCode
         let l10n = BeyGramL10n.shared
         let accessed = folder.startAccessingSecurityScopedResource()
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-        let ext = run.format == .json ? "json" : "html"
+        let ext = self.format == .json ? "json" : "html"
         let fileURL = folder.appendingPathComponent("BeyGram-chat-\(stamp).\(ext)")
         FileManager.default.createFile(atPath: fileURL.path, contents: nil)
         guard let handle = try? FileHandle(forWritingTo: fileURL) else {
             if accessed { folder.stopAccessingSecurityScopedResource() }
-            run.status = l10n.string(.commonError, languageCode: lang)
-            bump()
+            self.status = l10n.string(.commonError, languageCode: lang)
+            self.render()
             return
         }
-        run.folderURL = accessed ? folder : nil
-        run.fileURL = fileURL
-        run.handle = handle
-        run.isRunning = true
-        run.status = l10n.format(.exportProgress, languageCode: lang, 0)
-        bump()
+        self.folderURL = accessed ? folder : nil
+        self.handle = handle
+        self.isRunning = true
+        self.status = l10n.format(.exportProgress, languageCode: lang, 0)
+        self.render()
 
         let cleanup: () -> Void = {
             try? handle.truncate(atOffset: 0)
             try? handle.close()
             try? FileManager.default.removeItem(at: fileURL)
         }
-        run.task = Task { @MainActor in
+        self.exportTask = Task { @MainActor in
             do {
                 let summary = try await runChatExport(
-                    context: context,
-                    peerId: peerId,
-                    chatTitle: chatTitle,
-                    accountLabel: accountLabel,
-                    hasProtectedContent: hasProtectedContent,
-                    format: run.format,
+                    context: self.context,
+                    peerId: self.peerId,
+                    chatTitle: self.chatTitle,
+                    accountLabel: self.accountLabel,
+                    hasProtectedContent: self.hasProtectedContent,
+                    format: self.format,
                     range: ChatExportRange(),
                     sink: ChatExportFileHandleSink(handle: handle),
                     cleanup: cleanup,
                     onProgress: { progress in
-                        run.status = l10n.format(.exportProgress, languageCode: lang, progress.exportedMessages)
-                        bump()
+                        self.status = l10n.format(.exportProgress, languageCode: lang, progress.exportedMessages)
+                        self.render()
                     }
                 )
-                let details = "\(summary.exportedMessages)"
-                finishRun(message: l10n.format(.exportCompleted, languageCode: lang, details))
+                self.finishRun(message: l10n.format(.exportCompleted, languageCode: lang, "\(summary.exportedMessages)"))
             } catch is CancellationError {
-                finishRun(message: l10n.string(.exportCancelled, languageCode: lang))
+                self.finishRun(message: l10n.string(.exportCancelled, languageCode: lang))
             } catch {
-                finishRun(message: l10n.string(.commonError, languageCode: lang))
+                self.finishRun(message: l10n.string(.commonError, languageCode: lang))
             }
         }
     }
 
-    let arguments = ChatExportArguments(
-        setFormat: { format in
-            run.format = format
-            bump()
-        },
-        chooseFolder: {
-            let delegate = FolderPickerDelegate { url in
-                startExport(folder: url)
-            }
-            folderDelegate = delegate
-            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.folder], asCopy: false)
-            picker.delegate = delegate
-            presentPicker?(picker)
-        },
-        cancel: {
-            run.task?.cancel()
-        }
+    private func finishRun(message: String?) {
+        self.isRunning = false
+        self.status = message
+        self.exportTask = nil
+        try? self.handle?.close()
+        self.handle = nil
+        self.folderURL?.stopAccessingSecurityScopedResource()
+        self.folderURL = nil
+        self.render()
+    }
+}
+
+public func chatExportController(context: AccountContext, peerId: EnginePeer.Id, chatTitle: String, accountLabel: String, hasProtectedContent: Bool) -> ViewController {
+    return ChatExportViewControllerImpl(
+        context: context,
+        peerId: peerId,
+        chatTitle: chatTitle,
+        accountLabel: accountLabel,
+        hasProtectedContent: hasProtectedContent
     )
-
-    let signal = combineLatest(context.sharedContext.presentationData, revision.get())
-    |> deliverOnMainQueue
-    |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
-        let lang = presentationData.strings.primaryComponent.languageCode
-        let l10n = BeyGramL10n.shared
-        let theme = presentationData.theme
-        let controllerState = ItemListControllerState(
-            presentationData: ItemListPresentationData(presentationData),
-            title: .text(l10n.string(.exportTitle, languageCode: lang)),
-            leftNavigationButton: nil,
-            rightNavigationButton: nil,
-            backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back)
-        )
-        var entries: [ChatExportEntry] = [
-            .formatHeader(theme, l10n.string(.exportSectionFormat, languageCode: lang).uppercased()),
-            .json(theme, l10n.string(.exportFormatJson, languageCode: lang), run.format == .json),
-            .html(theme, l10n.string(.exportFormatHtml, languageCode: lang), run.format == .html),
-            .chooseFolder(theme, l10n.string(.exportChooseFolder, languageCode: lang), !run.isRunning),
-            .notice(theme, l10n.string(.exportProtectedNotice, languageCode: lang))
-        ]
-        if let status = run.status {
-            entries.append(.status(theme, status))
-        }
-        if run.isRunning {
-            entries.append(.cancel(theme, l10n.string(.exportCancel, languageCode: lang)))
-        }
-        let listState = ItemListNodeState(
-            presentationData: ItemListPresentationData(presentationData),
-            entries: entries,
-            style: .blocks
-        )
-        return (controllerState, (listState, arguments))
-    }
-
-    let controller = ItemListController(context: context, state: signal)
-    presentPicker = { [weak controller] picker in
-        controller?.present(picker, animated: true, completion: nil)
-    }
-    _ = folderDelegate
-    return controller
 }

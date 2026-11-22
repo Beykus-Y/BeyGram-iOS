@@ -17,12 +17,12 @@ swift_library(
 
 # Host (macOS) test: run with
 # `./build-input/bazel-9.2.0-darwin-arm64 test //submodules/BeyGramMusicFormat:BeyGramMusicFormatTests`.
-# Not run yet: no macOS toolchain was available when these tests were written.
+# Not run yet: no macOS toolchain was available when these tests were written (see CLAUDE.md in this directory).
 swift_test(
     name = "BeyGramMusicFormatTests",
-    srcs = [
-        "Tests/BGMusicFormatTests.swift",
-    ],
+    srcs = glob([
+        "Tests/*.swift",
+    ]),
     deps = [
         ":BeyGramMusicFormat",
     ],
