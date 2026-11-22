@@ -18,11 +18,42 @@ Block B of the iOS plan (privacy and stealth, see the plan document «План �
 - `resendMessages(account:messageIds:sendNowConsent:)`: a resend is scheduled like a new send, and a refused batch stays failed and is not deleted. `sendNowConsent: true` sends now, outside stealth sending. No caller passes it yet: the UI must ask the user first.
 - **The date is set at dispatch.** The enqueue-time date is only a placeholder. `beyGramStealthAtDispatch` (called by `PendingMessageManager` when the request is built, after the media upload) sets the chosen delay from the server clock at that moment, never less than the lead, and stores the same date in the same transaction, so the server's reply is recognised as the scheduled send. A batch of an album shares one clock reading, so its messages carry one date. The delay waits in `BeyGramStealthScheduleRegistry` (UserDefaults `beygram.stealth.schedules.<accountPeerId>`), keyed by message id. A message is rewritten only while its stored date is the one it was registered with, so a date the user picked, or an entry left by a deleted message, is never touched. A stealth message whose entry is missing keeps its stored date; the registry and the database share the app container, so this should not happen.
 
+## Local delayed send (a model, not wired)
+
+`Sources/BeyGramStealthDelayedSend.swift`: `BeyGramStealthDelayedSendQueue`, one file per account
+(`delayed-send-<accountPeerId>.json` in a directory the caller passes; use one excluded from backup). It holds the text the user
+delays by 1 to 3600 seconds and sends nothing itself. TelegramCore's dispatcher and the UI are not wired. The screen contract is
+`docs/stealth-ui-contract.md`, section 10.
+
+- States: `queued` waits for its time. `dispatching` is written before the request. `failed` carries a reason (`expired`,
+  `network`, `server`). `uncertain` is a request that a restart or a lost connection interrupted, so it may already be on the server.
+- A restart turns `dispatching` into `uncertain`, never into `queued`. Only the user sends an uncertain message again.
+- A queued message older than 24 hours (`retentionMillis`) becomes `failed` with `expired`, and keeps its text. Android drops it
+  instead. iOS keeps it, because the ТЗ asks that the text of a failed message can be restored.
+- With "hide online" on, the messages due at load are held (`heldAtLoad()`) until the user sends them. A send would show the account online.
+- A chat keeps its order, as on Android (`isDue`): a newer waiting message waits while an older message of its chat is held, in flight, uncertain or failed. An expired message does not hold the others back. `sendNow` bypasses the order.
+- `sendNow` sends a queued message before its time, or sends a failed or uncertain one again. It sets `sendNowConsented`: the
+  user's agreement to send past a stealth refusal of an automatic send.
+- The cap is 50 messages per account. The times come from the device clock, because no server is involved. `reconcile` limits what a
+  jump back does.
+- iOS can suspend or end the app at any time. Due messages go out only while the app runs with a chat of the account open. Nothing
+  here promises the exact time.
+- The entry keeps the chat, the forum topic, the reply target and the silent flag, as Android does. It does not keep the formatting, which Android keeps as entities. Before a formatted message can be delayed, the wiring must decide how to store it, or refuse it.
+
+Deliberate differences from Android (`data/delayed/DelayedSendQueue.kt`):
+
+- Failed and uncertain messages are kept until the user sends or deletes them. Android removes them after 24 hours, so the cap of 50 can fill with them.
+- `sendNow` restarts the 24 hours of the message it sends again. Android keeps the original time, since it removes failed messages after 24 hours, so a message it sends again is never older than that.
+- `sendNowConsented` is kept on disk. Android keeps its explicit flag in memory only.
+- `edit` changes the text in place and keeps the due time. Android's queue has no in-place edit; its `cancel` returns the text to the composer.
+
+Tests: `Tests/BeyGramStealthDelayedSendTests.swift`, a host `swift_test` (listed in `BUILD`).
+
 ## Not covered yet
 
 - **View-once media and live locations**: Android refuses them (`TdStealthScheduler.resolve`); iOS does not yet. Channel direct messages (monoforums) are not refused either.
 - **Standalone sends** (`standaloneSendMessage`, share and intent paths) do not pass the hook. The sideload build has no extensions, so they are not reachable there today.
-- Story views, open-content receipts, the delayed-send queue, live text drafts, the settings screen and the consent prompt (UI, outside this module).
+- Story views, open-content receipts, live text drafts, the settings screen and the consent prompt (UI, outside this module). The local delayed send is a model only, see below.
 
 ## Rules
 
@@ -39,4 +70,4 @@ Block B of the iOS plan (privacy and stealth, see the plan document «План �
   - `submodules/TelegramCore/Sources/PendingMessages/EnqueueMessage.swift` with `submodules/TelegramCore/Sources/BeyGram/BeyGramStealthSend.swift`: sending and resending.
 - **Scheduled sends**: flags bit 10 goes together with the date in the request builder (`PendingMessageManager`), so a date is never sent without its flag.
 - **Clock**: the server clock (`network.globalTime`), never the device clock. A date in the past means an immediate send.
-- **Tests**: `Tests/BeyGramStealthTests.swift`, a host `swift_test` for the pure logic. The TelegramCore parts have no host test. The batch logic and the failed marker need a device check: the chat shows one message, and a refused send shows as failed and goes out only after a resend.
+- **Tests**: `Tests/BeyGramStealthTests.swift` and `Tests/BeyGramStealthDelayedSendTests.swift`, host `swift_test`s for the pure logic. The TelegramCore parts have no host test. The batch logic and the failed marker need a device check: the chat shows one message, and a refused send shows as failed and goes out only after a resend.

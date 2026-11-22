@@ -24,6 +24,7 @@ swift_library(
 swift_test(
     name = "BeyGramStealthTests",
     srcs = [
+        "Tests/BeyGramStealthDelayedSendTests.swift",
         "Tests/BeyGramStealthTests.swift",
     ],
     copts = [

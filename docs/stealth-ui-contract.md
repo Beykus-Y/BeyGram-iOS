@@ -91,7 +91,7 @@ their settings.
 ## 6. Limits the UI must respect
 
 - Thread and topic reads (`readDiscussion`, `readSavedHistory`) follow the read-receipt rule of the chat they belong to. With the rule on, nothing is sent, and the local read state still changes. The UI shows nothing new for this.
-- The local delay queue is not built. The UI must not offer a delay that happens on the device.
+- The local delayed send is a model, not wired to dispatch or to a screen (section 10). The UI must not offer a delay that happens on the device until it is wired.
 - Secret chats and paid messages are refused, not scheduled. View-once media and live locations are not refused yet (Android
   refuses them). Channel direct messages (monoforums) are not refused yet.
 - A reason is keyed by the local message id, which Postbox can reuse after a deletion. Show a stealth dialog only for a message
@@ -119,3 +119,60 @@ their settings.
 
 - How a waiting message is shown: in the chat, in a banner, or in the scheduled list.
 - Whether the delay choices (15, 30, 60, 120 s) are the ones to offer.
+
+## 10. Local delayed send (model)
+
+`BeyGramStealthDelayedSendQueue` holds a message the user delays by 1 to 3600 seconds, on this device only. Nothing dispatches
+it and no screen shows it yet, so this section is the contract for the screen, not a running feature.
+
+Message states (`BeyGramStealthDelayedStatus`):
+
+| State | Meaning | What the screen shows |
+|---|---|---|
+| queued | Waits for its time. | "Sends at" the due time, with Cancel and Edit. |
+| queued, held | Due when the app started with "hide online" on. `heldAtLoad()` lists it. | The text, with Send now. Key `BeyGram.Stealth.Delay.Held`. |
+| dispatching | The request is in flight. | "Sending", with no action. |
+| failed | Not sent. The reason is `BeyGramStealthDelayedFailure`: expired, network or server. | The dialog for the reason, with Send now, Edit and Delete. |
+| uncertain | The app stopped during the send, so the message may have gone out. | Key `BeyGram.Stealth.Delay.Uncertain`. Send again only after a confirmation. |
+
+Actions:
+
+- **Cancel** (`cancel(id:)`): for a queued message. It returns the message, so its text goes back to the draft. Not for a message in flight.
+- **Edit** (`edit(id:text:)`): for queued, failed and uncertain messages. The due time stays.
+- **Send now** (`sendNow(id:nowMillis:)`): sends a queued message before its time, or sends a failed or uncertain one again. The
+  screen must confirm first for an uncertain message, because it may be a duplicate. The choice is the user's agreement, so it sets
+  `sendNowConsented`.
+
+Order in a chat: a newer waiting message waits while an older message of that chat is held, in flight, uncertain or failed. An
+expired message does not hold the others back. Send now on the newer one sends it at once, ahead of that order.
+
+Limits the screen must respect: 50 messages per account, failed and uncertain ones included. The delay is 1 to 3600 seconds. The
+text is at most 4096 UTF-16 units. A message older than 24 hours expires: it becomes failed, with its text kept. A failed or
+uncertain message stays until the user sends it or deletes it.
+
+The entry keeps the chat, the forum topic, the reply and the silent flag. It does not keep formatting yet, so the screen must not
+offer a delay for a formatted message until that is decided.
+
+Strings (Russian and English). The failure keys come from `BeyGramStealthDelayedFailure.localizationKey`:
+
+| Key | Russian | English |
+|---|---|---|
+| `BeyGram.Stealth.Delay.Failure.Expired` | Сообщение ждало отправки больше суток, поэтому оно не отправлено. Текст сохранён: отправьте его сейчас или удалите. | The message waited for more than a day, so it was not sent. The text is kept: send it now or delete it. |
+| `BeyGram.Stealth.Delay.Failure.Network` | Не удалось отправить из-за сети. Текст сохранён: отправьте его снова или удалите. | The message could not be sent because of a network error. The text is kept: send it again or delete it. |
+| `BeyGram.Stealth.Delay.Failure.Server` | Сервер не принял сообщение. Текст сохранён: отправьте его снова или удалите. | The server did not accept the message. The text is kept: send it again or delete it. |
+| `BeyGram.Stealth.Delay.Uncertain` | Приложение закрылось во время отправки, поэтому сообщение могло уйти. Отправьте его снова, только если его нет в чате. | The app closed while the message was being sent, so it may have gone out. Send it again only if it is not in the chat. |
+| `BeyGram.Stealth.Delay.Held` | Сообщение ждёт вашего решения: скрытие онлайн включено, поэтому оно не отправлено само. | The message waits for you: hide online is on, so it was not sent by itself. |
+
+Checks on a device, once the queue is wired:
+
+1. Hide online on, and a message due while the app is closed: after the launch it is held, and it goes out only after Send now.
+2. Hide online off: the message goes out once the app runs with its chat open. Do not expect the exact time while the app is suspended.
+3. Force quit during a send: after the launch the message shows as uncertain, and nothing sends it by itself.
+4. Cancel: the text returns to the draft.
+5. A message left for more than 24 hours shows as failed (expired), with its text.
+6. Two accounts: each queue shows only its own messages.
+7. A newer message behind a failed older one in the same chat waits until the older one is sent or deleted. Send now on the newer one sends it at once.
+
+Open points for the product owner: whether an expired message should be dropped, as Android does, or kept as here. Whether the
+held state needs a banner, or only the message itself. Whether failed and uncertain messages should be removed after 24 hours, as
+Android does; until then the cap of 50 can fill with them. How a formatted message is delayed, since Android keeps its formatting.
