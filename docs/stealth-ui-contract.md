@@ -15,7 +15,7 @@ The whole feature sits behind the BeyGramKit feature `privacyPolicy`, which is o
 | Setting | Field | Default | Notes |
 |---|---|---|---|
 | Hide read receipts | `hideReadReceipts` | off | Account default. A per-chat override applies. |
-| Hide online | `hideOnline` | off | Account-wide. Applies at once when it changes once PR #108 is in. Before that it waits for the next presence refresh. |
+| Hide online | `hideOnline` | off | Account-wide. Applies at once when it changes (PR #108, now on DEV). |
 | Hide typing | `hideTyping` | off | Account default. A per-chat override applies. |
 | Scheduled sending | `serverScheduledSend` | off | Sends the messages the user did not schedule as server-scheduled. |
 | Delay | `scheduledSendDelaySeconds` | 15 | Choices in `BeyGramStealthSettings.scheduleDelayChoices` (15, 30, 60, 120). Never below `minimumServerLeadSeconds` (15). |
@@ -100,7 +100,7 @@ their settings.
 
 ## 7. Checks on a device (Gemini)
 
-1. Hide online on: the account shows offline at once, without waiting for the 30 s refresh (needs PR #108).
+1. Hide online on: the account shows offline at once, without waiting for the 30 s refresh (PR #108, now on DEV).
 2. Scheduled sending with a 15 s delay, and a photo or video that takes more than 15 s to upload: the message is published at the
    chosen delay, not at once.
 3. Secret chat with scheduled sending on: the message is failed with the secret-chat dialog. Resend gives the same reason.
