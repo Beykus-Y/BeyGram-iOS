@@ -5,7 +5,8 @@
 //
 // Threading: call every method from any thread. Each call runs asynchronously on one private serial queue, which owns
 // the controller and the native session. Completions, the delegate, outboundLinkHandler and hostTapHandler run on the
-// main queue. The facade never waits on the main queue, so a caller on the main queue must not wait on the facade.
+// main queue. The one wait on the main queue is the detach of the host tap (hostTapHandler(NULL)), which runs
+// synchronously just before the native session is released. So a caller on the main queue must never wait on the facade.
 //
 // Lifecycle: call -invalidate once before the last reference goes. It runs asynchronously and stops the timers and the
 // listener audio, and it detaches the host tap before the native session is released.
