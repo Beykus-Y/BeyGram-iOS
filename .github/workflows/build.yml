@@ -308,3 +308,17 @@ jobs:
             ${{ runner.TEMP }}/build.log
             versions.json
           retention-days: 7
+
+      - name: Repeat build errors at the end of the log
+        if: always()
+        run: |
+          # The job log shows only its last 5,000 lines, so errors printed early in the IPA step can be cut off.
+          # This step prints every error line of build.log again, at the very end of the job log.
+          log="$RUNNER_TEMP/build.log"
+          echo "===== Error lines from build.log ====="
+          if [ -f "$log" ]; then
+            sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g' "$log" | grep -E 'error:|ERROR:|FAILED:' | head -n 300 || true
+          else
+            echo "No build log at $log"
+          fi
+          echo "===== End of error lines ====="
