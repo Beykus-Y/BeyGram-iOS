@@ -42,14 +42,34 @@ public final class BGYandexURLSessionTransport: BGYandexTransport {
     }
 }
 
+/// Why a request to Yandex failed. The UI maps these to its own strings; nothing here is raw server text.
 public enum BGYandexError: Error, Equatable {
     case network
+    /// The access token is refused and cannot be renewed: the account has to sign in again.
     case sessionExpired
+    /// No signed-in account for this call (signed out, or the account changed meanwhile).
+    case notSignedIn
+    /// The account has no subscription that allows full tracks.
+    case subscriptionRequired
     case unavailable
     case notFound
     case rateLimited
+    /// The answer did not have the shape the app understands. The service may have changed.
     case serviceChanged
+    /// The file behind a track link is not a track: an error page, a text body or a cut-off file. Nothing is kept.
+    case invalidFile
     case unknown
+
+    /// True when the failure may pass on its own (a pause, a session, a network blip), so a track is retried later.
+    /// False when the track itself is the verdict (missing, or a format the app does not read). As `YandexTrackResolver.kt`.
+    public var isTemporary: Bool {
+        switch self {
+        case .notFound, .serviceChanged:
+            return false
+        default:
+            return true
+        }
+    }
 }
 
 /// The only path to Yandex. One queue, the gap between requests, and a whole-queue pause after 429.
@@ -71,6 +91,7 @@ public final class BGYandexClient {
         queue.async {
             var prepared = request
             prepared.setValue(BGYandexConfig.clientHeader, forHTTPHeaderField: "X-Yandex-Music-Client")
+            prepared.setValue(BGYandexConfig.userAgent, forHTTPHeaderField: "User-Agent")
             prepared.setValue("application/json", forHTTPHeaderField: "Accept")
             if let token = token {
                 prepared.setValue("OAuth \(token)", forHTTPHeaderField: "Authorization")
@@ -120,5 +141,16 @@ public final class BGYandexClient {
         default:
             return .failure(.unknown)
         }
+    }
+
+    /// The error for an answer that is not 2xx: `nil` (no answer) is a network failure.
+    static func error(for response: BGYandexHTTPResponse?) -> BGYandexError {
+        guard let response = response else {
+            return .network
+        }
+        if case let .failure(error) = map(response) {
+            return error
+        }
+        return .unknown
     }
 }

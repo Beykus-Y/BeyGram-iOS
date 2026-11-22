@@ -17,7 +17,9 @@ swift_library(
         "//submodules/ItemListUI:ItemListUI",
         "//submodules/PresentationDataUtils:PresentationDataUtils",
         "//submodules/AccountContext:AccountContext",
+        "//submodules/BeyGramDesign:BeyGramDesign",
         "//submodules/BeyGramDiagnostics:BeyGramDiagnostics",
+        "//submodules/BeyGramKit:BeyGramKit",
     ],
     visibility = [
         "//visibility:public",

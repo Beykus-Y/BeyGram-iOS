@@ -14,7 +14,7 @@ import BeyGramKit
 // сеть не используется и Telegram ничего не регистрирует. Выключение переключателя отзывает регистрацию.
 
 private func beyGramPushIsRussian() -> Bool {
-    return (Locale.preferredLanguages.first ?? "").hasPrefix("ru")
+    return BeyGramL10n.shared.currentLanguageCode == "ru"
 }
 
 private func beyGramPushLocalized(_ russian: String, _ english: String) -> String {
@@ -23,7 +23,8 @@ private func beyGramPushLocalized(_ russian: String, _ english: String) -> Strin
 
 /// Название строки в настройках уведомлений.
 public func beyGramPushSettingsTitle() -> String {
-    return beyGramPushLocalized("BG Push (экспериментально)", "BG Push (experimental)")
+    let lang = BeyGramL10n.shared.currentLanguageCode
+    return "\(BeyGramL10n.shared.string(.settingsBgPushTitle, languageCode: lang)) (\(BeyGramL10n.shared.string(.commonExperimental, languageCode: lang)))"
 }
 
 private func beyGramPushErrorText(_ error: BeyGramPushError) -> String {
@@ -242,7 +243,8 @@ private enum BeyGramPushEntry: ItemListNodeEntry {
 
 private func beyGramPushEntries(presentationData: PresentationData, enabled: Bool, registration: BeyGramPushState?, hasSecrets: Bool, isRegistering: Bool, lastError: String?) -> [BeyGramPushEntry] {
     let theme = presentationData.theme
-    let languageCode = beyGramPushIsRussian() ? "ru" : "en"
+    let languageCode = presentationData.strings.primaryComponent.languageCode
+    BeyGramL10n.shared.setLanguageCode(languageCode)
     var entries: [BeyGramPushEntry] = []
     entries.append(.header(theme, beyGramPushLocalized("Уведомления", "Notifications")))
     entries.append(.toggle(theme, BeyGramFeature.bgPush.title(languageCode: languageCode), enabled))

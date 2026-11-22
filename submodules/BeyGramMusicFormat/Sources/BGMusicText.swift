@@ -71,22 +71,21 @@ public enum BGMusicText {
         var out = String.UnicodeScalarView()
         var breakRun = 0
         func flushBreaks() {
-            if breakRun == 0 {
-                return
-            }
-            if multiline {
-                for _ in 0..<min(breakRun, 2) {
-                    out.append("\n")
-                }
-            } else {
-                out.append(" ")
+            // A description keeps at most two LF in a row. Single-line fields never count a run (see below).
+            for _ in 0..<min(breakRun, 2) {
+                out.append("\n")
             }
             breakRun = 0
         }
         for token in tokens {
             switch token {
             case .lineBreak:
-                breakRun += 1
+                if multiline {
+                    breakRun += 1
+                } else {
+                    // Section 7, rule 1: each line break in a single-line field is one space, so runs are not collapsed.
+                    out.append(" ")
+                }
             case let .text(scalar):
                 flushBreaks()
                 out.append(scalar)

@@ -23,7 +23,8 @@ extension MihomoCoreError: LocalizedError {
     }
 }
 
-/// Runs one JSON action of the core. The caller must not run two actions at once.
+/// Runs one JSON action of the core. The caller must not run two actions at once, except `testDelay`: the core runs a
+/// probe beside the other actions, because a probe waits on the network (core/bridge/bridge.go, `run`).
 public protocol MihomoCoreDriver: AnyObject {
     /// Runs one action and returns the `data` of the reply. Throws `MihomoCoreError.refused` when the core refuses.
     func call(_ method: String, data: [String: Any]) throws -> Any?
@@ -75,6 +76,21 @@ public struct MihomoGroupState: Equatable {
     }
 }
 
+/// Which entries of a profile are servers a user can pick. The rule is Android's (`MihomoCoreBridge.listConnections`):
+/// direct and reject entries, and the groups of a profile, are not servers. Auto-select must never pick one of them,
+/// because a direct entry would send traffic around the proxy.
+public enum MihomoServerRule {
+    private static let nonServerTypes: Set<String> = [
+        "direct", "reject", "reject-drop", "pass", "compatible", "global", "block",
+        "select", "selector", "urltest", "fallback", "loadbalance", "relay"
+    ]
+
+    /// `type` is the core's type name in any letter case. An empty type counts as a server.
+    public static func isServer(type: String) -> Bool {
+        return !nonServerTypes.contains(type.lowercased())
+    }
+}
+
 /// Typed calls over the JSON actions of the core (see core/bridge/bridge.go).
 public final class MihomoCoreClient {
     private let driver: MihomoCoreDriver
@@ -96,7 +112,12 @@ public final class MihomoCoreClient {
         guard let object = reply as? [String: Any], let yaml = object["yaml"] as? String else {
             throw MihomoCoreError.malformedReply
         }
-        let serverNames = ((object["servers"] as? [[String: Any]]) ?? []).compactMap { $0["name"] as? String }
+        let serverNames = ((object["servers"] as? [[String: Any]]) ?? []).compactMap { item -> String? in
+            guard let name = item["name"] as? String else {
+                return nil
+            }
+            return MihomoServerRule.isServer(type: (item["type"] as? String) ?? "") ? name : nil
+        }
         let skipped = (object["skipped"] as? Int) ?? 0
         return MihomoProfile(yaml: yaml, serverNames: serverNames, skipped: skipped)
     }

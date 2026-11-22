@@ -1,4 +1,5 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
 
 # BG Mix (AutoMix) and BG Beat for iOS. The C++20 core lives in the BG-Media
@@ -47,6 +48,15 @@ cc_library(
         "BGMediaCore/src/mix/MixEngine.cpp",
         "BGMediaCore/src/mix/MixSession.cpp",
         "BGMediaCore/src/mix/MixSync.cpp",
+        # BG Wave core (portable part: ring buffer, resampler, codec framing, jitter buffer, signaling,
+        # transport, audio pipeline). The libopus and libdatachannel adapters are not built on iOS yet.
+        "BGMediaCore/src/wave/WaveRingBuffer.cpp",
+        "BGMediaCore/src/wave/WaveResampler.cpp",
+        "BGMediaCore/src/wave/WaveCodec.cpp",
+        "BGMediaCore/src/wave/WaveJitterBuffer.cpp",
+        "BGMediaCore/src/wave/WaveSignaling.cpp",
+        "BGMediaCore/src/wave/WaveTransport.cpp",
+        "BGMediaCore/src/wave/WaveAudioPipeline.cpp",
     ],
     hdrs = glob([
         "BGMediaCore/include/**/*.h",
@@ -64,10 +74,40 @@ cc_library(
     linkopts = [
         "-lpthread",
     ],
-    visibility = ["//visibility:private"],
+    # Subpackages (BGWaveCore) build on the core; nothing outside BeyGramMedia does.
+    visibility = ["//submodules/BeyGramMedia:__subpackages__"],
     deps = [
         ":BGMediaKissFFT",
     ],
+)
+
+# Pure C++ PCM limits for the iOS track pipeline. The host test runs with `bazel test` on a Mac.
+cc_library(
+    name = "BGMediaPcmLimits",
+    hdrs = ["Sources/BGMediaPcmLimits.hpp"],
+    visibility = ["//visibility:private"],
+)
+
+cc_test(
+    name = "BGMediaPcmLimitsTests",
+    srcs = ["Tests/BGMediaPcmLimitsTests.cpp"],
+    copts = ["-std=c++20"],
+    deps = [":BGMediaPcmLimits"],
+)
+
+# Pure mapping from the MixSession snapshot to the player's published state. Host test as above.
+cc_library(
+    name = "BGMediaMixState",
+    hdrs = ["Sources/BGMediaMixState.hpp"],
+    deps = [":BGMediaCore"],
+    visibility = ["//visibility:private"],
+)
+
+cc_test(
+    name = "BGMediaMixStateTests",
+    srcs = ["Tests/BGMediaMixStateTests.cpp"],
+    copts = ["-std=c++20"],
+    deps = [":BGMediaMixState"],
 )
 
 objc_library(
@@ -95,6 +135,7 @@ objc_library(
         "AVFoundation",
         "QuartzCore",
         "UIKit",
+        "UniformTypeIdentifiers",
     ],
     visibility = [
         "//visibility:public",
