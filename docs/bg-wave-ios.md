@@ -118,6 +118,16 @@ Linux-результаты относятся только к переносим
   «Присоединиться» и «Отмена». Сам файл не переписываем, меняется одна функция.
 - Фон: `UIBackgroundModes: audio` уже есть. Вместо `BgWaveNetworkWatcher` использовать `NWPathMonitor`.
 
+### Контроллер и фасад (поверх этапа 4)
+- `BGWaveController` (`BGWaveCore/BGWaveController.*`, PR #118): порт `BgWaveController` из Android на C++. Одна волна
+  за раз, таблица приглашений, защита от повтора, лимит приглашений на собеседника. Проверено на Linux:
+  `BGWaveControllerTests`.
+- `BGWaveSessionController` (`BGWaveListener/`, ветка `feature/ios-bgwave-facade`): Objective-C фасад для экрана и
+  карточки. Контракт для UI: `docs/bg-wave-ui-contract.md`. Расхождения с Android и открытые решения:
+  `docs/bg-wave-android-compat.md`.
+- Не проверено: сборка на macOS и Bazel-тесты обоих слоёв. Mac и Gemini не ждём. Сборку и тесты проверит один большой прогон GitHub CI
+  из интеграционной ветки, которую ведёт поток невидимки. Feature-ветки и PR CI не запускают (`.github/workflows/build.yml`).
+
 ## 4. Решение о транспорте (принято 2026-11-20)
 
 Владелец выбрал вариант A: **libdatachannel, как на Android**. Архитектура BG Wave сохраняется полностью: ядро BG-Media с
