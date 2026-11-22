@@ -3,6 +3,7 @@ internal import TelegramApi
 import Postbox
 import SwiftSignalKit
 import MtProtoKit
+import BeyGramStealth
 
 
 func _internal_markAllChatsAsRead(postbox: Postbox, network: Network, stateManager: AccountStateManager) -> Signal<Void, NoError> {
@@ -23,6 +24,10 @@ func _internal_markAllChatsAsRead(postbox: Postbox, network: Network, stateManag
                     case let .dialogPeer(dialogPeerData):
                         let peer = dialogPeerData.peer
                         let peerId = peer.peerId
+                        // BeyGram stealth: with read receipts hidden for this chat, it is not marked read on the server.
+                        if !BeyGramStealthHooks.allows(.readHistory, accountPeerId: stateManager.accountPeerId.toInt64(), chatPeerId: peerId.toInt64()) {
+                            continue
+                        }
                         if peerId.namespace == Namespaces.Peer.CloudChannel {
                             if let inputChannel = transaction.getPeer(peerId).flatMap(apiInputChannel) {
                                 signals.append(network.request(Api.functions.channels.readHistory(channel: inputChannel, maxId: Int32.max - 1))

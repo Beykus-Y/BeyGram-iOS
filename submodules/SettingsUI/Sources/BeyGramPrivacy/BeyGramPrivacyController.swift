@@ -1,216 +1,366 @@
 import Foundation
+import UIKit
 import Display
 import SwiftSignalKit
 import TelegramPresentationData
-import ItemListUI
-import PresentationDataUtils
 import AccountContext
+import BeyGramDesign
 import BeyGramKit
 import BeyGramStealth
 
-/// The four switches of the privacy screen. The stored keys are set in `BeyGramStealthSettings` (Android names).
-private enum BeyGramPrivacySwitch {
-    case hideTyping
-    case noReadReceipts
-    case hideOnline
-    case serverScheduledSend
+private enum StealthPresetKind: Equatable {
+    case normal
+    case hiddenReading
+    case maximum
+    case custom
 }
 
-private final class BeyGramPrivacyArguments {
-    let setMasterEnabled: (Bool) -> Void
-    let setSwitch: (BeyGramPrivacySwitch, Bool) -> Void
-    let setScheduleDelay: (Int32) -> Void
-
-    init(setMasterEnabled: @escaping (Bool) -> Void, setSwitch: @escaping (BeyGramPrivacySwitch, Bool) -> Void, setScheduleDelay: @escaping (Int32) -> Void) {
-        self.setMasterEnabled = setMasterEnabled
-        self.setSwitch = setSwitch
-        self.setScheduleDelay = setScheduleDelay
+private func matchingStealthPreset(_ settings: BeyGramStealthSettings) -> StealthPresetKind {
+    if !settings.hideTyping && !settings.hideReadReceipts && !settings.hideOnline && !settings.serverScheduledSend {
+        return .normal
     }
+    if settings.hideTyping && settings.hideReadReceipts && !settings.hideOnline && !settings.serverScheduledSend {
+        return .hiddenReading
+    }
+    if settings.hideTyping && settings.hideReadReceipts && settings.hideOnline && settings.serverScheduledSend {
+        return .maximum
+    }
+    return .custom
 }
 
-private enum BeyGramPrivacySection: Int32 {
-    case master
-    case switches
-    case schedule
-}
+private final class BeyGramPrivacyViewControllerImpl: BeyGramScrollViewController {
+    private let accountPeerId: Int64
+    private var featureEnabled: Bool
+    private var settings: BeyGramStealthSettings
 
-private enum BeyGramPrivacyEntry: ItemListNodeEntry {
-    case masterSwitch(PresentationTheme, Bool)
-    case masterInfo(PresentationTheme, String)
-    case switchesHeader(PresentationTheme, String)
-    case hideTyping(PresentationTheme, Bool, Bool)
-    case noReadReceipts(PresentationTheme, Bool, Bool)
-    case hideOnline(PresentationTheme, Bool, Bool)
-    case scheduleHeader(PresentationTheme, String)
-    case scheduleSwitch(PresentationTheme, Bool, Bool)
-    case scheduleDelay(PresentationTheme, Int32, Bool, Bool)
-    case scheduleInfo(PresentationTheme, String)
+    private let statusCard = BeyGramCardView(spacing: 10)
+    private let statusIcon = UIImageView()
+    private let statusTitleLabel = BeyGramTypography.makeLabel(style: .headline, weight: .semibold, lines: 0)
+    private let statusBadge = BeyGramPillBadge()
+    private let statusBodyLabel = BeyGramTypography.makeLabel(style: .subheadline, weight: .regular, lines: 0)
+    private let masterSwitch = UISwitch()
 
-    var section: ItemListSectionId {
-        switch self {
-        case .masterSwitch, .masterInfo:
-            return BeyGramPrivacySection.master.rawValue
-        case .switchesHeader, .hideTyping, .noReadReceipts, .hideOnline:
-            return BeyGramPrivacySection.switches.rawValue
-        case .scheduleHeader, .scheduleSwitch, .scheduleDelay, .scheduleInfo:
-            return BeyGramPrivacySection.schedule.rawValue
+    private let presetsHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let presetsCard = BeyGramCardView(spacing: 10)
+    private let presetsStack = UIStackView()
+    private var presetButtons: [(StealthPresetKind, UIButton)] = []
+
+    private let hideHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let hideCard = BeyGramCardView(spacing: 0, insets: UIEdgeInsets(top: 4, left: 16, bottom: 4, right: 16))
+    private let hideTypingRow = BeyGramRowView()
+    private let hideReadRow = BeyGramRowView()
+    private let hideOnlineRow = BeyGramRowView()
+
+    private let sendHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let sendCard = BeyGramCardView(spacing: 12)
+    private let scheduledRow = BeyGramRowView()
+    private let delayLabel = BeyGramTypography.makeLabel(style: .footnote, weight: .medium, lines: 1)
+    private let delayStack = UIStackView()
+    private var delayButtons: [(Int32, UIButton)] = []
+    private let restrictionsLabel = BeyGramTypography.makeLabel(style: .footnote, weight: .regular, lines: 0)
+
+    private let limitsCard = BeyGramCardView(spacing: 8)
+    private let limitsTitleLabel = BeyGramTypography.makeLabel(style: .subheadline, weight: .semibold, lines: 0)
+    private let limitsBodyLabel = BeyGramTypography.makeLabel(style: .footnote, weight: .regular, lines: 0)
+
+    private var settingsObserver: NSObjectProtocol?
+    private var featureObserver: NSObjectProtocol?
+
+    override init(context: AccountContext) {
+        self.accountPeerId = context.account.peerId.toInt64()
+        self.featureEnabled = BeyGramSettings.shared.isEnabled(.privacyPolicy)
+        self.settings = BeyGramStealthStore.shared.settings(accountPeerId: self.accountPeerId)
+        super.init(context: context)
+    }
+
+    deinit {
+        if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) }
+        if let featureObserver { NotificationCenter.default.removeObserver(featureObserver) }
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        self.setupUI()
+
+        self.settingsObserver = NotificationCenter.default.addObserver(forName: BeyGramStealthStore.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.settings = BeyGramStealthStore.shared.settings(accountPeerId: self.accountPeerId)
+            self.reloadContent()
+        }
+        self.featureObserver = NotificationCenter.default.addObserver(forName: BeyGramSettings.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.featureEnabled = BeyGramSettings.shared.isEnabled(.privacyPolicy)
+            self.reloadContent()
         }
     }
 
-    var stableId: Int32 {
-        switch self {
-        case .masterSwitch:
-            return 0
-        case .masterInfo:
-            return 1
-        case .switchesHeader:
-            return 2
-        case .hideTyping:
-            return 3
-        case .noReadReceipts:
-            return 4
-        case .hideOnline:
-            return 5
-        case .scheduleHeader:
-            return 6
-        case .scheduleSwitch:
-            return 7
-        case let .scheduleDelay(_, seconds, _, _):
-            return 8 + Int32(BeyGramStealthSettings.scheduleDelayChoices.firstIndex(of: seconds) ?? 0)
-        case .scheduleInfo:
-            return 20
+    private func setupUI() {
+        // Status Hero Card
+        self.statusIcon.contentMode = .scaleAspectFit
+        self.statusIcon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            self.statusIcon.widthAnchor.constraint(equalToConstant: 26),
+            self.statusIcon.heightAnchor.constraint(equalToConstant: 26)
+        ])
+        self.masterSwitch.addTarget(self, action: #selector(self.masterToggled), for: .valueChanged)
+        let headerRow = UIStackView(arrangedSubviews: [self.statusIcon, self.statusTitleLabel, self.statusBadge, UIView(), self.masterSwitch])
+        headerRow.axis = .horizontal
+        headerRow.alignment = .center
+        headerRow.spacing = 10
+        self.statusCard.contentStack.addArrangedSubview(headerRow)
+        self.statusCard.contentStack.addArrangedSubview(self.statusBodyLabel)
+        self.stackView.addArrangedSubview(self.statusCard)
+
+        // Presets
+        self.stackView.addArrangedSubview(self.presetsHeader)
+        self.presetsStack.axis = .horizontal
+        self.presetsStack.spacing = 8
+        self.presetsStack.distribution = .fillEqually
+        for kind in [StealthPresetKind.normal, .hiddenReading, .maximum] {
+            let btn = UIButton(type: .system)
+            btn.layer.cornerRadius = 11
+            btn.layer.cornerCurve = .continuous
+            btn.titleLabel?.font = BeyGramTypography.font(style: .footnote, weight: .semibold)
+            btn.titleLabel?.adjustsFontForContentSizeCategory = true
+            btn.titleLabel?.numberOfLines = 2
+            btn.titleLabel?.textAlignment = .center
+            btn.heightAnchor.constraint(greaterThanOrEqualToConstant: 38).isActive = true
+            btn.tag = self.presetButtons.count
+            btn.addTarget(self, action: #selector(self.presetTapped(_:)), for: .touchUpInside)
+            self.presetButtons.append((kind, btn))
+            self.presetsStack.addArrangedSubview(btn)
         }
-    }
+        self.presetsCard.contentStack.addArrangedSubview(self.presetsStack)
+        self.stackView.addArrangedSubview(self.presetsCard)
 
-    static func ==(lhs: BeyGramPrivacyEntry, rhs: BeyGramPrivacyEntry) -> Bool {
-        switch (lhs, rhs) {
-        case let (.masterSwitch(lhsTheme, lhsValue), .masterSwitch(rhsTheme, rhsValue)):
-            return lhsTheme === rhsTheme && lhsValue == rhsValue
-        case let (.masterInfo(lhsTheme, lhsText), .masterInfo(rhsTheme, rhsText)):
-            return lhsTheme === rhsTheme && lhsText == rhsText
-        case let (.switchesHeader(lhsTheme, lhsText), .switchesHeader(rhsTheme, rhsText)):
-            return lhsTheme === rhsTheme && lhsText == rhsText
-        case let (.hideTyping(lhsTheme, lhsValue, lhsEnabled), .hideTyping(rhsTheme, rhsValue, rhsEnabled)):
-            return lhsTheme === rhsTheme && lhsValue == rhsValue && lhsEnabled == rhsEnabled
-        case let (.noReadReceipts(lhsTheme, lhsValue, lhsEnabled), .noReadReceipts(rhsTheme, rhsValue, rhsEnabled)):
-            return lhsTheme === rhsTheme && lhsValue == rhsValue && lhsEnabled == rhsEnabled
-        case let (.hideOnline(lhsTheme, lhsValue, lhsEnabled), .hideOnline(rhsTheme, rhsValue, rhsEnabled)):
-            return lhsTheme === rhsTheme && lhsValue == rhsValue && lhsEnabled == rhsEnabled
-        case let (.scheduleHeader(lhsTheme, lhsText), .scheduleHeader(rhsTheme, rhsText)):
-            return lhsTheme === rhsTheme && lhsText == rhsText
-        case let (.scheduleSwitch(lhsTheme, lhsValue, lhsEnabled), .scheduleSwitch(rhsTheme, rhsValue, rhsEnabled)):
-            return lhsTheme === rhsTheme && lhsValue == rhsValue && lhsEnabled == rhsEnabled
-        case let (.scheduleDelay(lhsTheme, lhsSeconds, lhsSelected, lhsEnabled), .scheduleDelay(rhsTheme, rhsSeconds, rhsSelected, rhsEnabled)):
-            return lhsTheme === rhsTheme && lhsSeconds == rhsSeconds && lhsSelected == rhsSelected && lhsEnabled == rhsEnabled
-        case let (.scheduleInfo(lhsTheme, lhsText), .scheduleInfo(rhsTheme, rhsText)):
-            return lhsTheme === rhsTheme && lhsText == rhsText
-        default:
-            return false
+        // Hide Activity Switches
+        self.stackView.addArrangedSubview(self.hideHeader)
+        self.hideCard.contentStack.addArrangedSubview(self.hideTypingRow)
+        self.hideCard.contentStack.addArrangedSubview(self.hideReadRow)
+        self.hideCard.contentStack.addArrangedSubview(self.hideOnlineRow)
+        self.stackView.addArrangedSubview(self.hideCard)
+
+        // Server Scheduled Send + Delay Pills
+        self.stackView.addArrangedSubview(self.sendHeader)
+        self.sendCard.contentStack.addArrangedSubview(self.scheduledRow)
+        self.sendCard.contentStack.addArrangedSubview(self.delayLabel)
+        self.delayStack.axis = .horizontal
+        self.delayStack.spacing = 8
+        self.delayStack.distribution = .fillEqually
+        for delay in BeyGramStealthSettings.scheduleDelayChoices {
+            let btn = UIButton(type: .system)
+            btn.layer.cornerRadius = 10
+            btn.layer.cornerCurve = .continuous
+            btn.titleLabel?.font = BeyGramTypography.font(style: .subheadline, weight: .semibold)
+            btn.titleLabel?.adjustsFontForContentSizeCategory = true
+            btn.heightAnchor.constraint(greaterThanOrEqualToConstant: 36).isActive = true
+            btn.tag = Int(delay)
+            btn.addTarget(self, action: #selector(self.delayTapped(_:)), for: .touchUpInside)
+            self.delayButtons.append((delay, btn))
+            self.delayStack.addArrangedSubview(btn)
         }
+        self.sendCard.contentStack.addArrangedSubview(self.delayStack)
+        self.sendCard.contentStack.addArrangedSubview(self.restrictionsLabel)
+        self.stackView.addArrangedSubview(self.sendCard)
+
+        // Honest Limits Card
+        self.limitsCard.contentStack.addArrangedSubview(self.limitsTitleLabel)
+        self.limitsCard.contentStack.addArrangedSubview(self.limitsBodyLabel)
+        self.stackView.addArrangedSubview(self.limitsCard)
+
+        self.reloadContent()
     }
 
-    static func <(lhs: BeyGramPrivacyEntry, rhs: BeyGramPrivacyEntry) -> Bool {
-        return lhs.stableId < rhs.stableId
+    override func applyPresentationData(_ presentationData: PresentationData) {
+        super.applyPresentationData(presentationData)
+        self.reloadContent()
     }
 
-    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
-        let arguments = arguments as! BeyGramPrivacyArguments
-        switch self {
-        case let .masterSwitch(_, value):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Режим невидимки", value: value, sectionId: self.section, style: .blocks, updated: { newValue in
-                arguments.setMasterEnabled(newValue)
-            })
-        case let .masterInfo(_, text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case let .switchesHeader(_, text):
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .hideTyping(_, value, enabled):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Не показывать, что я печатаю", value: value, enabled: enabled, sectionId: self.section, style: .blocks, updated: { newValue in
-                arguments.setSwitch(.hideTyping, newValue)
-            })
-        case let .noReadReceipts(_, value, enabled):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Не отмечать сообщения прочитанными", value: value, enabled: enabled, sectionId: self.section, style: .blocks, updated: { newValue in
-                arguments.setSwitch(.noReadReceipts, newValue)
-            })
-        case let .hideOnline(_, value, enabled):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Скрывать статус «в сети»", value: value, enabled: enabled, sectionId: self.section, style: .blocks, updated: { newValue in
-                arguments.setSwitch(.hideOnline, newValue)
-            })
-        case let .scheduleHeader(_, text):
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .scheduleSwitch(_, value, enabled):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Отправлять через отложенные сообщения Telegram", value: value, enabled: enabled, sectionId: self.section, style: .blocks, updated: { newValue in
-                arguments.setSwitch(.serverScheduledSend, newValue)
-            })
-        case let .scheduleDelay(_, seconds, selected, enabled):
-            return ItemListCheckboxItem(presentationData: presentationData, systemStyle: .glass, title: "\(seconds) с", style: .left, checked: selected, zeroSeparatorInsets: false, sectionId: self.section, action: {
-                if enabled {
-                    arguments.setScheduleDelay(seconds)
-                }
-            })
-        case let .scheduleInfo(_, text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+    private func reloadContent() {
+        let lang = self.presentationData.strings.primaryComponent.languageCode
+        let isRu = lang.lowercased().hasPrefix("ru")
+        let l10n = BeyGramL10n.shared
+        let palette = BeyGramThemePalette(theme: self.presentationData.theme)
+
+        self.title = l10n.string(.privacyTitle, languageCode: lang)
+
+        // Status Card
+        self.statusCard.apply(palette: palette)
+        let active = self.featureEnabled
+        self.masterSwitch.isOn = active
+        self.masterSwitch.onTintColor = palette.accent
+        self.statusIcon.image = UIImage(systemName: active ? "eye.slash.circle.fill" : "eye.circle")
+        self.statusIcon.tintColor = active ? palette.success : palette.secondaryText
+        self.statusTitleLabel.text = l10n.string(.privacyMasterTitle, languageCode: lang)
+        self.statusTitleLabel.textColor = palette.primaryText
+
+        let preset = matchingStealthPreset(self.settings)
+        let badgeText: String
+        if !active {
+            badgeText = l10n.string(.commonOff, languageCode: lang)
+            self.statusBadge.configure(text: badgeText, textColor: palette.secondaryText, backgroundColor: palette.separator.withAlphaComponent(0.2))
+        } else {
+            switch preset {
+            case .normal:
+                badgeText = isRu ? "Обычный" : "Normal"
+            case .hiddenReading:
+                badgeText = isRu ? "Скрытое чтение" : "Hidden reading"
+            case .maximum:
+                badgeText = isRu ? "Максимум" : "Maximum"
+            case .custom:
+                badgeText = isRu ? "Свой" : "Custom"
+            }
+            self.statusBadge.configure(text: badgeText, textColor: palette.success, backgroundColor: palette.successSoft)
         }
+        self.statusBodyLabel.text = active
+            ? l10n.string(.privacyMasterActiveSummary, languageCode: lang)
+            : l10n.string(.privacyMasterInactiveSummary, languageCode: lang)
+        self.statusBodyLabel.textColor = palette.secondaryText
+
+        // Presets
+        self.presetsHeader.text = (isRu ? "РЕЖИМЫ ЗАЩИТЫ" : "PROTECTION PRESETS")
+        self.presetsHeader.textColor = palette.secondaryText
+        self.presetsCard.apply(palette: palette)
+        for (kind, btn) in self.presetButtons {
+            let title: String
+            switch kind {
+            case .normal: title = isRu ? "Обычный" : "Normal"
+            case .hiddenReading: title = isRu ? "Тихий" : "Quiet"
+            case .maximum: title = isRu ? "Максимум" : "Maximum"
+            case .custom: title = isRu ? "Свой" : "Custom"
+            }
+            let selected = active && (preset == kind)
+            btn.setTitle(title, for: .normal)
+            btn.isEnabled = active
+            btn.alpha = active ? 1.0 : 0.5
+            btn.backgroundColor = selected ? palette.accent : palette.accentSoft
+            btn.setTitleColor(selected ? palette.onAccent : palette.accent, for: .normal)
+        }
+
+        // Hide Activity Switches
+        self.hideHeader.text = l10n.string(.privacySectionHide, languageCode: lang).uppercased()
+        self.hideHeader.textColor = palette.secondaryText
+        self.hideCard.apply(palette: palette)
+
+        let peerId = self.accountPeerId
+        self.hideTypingRow.configure(
+            iconName: "ellipsis.bubble",
+            iconTint: palette.accent,
+            title: l10n.string(.privacyHideTyping, languageCode: lang),
+            subtitle: isRu ? "Не отправляет статус «печатает» и запись голоса" : "Suppresses typing and recording indicators",
+            switchValue: self.settings.hideTyping,
+            isEnabled: active,
+            showSeparator: true,
+            palette: palette,
+            onSwitch: { val in
+                BeyGramStealthStore.shared.update(accountPeerId: peerId) { $0.hideTyping = val }
+            }
+        )
+        self.hideReadRow.configure(
+            iconName: "checkmark.circle",
+            iconTint: palette.accent,
+            title: l10n.string(.privacyNoReadReceipts, languageCode: lang),
+            subtitle: isRu ? "Включая темы, комментарии и «Прочитать все»" : "Covers chats, forum topics, comments, and Mark All Read",
+            switchValue: self.settings.hideReadReceipts,
+            isEnabled: active,
+            showSeparator: true,
+            palette: palette,
+            onSwitch: { val in
+                BeyGramStealthStore.shared.update(accountPeerId: peerId) { $0.hideReadReceipts = val }
+            }
+        )
+        self.hideOnlineRow.configure(
+            iconName: "moon.zzz",
+            iconTint: palette.accent,
+            title: l10n.string(.privacyHideOnline, languageCode: lang),
+            subtitle: isRu ? "Применяется сразу для всего аккаунта" : "Applies immediately across the whole account",
+            switchValue: self.settings.hideOnline,
+            isEnabled: active,
+            showSeparator: false,
+            palette: palette,
+            onSwitch: { val in
+                BeyGramStealthStore.shared.update(accountPeerId: peerId) { $0.hideOnline = val }
+            }
+        )
+
+        // Scheduled Send
+        self.sendHeader.text = l10n.string(.privacySectionSend, languageCode: lang).uppercased()
+        self.sendHeader.textColor = palette.secondaryText
+        self.sendCard.apply(palette: palette)
+
+        self.scheduledRow.configure(
+            iconName: "clock.arrow.circlepath",
+            iconTint: palette.accent,
+            title: l10n.string(.privacyDelayedSend, languageCode: lang),
+            subtitle: isRu ? "Дата фиксируется на сервере после загрузки медиа" : "Scheduled on Telegram server after media upload completes",
+            switchValue: self.settings.serverScheduledSend,
+            isEnabled: active,
+            showSeparator: false,
+            palette: palette,
+            onSwitch: { val in
+                BeyGramStealthStore.shared.update(accountPeerId: peerId) { $0.serverScheduledSend = val }
+            }
+        )
+        self.delayLabel.text = l10n.string(.privacyDelayPickerTitle, languageCode: lang)
+        self.delayLabel.textColor = palette.secondaryText
+        let delayInteractive = active && self.settings.serverScheduledSend
+        for (delay, btn) in self.delayButtons {
+            btn.setTitle("\(delay)s", for: .normal)
+            btn.isEnabled = delayInteractive
+            btn.alpha = delayInteractive ? 1.0 : 0.45
+            let selected = self.settings.scheduledSendDelaySeconds == delay
+            btn.backgroundColor = selected ? palette.accent : palette.accentSoft
+            btn.setTitleColor(selected ? palette.onAccent : palette.accent, for: .normal)
+        }
+        self.restrictionsLabel.text = l10n.string(.privacyRestrictionsSummary, languageCode: lang)
+        self.restrictionsLabel.textColor = palette.secondaryText
+
+        // Honest Limits
+        self.limitsCard.apply(palette: palette)
+        self.limitsTitleLabel.text = l10n.string(.privacyHowItWorksTitle, languageCode: lang)
+        self.limitsTitleLabel.textColor = palette.primaryText
+        self.limitsBodyLabel.text = l10n.string(.privacyHowItWorksBody, languageCode: lang) + "\n\n" + l10n.string(.privacyDisclaimer, languageCode: lang)
+        self.limitsBodyLabel.textColor = palette.secondaryText
     }
-}
 
-private func beyGramPrivacyEntries(presentationData: PresentationData, masterEnabled: Bool, settings: BeyGramStealthSettings) -> [BeyGramPrivacyEntry] {
-    let theme = presentationData.theme
-    var entries: [BeyGramPrivacyEntry] = []
-    entries.append(.masterSwitch(theme, masterEnabled))
-    entries.append(.masterInfo(theme, "Пока режим выключен, ни один из переключателей ниже не действует. Все они выключены по умолчанию. Настройки относятся только к этому аккаунту."))
-
-    entries.append(.switchesHeader(theme, "Что скрывать"))
-    entries.append(.hideTyping(theme, settings.hideTyping, masterEnabled))
-    entries.append(.noReadReceipts(theme, settings.hideReadReceipts, masterEnabled))
-    entries.append(.hideOnline(theme, settings.hideOnline, masterEnabled))
-
-    entries.append(.scheduleHeader(theme, "Отправка в невидимке"))
-    entries.append(.scheduleSwitch(theme, settings.serverScheduledSend, masterEnabled))
-    for seconds in BeyGramStealthSettings.scheduleDelayChoices {
-        entries.append(.scheduleDelay(theme, seconds, settings.scheduledSendDelaySeconds == seconds, masterEnabled && settings.serverScheduledSend))
+    @objc private func masterToggled() {
+        BeyGramSettings.shared.setEnabled(self.masterSwitch.isOn, for: .privacyPolicy)
     }
-    entries.append(.scheduleInfo(theme, "Сообщение сразу уходит на сервер Telegram как запланированное, и сервер публикует его через выбранное время. Пока сообщение ждёт, его можно отменить или перенести в списке отложенных сообщений чата. В секретных чатах, в чатах с платными сообщениями и в трансляции геопозиции запланировать нельзя: такие отправки не уходят сразу и не отправляются. Это снижает риск показать вас в сети, но не гарантирует невидимость."))
-    return entries
-}
 
-/// The privacy screen: the master switch of `BeyGramFeature.privacyPolicy` and the per-account stealth switches.
-public func beyGramPrivacyController(context: AccountContext) -> ViewController {
-    let accountPeerId = context.account.peerId.toInt64()
-    let masterPromise = ValuePromise<Bool>(BeyGramSettings.shared.isEnabled(.privacyPolicy), ignoreRepeated: true)
-    let settingsPromise = ValuePromise<BeyGramStealthSettings>(BeyGramStealthStore.shared.settings(accountPeerId: accountPeerId), ignoreRepeated: true)
-
-    let arguments = BeyGramPrivacyArguments(setMasterEnabled: { value in
-        BeyGramSettings.shared.setEnabled(value, for: .privacyPolicy)
-        masterPromise.set(BeyGramSettings.shared.isEnabled(.privacyPolicy))
-    }, setSwitch: { option, value in
-        BeyGramStealthStore.shared.update(accountPeerId: accountPeerId) { settings in
-            switch option {
-            case .hideTyping:
-                settings.hideTyping = value
-            case .noReadReceipts:
-                settings.hideReadReceipts = value
-            case .hideOnline:
-                settings.hideOnline = value
-            case .serverScheduledSend:
-                settings.serverScheduledSend = value
+    @objc private func presetTapped(_ sender: UIButton) {
+        guard sender.tag >= 0 && sender.tag < self.presetButtons.count else { return }
+        let kind = self.presetButtons[sender.tag].0
+        BeyGramStealthStore.shared.update(accountPeerId: self.accountPeerId) { s in
+            switch kind {
+            case .normal:
+                s.hideTyping = false
+                s.hideReadReceipts = false
+                s.hideOnline = false
+                s.serverScheduledSend = false
+            case .hiddenReading:
+                s.hideTyping = true
+                s.hideReadReceipts = true
+                s.hideOnline = false
+                s.serverScheduledSend = false
+            case .maximum:
+                s.hideTyping = true
+                s.hideReadReceipts = true
+                s.hideOnline = true
+                s.serverScheduledSend = true
+            case .custom:
+                break
             }
         }
-        settingsPromise.set(BeyGramStealthStore.shared.settings(accountPeerId: accountPeerId))
-    }, setScheduleDelay: { seconds in
-        BeyGramStealthStore.shared.update(accountPeerId: accountPeerId) { settings in
-            settings.scheduledSendDelaySeconds = seconds
-        }
-        settingsPromise.set(BeyGramStealthStore.shared.settings(accountPeerId: accountPeerId))
-    })
-
-    let signal = combineLatest(context.sharedContext.presentationData, masterPromise.get(), settingsPromise.get())
-    |> deliverOnMainQueue
-    |> map { presentationData, masterEnabled, settings -> (ItemListControllerState, (ItemListNodeState, Any)) in
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Приватность"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
-        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: beyGramPrivacyEntries(presentationData: presentationData, masterEnabled: masterEnabled, settings: settings), style: .blocks)
-        return (controllerState, (listState, arguments))
     }
 
-    return ItemListController(context: context, state: signal)
+    @objc private func delayTapped(_ sender: UIButton) {
+        let delay = Int32(sender.tag)
+        BeyGramStealthStore.shared.update(accountPeerId: self.accountPeerId) { s in
+            s.scheduledSendDelaySeconds = max(BeyGramStealthSettings.minimumServerLeadSeconds, delay)
+        }
+    }
+}
+
+public func beyGramPrivacyController(context: AccountContext) -> ViewController {
+    return BeyGramPrivacyViewControllerImpl(context: context)
 }

@@ -115,8 +115,11 @@ public enum BGMusicArchive {
             cursor += 46 + nameLength + extraLength + commentLength
         }
 
+        guard !entries.isEmpty else {
+            return .failure(.corruptArchive)
+        }
+        // Names: exact spelling for manifest.json and the cover names; duplicates are found ignoring case (section 2.1).
         var seen = Set<String>()
-        var declaredTotal = 0
         for entry in entries {
             if let failure = checkName(entry.name) {
                 return .failure(failure)
@@ -124,49 +127,46 @@ public enum BGMusicArchive {
             guard seen.insert(entry.name.lowercased()).inserted else {
                 return .failure(.duplicateEntry)
             }
-            declaredTotal += entry.uncompressedSize
-        }
-        guard declaredTotal <= maxTotalUncompressed else {
-            return .failure(.tooLarge)
         }
 
         var manifest: Data?
         var cover: BGMusicCover?
         var coverSeen = false
+        // Sizes are counted while the bytes are inflated, never taken from the header (section 6). Each entry may
+        // use at most its own limit, and at most what the whole file has left of the total budget.
+        var budget = maxTotalUncompressed
         for entry in entries {
+            let isManifest = entry.name == "manifest.json"
+            let coverKind = BGMusicCoverKind(rawValue: entry.name)
+            let ownLimit = isManifest ? maxManifestBytes : (coverKind != nil ? maxCoverBytes : budget)
+            let ownFailure: BGMusicArchiveError = isManifest ? .manifestTooLarge : (coverKind != nil ? .coverTooLarge : .tooLarge)
             let content: [UInt8]
-            switch extract(entry, bytes: bytes) {
+            switch extract(entry, bytes: bytes, limit: min(ownLimit, budget)) {
             case let .success(value):
                 content = value
-            case let .failure(error):
+            case .failure(.overflow):
+                // Past the entry's own limit, or past the budget when the budget is the smaller of the two.
+                return .failure(ownLimit <= budget ? ownFailure : .tooLarge)
+            case let .failure(.archive(error)):
                 return .failure(error)
             }
+            budget -= content.count
             if nestedArchiveSignature(content) {
                 return .failure(.badEntryName)
             }
-            switch entry.name.lowercased() {
-            case "manifest.json":
-                guard content.count <= maxManifestBytes else {
-                    return .failure(.manifestTooLarge)
-                }
+            if isManifest {
                 manifest = Data(content)
-            case BGMusicCoverKind.webp.rawValue, BGMusicCoverKind.jpg.rawValue, BGMusicCoverKind.png.rawValue:
+            } else if let kind = coverKind {
                 if coverSeen {
                     return .failure(.duplicateEntry)
                 }
                 coverSeen = true
-                guard content.count <= maxCoverBytes else {
-                    return .failure(.coverTooLarge)
-                }
-                let kind = BGMusicCoverKind(rawValue: entry.name.lowercased()) ?? .webp
                 guard coverMatches(kind, content) else {
                     return .failure(.badCover)
                 }
                 cover = BGMusicCover(kind: kind, data: Data(content))
-            default:
-                // Unknown safe entries are skipped so later versions stay readable. They still count against the limits above.
-                continue
             }
+            // Unknown safe entries are skipped so later versions stay readable. They still count against the limits above.
         }
         guard let manifestData = manifest else {
             return .failure(.missingManifest)
@@ -253,28 +253,40 @@ public enum BGMusicArchive {
         return nil
     }
 
-    private static func extract(_ entry: Entry, bytes: [UInt8]) -> Result<[UInt8], BGMusicArchiveError> {
+    /// Why an entry's bytes could not be taken out: the archive is damaged, or the bytes went past the limit.
+    private enum ExtractError: Error {
+        case archive(BGMusicArchiveError)
+        case overflow
+    }
+
+    private static func extract(_ entry: Entry, bytes: [UInt8], limit: Int) -> Result<[UInt8], ExtractError> {
         let header = entry.localOffset
         guard header + 30 <= bytes.count, u32(bytes, header) == 0x0403_4B50 else {
-            return .failure(.corruptArchive)
+            return .failure(.archive(.corruptArchive))
         }
         let start = header + 30 + Int(u16(bytes, header + 26)) + Int(u16(bytes, header + 28))
         guard start + entry.compressedSize <= bytes.count else {
-            return .failure(.corruptArchive)
+            return .failure(.archive(.corruptArchive))
         }
         let payload = Array(bytes[start..<(start + entry.compressedSize)])
         let content: [UInt8]
         if entry.method == 0 {
+            guard payload.count <= limit else {
+                return .failure(.overflow)
+            }
             content = payload
         } else {
             do {
-                content = try BGMusicInflate.inflate(payload, limit: entry.uncompressedSize)
+                content = try BGMusicInflate.inflate(payload, limit: limit)
+            } catch BGMusicInflate.Failure.overflow {
+                return .failure(.overflow)
             } catch {
-                return .failure(.corruptArchive)
+                return .failure(.archive(.corruptArchive))
             }
         }
+        // The declared size is compared only after the bytes are read, which is the order the Android reader uses.
         guard content.count == entry.uncompressedSize, BGMusicCRC32.checksum(content) == entry.crc else {
-            return .failure(.corruptArchive)
+            return .failure(.archive(.corruptArchive))
         }
         return .success(content)
     }

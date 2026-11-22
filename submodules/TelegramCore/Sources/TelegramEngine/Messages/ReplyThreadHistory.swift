@@ -1,6 +1,7 @@
 import Foundation
 import Postbox
 import SwiftSignalKit
+import BeyGramStealth
 internal import TelegramApi
 
 private struct DiscussionMessage {
@@ -388,21 +389,38 @@ private class ReplyThreadHistoryContextImpl {
                 }
             }
 
+            // A stealth rule that hides read receipts for this chat keeps the thread read on this device. The counts above still
+            // change, but nothing is sent, and the server count is not fetched: it would bring the unread count back.
+            let sendsReadReceipt = BeyGramStealthHooks.allows(.readHistory, accountPeerId: strongSelf.account.peerId.toInt64(), chatPeerId: peerId.toInt64())
+            if !sendsReadReceipt {
+                revalidate = false
+            }
+
             if let subPeerId {
-                let signal = strongSelf.account.network.request(Api.functions.messages.readSavedHistory(parentPeer: inputPeer, peer: subPeerId, maxId: messageIndex.id.id))
-                |> `catch` { _ -> Signal<Api.Bool, NoError> in
-                    return .single(.boolFalse)
+                let signal: Signal<Never, NoError>
+                if sendsReadReceipt {
+                    signal = strongSelf.account.network.request(Api.functions.messages.readSavedHistory(parentPeer: inputPeer, peer: subPeerId, maxId: messageIndex.id.id))
+                    |> `catch` { _ -> Signal<Api.Bool, NoError> in
+                        return .single(.boolFalse)
+                    }
+                    |> ignoreValues
+                } else {
+                    signal = .complete()
                 }
-                |> ignoreValues
                 if revalidate {
                 }
                 strongSelf.readDisposable.set(signal.start())
             } else {
-                var signal = strongSelf.account.network.request(Api.functions.messages.readDiscussion(peer: inputPeer, msgId: Int32(clamping: threadId), readMaxId: messageIndex.id.id))
-                |> `catch` { _ -> Signal<Api.Bool, NoError> in
-                    return .single(.boolFalse)
+                var signal: Signal<Never, NoError>
+                if sendsReadReceipt {
+                    signal = strongSelf.account.network.request(Api.functions.messages.readDiscussion(peer: inputPeer, msgId: Int32(clamping: threadId), readMaxId: messageIndex.id.id))
+                    |> `catch` { _ -> Signal<Api.Bool, NoError> in
+                        return .single(.boolFalse)
+                    }
+                    |> ignoreValues
+                } else {
+                    signal = .complete()
                 }
-                |> ignoreValues
                 if revalidate {
                     let validateSignal = strongSelf.account.network.request(Api.functions.messages.getDiscussionMessage(peer: inputPeer, msgId: Int32(clamping: threadId)))
                     |> map { result -> (MessageId?, Int) in
