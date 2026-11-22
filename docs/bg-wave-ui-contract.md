@@ -45,7 +45,7 @@ UI работает только с фасадом. Контроллер и яд
 | `answerSendFailedForSidHex:` | ответ не ушёл в Telegram | волна `Failed`, ошибка `SendFailed` |
 | `declineSidHex:completion:` | «Отклонить» | https-Cancel с nonce 1 (`kDeclineNonce`) |
 | `stopWithCompletion:` | «Стоп» в любой фазе | https-Cancel до ответа или End после ответа, nonce 2 (`kStopNonce`); nil, если отправлять нечего |
-| `retryWithCompletion:` | «Повторить» после сбоя | `started`: запущен ли повтор. Для хоста повтор не решён, см. раздел 14 |
+| `retryWithCompletion:` | «Повторить» после сбоя | `started`: запущен ли повтор. Для обеих ролей как в Android, см. раздел 14 |
 | `dismiss` | «Закрыть» после сбоя или окончания | очищает экран |
 | `cancelLinkForSidHex:completion:` | оффер ушёл уже после локального стопа | https-Cancel с nonce 3 (`kAbortCancelNonce`) |
 | `resetAccountId:` | выход из аккаунта | приглашения аккаунта удаляются; волна закрывается, если она его |
@@ -149,7 +149,7 @@ UI работает только с фасадом. Контроллер и яд
 - Pending: «Присоединиться», «Отклонить».
 - Offering или AwaitingAnswer: «Отменить» (это `stop`).
 - Live: «Стоп».
-- Failed с NoConnection: «Повторить» (для слушателя; для хоста см. раздел 14) и «Закрыть».
+- Failed с NoConnection: «Повторить» (для обеих ролей как в Android, см. раздел 14) и «Закрыть».
 - Ended: «Закрыть».
 
 ## 9. Согласие stealth
@@ -214,8 +214,8 @@ Mac и Gemini не ждём. Один большой прогон GitHub CI за
 
 ## 14. Открытые вопросы
 
-- Повтор у хоста после сбоя: пир получает новый sid, фасад держит старый. Подробно в `bg-wave-android-compat.md`,
-  пункт 1. Нужно решение владельца до экрана с кнопкой «Повторить» для хоста.
+- Повтор после сбоя решён 2026-11-22: как в Android, без отказа для хоста. Подробно в `bg-wave-android-compat.md`,
+  пункт 1. Для экрана: если повтор не завершается, выход через «Стоп» в фазе Reconnecting.
 - `ExternalCallFallback` в офферах и ответах: пункт 2 compat.
 - Ошибка старта вывода слушателя видна только в логе.
 - Сетевой ретрай (аналог Android `BgWaveNetworkWatcher`) на iOS не подключён. Нужны `NWPathMonitor` и вызов `retry`.
