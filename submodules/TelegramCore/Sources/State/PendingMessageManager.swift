@@ -1198,6 +1198,10 @@ public final class PendingMessageManager {
                 }
             }
             
+            // BeyGram stealth: each server-scheduled message gets its date here, after the uploads, and keeps it in the store.
+            // One clock reading for the whole group: the messages of one request carry the same date.
+            let stealthNowSeconds = Int32(network.globalTime)
+            messages = messages.map { (beyGramStealthAtDispatch(transaction: transaction, accountPeerId: accountPeerId, message: $0.0, nowSeconds: stealthNowSeconds), $0.1) }
             messages.sort { $0.0.index < $1.0.index }
             
             if peerId.namespace == Namespaces.Peer.SecretChat {
@@ -1699,9 +1703,11 @@ public final class PendingMessageManager {
     private func sendMessageContent(network: Network, postbox: Postbox, stateManager: AccountStateManager, accountPeerId: PeerId, messageId: MessageId, content: PendingMessageUploadedContentAndReuploadInfo) -> Signal<Void, NoError> {
         let queue = self.queue
         return postbox.transaction { [weak self] transaction -> Signal<Void, NoError> in
-            guard let message = transaction.getMessage(messageId) else {
+            guard let storedMessage = transaction.getMessage(messageId) else {
                 return .complete()
             }
+            // BeyGram stealth: a server-scheduled send gets its date here, after its media is uploaded (beyGramStealthAtDispatch).
+            let message = beyGramStealthAtDispatch(transaction: transaction, accountPeerId: accountPeerId, message: storedMessage, nowSeconds: Int32(network.globalTime))
             
             if messageId.peerId.namespace == Namespaces.Peer.SecretChat {
                 PendingMessageManager.sendSecretMessageContent(transaction: transaction, message: message, content: content)

@@ -181,6 +181,7 @@ enum PeerInfoSettingsSection {
     case beyGramMusic
     case beyGramUpdates
     case beyGramPrivacy
+    case beyGramSettings
     case language
     case stickers
     case premium

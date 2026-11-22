@@ -161,7 +161,12 @@ final class BGMusicFormatTests: XCTestCase {
     }
 
     func testInflateRefusesOutputAboveLimit() {
-        XCTAssertThrowsError(try BGMusicInflate.inflate(deflatedHello, limit: 4))
+        do {
+            _ = try BGMusicInflate.inflate(deflatedHello, limit: 4)
+            XCTFail("output above the limit must be refused")
+        } catch {
+            XCTAssertEqual(error as? BGMusicInflate.Failure, .overflow)
+        }
     }
 
     func testReadDeflatedArchive() {

@@ -7,6 +7,7 @@ import ItemListUI
 import PresentationDataUtils
 import AccountContext
 import BeyGramAppearance
+import BeyGramKit
 
 private final class BeyGramStyleArguments {
     let select: (BeyGramStyle) -> Void
@@ -83,11 +84,13 @@ private enum BeyGramStyleEntry: ItemListNodeEntry {
 }
 
 private func beyGramStyleEntries(presentationData: PresentationData, selected: BeyGramStyle) -> [BeyGramStyleEntry] {
+    let lang = presentationData.strings.primaryComponent.languageCode
+    let l10n = BeyGramL10n.shared
     var entries: [BeyGramStyleEntry] = []
-    entries.append(.header(presentationData.theme, "Style"))
-    entries.append(.style(presentationData.theme, .telegram, "Telegram", selected == .telegram))
-    entries.append(.style(presentationData.theme, .beygram, "BeyGram", selected == .beygram))
-    entries.append(.info(presentationData.theme, "BeyGram keeps the colours of the active Telegram theme and changes the geometry: 20/8 bubble corners, a 24 pt composer and 54 pt avatars in the chat list. Telegram keeps the upstream look."))
+    entries.append(.header(presentationData.theme, l10n.string(.appearanceSectionStyle, languageCode: lang)))
+    entries.append(.style(presentationData.theme, .telegram, l10n.string(.appearanceStyleTelegram, languageCode: lang), selected == .telegram))
+    entries.append(.style(presentationData.theme, .beygram, l10n.string(.appearanceStyleBeyGram, languageCode: lang), selected == .beygram))
+    entries.append(.info(presentationData.theme, l10n.string(.appearanceDescription, languageCode: lang)))
     return entries
 }
 
@@ -100,7 +103,8 @@ public func beyGramStyleController(context: AccountContext) -> ViewController {
     let signal = combineLatest(context.sharedContext.presentationData, BeyGramAppearance.shared.styleSignal)
     |> deliverOnMainQueue
     |> map { presentationData, selected -> (ItemListControllerState, (ItemListNodeState, Any)) in
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("BeyGram Style"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
+        let lang = presentationData.strings.primaryComponent.languageCode
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(BeyGramL10n.shared.string(.appearanceTitle, languageCode: lang)), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
         let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: beyGramStyleEntries(presentationData: presentationData, selected: selected), style: .blocks)
         return (controllerState, (listState, arguments))
     }

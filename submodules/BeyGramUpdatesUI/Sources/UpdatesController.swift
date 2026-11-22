@@ -3,117 +3,163 @@ import UIKit
 import Display
 import SwiftSignalKit
 import TelegramPresentationData
-import ItemListUI
-import PresentationDataUtils
 import AccountContext
+import BeyGramDesign
+import BeyGramKit
 import BeyGramUpdates
 
-private final class UpdatesState {
-    var isChecking = false
-    var result: UpdateCheckResult?
-}
+private final class UpdatesViewControllerImpl: BeyGramScrollViewController {
+    private var isChecking = false
+    private var result: UpdateCheckResult?
 
-private final class UpdatesArguments {
-    let check: () -> Void
-    let openRelease: (URL) -> Void
+    private let installedBuild: Int
+    private let shortVersion: String
+    private let isDev: Bool
+    private let channel: UpdateChannel
+    private let commitSha: String?
 
-    init(check: @escaping () -> Void, openRelease: @escaping (URL) -> Void) {
-        self.check = check
-        self.openRelease = openRelease
+    private let currentCard = BeyGramCardView(spacing: 0, insets: UIEdgeInsets(top: 4, left: 16, bottom: 4, right: 16))
+    private let versionRow = BeyGramRowView()
+    private let buildRow = BeyGramRowView()
+    private let channelRow = BeyGramRowView()
+    private let commitRow = BeyGramRowView()
+
+    private let actionCard = BeyGramCardView(spacing: 10)
+    private let checkButton = BeyGramActionButton(style: .primary)
+    private let statusBadge = BeyGramPillBadge()
+    private let statusLabel = BeyGramTypography.makeLabel(style: .subheadline, weight: .regular, lines: 0)
+    private let releaseButton = BeyGramActionButton(style: .secondary)
+
+    override init(context: AccountContext) {
+        let info = Bundle.main.infoDictionary ?? [:]
+        self.installedBuild = Int(info["CFBundleVersion"] as? String ?? "") ?? 0
+        self.shortVersion = info["CFBundleShortVersionString"] as? String ?? "0.0.1"
+        let channelRaw = (info["BeyGramBuildChannel"] as? String)?.lowercased()
+        self.isDev = channelRaw == "dev" || (info["CFBundleIdentifier"] as? String)?.lowercased().contains("dev") == true
+        self.channel = self.isDev ? .dev : .release
+        self.commitSha = (info["BeyGramGitCommit"] as? String) ?? (info["GitCommit"] as? String)
+        super.init(context: context)
     }
-}
 
-private enum UpdatesEntry: ItemListNodeEntry, Equatable {
-    case explanation
-    case check(Bool)
-    case status(String)
-    case release(URL)
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        self.currentCard.contentStack.addArrangedSubview(self.versionRow)
+        self.currentCard.contentStack.addArrangedSubview(self.buildRow)
+        self.currentCard.contentStack.addArrangedSubview(self.channelRow)
+        self.currentCard.contentStack.addArrangedSubview(self.commitRow)
+        self.stackView.addArrangedSubview(self.currentCard)
 
-    var section: ItemListSectionId {
-        return 0
+        self.checkButton.addTarget(self, action: #selector(self.checkTapped), for: .touchUpInside)
+        self.releaseButton.addTarget(self, action: #selector(self.releaseTapped), for: .touchUpInside)
+        self.actionCard.contentStack.addArrangedSubview(self.checkButton)
+        self.actionCard.contentStack.addArrangedSubview(self.statusBadge)
+        self.actionCard.contentStack.addArrangedSubview(self.statusLabel)
+        self.actionCard.contentStack.addArrangedSubview(self.releaseButton)
+        self.stackView.addArrangedSubview(self.actionCard)
+
+        self.render()
     }
 
-    var stableId: Int64 {
-        switch self {
-        case .explanation: return 0
-        case .check: return 1
-        case .status: return 2
-        case .release: return 3
+    override func applyPresentationData(_ presentationData: PresentationData) {
+        super.applyPresentationData(presentationData)
+        self.render()
+    }
+
+    private func render() {
+        let lang = self.presentationData.strings.primaryComponent.languageCode
+        let l10n = BeyGramL10n.shared
+        let palette = BeyGramThemePalette(theme: self.presentationData.theme)
+
+        self.title = l10n.string(.updatesTitle, languageCode: lang)
+        self.currentCard.apply(palette: palette)
+
+        let hasCommit = self.isDev && !(self.commitSha ?? "").isEmpty
+        self.versionRow.configure(title: l10n.string(.updatesVersion, languageCode: lang), value: self.shortVersion, showSeparator: true, palette: palette)
+        self.buildRow.configure(title: l10n.string(.updatesBuild, languageCode: lang), value: "\(self.installedBuild)", showSeparator: true, palette: palette)
+        self.channelRow.configure(
+            title: l10n.string(.updatesChannel, languageCode: lang),
+            value: self.isDev ? l10n.string(.updatesChannelDev, languageCode: lang) : l10n.string(.updatesChannelRelease, languageCode: lang),
+            showSeparator: hasCommit,
+            palette: palette
+        )
+        if hasCommit, let sha = self.commitSha {
+            self.commitRow.isHidden = false
+            self.commitRow.configure(title: l10n.string(.updatesCommit, languageCode: lang), value: String(sha.prefix(8)), showSeparator: false, palette: palette)
+        } else {
+            self.commitRow.isHidden = true
         }
-    }
 
-    static func < (lhs: UpdatesEntry, rhs: UpdatesEntry) -> Bool {
-        return lhs.stableId < rhs.stableId
-    }
+        self.actionCard.apply(palette: palette)
+        self.checkButton.configure(
+            title: self.isChecking ? l10n.string(.updatesChecking, languageCode: lang) : l10n.string(.updatesCheckButton, languageCode: lang),
+            style: .primary,
+            palette: palette,
+            isLoading: self.isChecking,
+            isEnabled: !self.isChecking
+        )
 
-    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
-        let arguments = arguments as! UpdatesArguments
-        switch self {
-        case .explanation:
-            return ItemListTextItem(presentationData: presentationData, text: .plain("Updates are checked only when you tap the button. BeyGram does not download or install anything in the background. On iOS, open the release page to get the new version."), sectionId: self.section)
-        case let .check(enabled):
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Check for updates", kind: enabled ? .generic : .disabled, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.check()
-            })
-        case let .status(text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case let .release(url):
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Open release page", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.openRelease(url)
-            })
-        }
-    }
-}
+        self.statusBadge.isHidden = true
+        self.statusLabel.isHidden = false
+        self.releaseButton.isHidden = true
 
-/// Manual update screen. Installed build number comes from the bundle's CFBundleVersion.
-public func beyGramUpdatesController(context: AccountContext) -> ViewController {
-    let state = UpdatesState()
-    let revision = ValuePromise<Int>(0, ignoreRepeated: false)
-    var counter = 0
-    let bump: () -> Void = {
-        counter += 1
-        revision.set(counter)
-    }
-    let installedBuild = Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "") ?? 0
-
-    let arguments = UpdatesArguments(check: {
-        guard !state.isChecking else {
-            return
-        }
-        state.isChecking = true
-        state.result = nil
-        bump()
-        Task { @MainActor in
-            state.result = await UpdateCheck.check(installedVersionCode: installedBuild)
-            state.isChecking = false
-            bump()
-        }
-    }, openRelease: { url in
-        context.sharedContext.applicationBindings.openUrl(url.absoluteString)
-    })
-
-    let signal = combineLatest(context.sharedContext.presentationData, revision.get())
-        |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
-            let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Updates"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
-            var entries: [UpdatesEntry] = [.explanation, .check(!state.isChecking)]
-            if state.isChecking {
-                entries.append(.status("Checking…"))
-            } else {
-                switch state.result {
-                case nil:
-                    break
-                case .upToDate?:
-                    entries.append(.status("BeyGram is up to date."))
-                case let .available(versionName, releaseURL)?:
-                    entries.append(.status("New version \(versionName) is available."))
-                    entries.append(.release(releaseURL))
-                case .failed?:
-                    entries.append(.status("Could not check for updates. Try again later."))
+        if self.isChecking {
+            self.statusLabel.text = l10n.string(.updatesChecking, languageCode: lang)
+            self.statusLabel.textColor = palette.secondaryText
+        } else if let result = self.result {
+            switch result {
+            case .upToDate, .noReleases:
+                self.statusBadge.isHidden = false
+                self.statusBadge.configure(text: l10n.string(.updatesUpToDate, languageCode: lang), textColor: palette.success, backgroundColor: palette.successSoft)
+                self.statusLabel.isHidden = true
+            case let .available(updateInfo):
+                self.statusBadge.isHidden = false
+                self.statusBadge.configure(text: l10n.string(.updatesAvailableTitle, languageCode: lang), textColor: palette.accent, backgroundColor: palette.accentSoft)
+                var versionSummary = l10n.format(.updatesAvailableVersion, languageCode: lang, "\(updateInfo.versionName) (\(updateInfo.buildNumber))")
+                if let sha = updateInfo.commitSha, !sha.isEmpty {
+                    versionSummary += " · \(String(sha.prefix(8)))"
                 }
+                if let changelog = updateInfo.changelog, !changelog.isEmpty {
+                    versionSummary += "\n\n\(changelog)"
+                }
+                self.statusLabel.text = versionSummary
+                self.statusLabel.textColor = palette.primaryText
+                self.releaseButton.isHidden = false
+                self.releaseButton.configure(title: l10n.string(.updatesOpenRelease, languageCode: lang), style: .secondary, palette: palette)
+            case .failed:
+                self.statusBadge.isHidden = false
+                self.statusBadge.configure(text: l10n.string(.commonError, languageCode: lang), textColor: palette.destructive, backgroundColor: palette.destructiveSoft)
+                self.statusLabel.text = l10n.format(.updatesErrorPrefix, languageCode: lang, l10n.string(.commonError, languageCode: lang))
+                self.statusLabel.textColor = palette.destructive
             }
-            let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
-            return (controllerState, (listState, arguments))
+        } else {
+            self.statusLabel.text = l10n.string(.updatesManualNote, languageCode: lang)
+            self.statusLabel.textColor = palette.secondaryText
         }
+    }
 
-    return ItemListController(context: context, state: signal)
+    @objc private func checkTapped() {
+        guard !self.isChecking else { return }
+        self.isChecking = true
+        self.result = nil
+        self.render()
+        Task { @MainActor in
+            self.result = await UpdateCheck.check(
+                installedVersionName: self.shortVersion,
+                installedBuildNumber: self.installedBuild,
+                channel: self.channel
+            )
+            self.isChecking = false
+            self.render()
+        }
+    }
+
+    @objc private func releaseTapped() {
+        if case let .available(updateInfo) = self.result {
+            self.context.sharedContext.applicationBindings.openUrl(updateInfo.releaseURL.absoluteString)
+        }
+    }
+}
+
+public func beyGramUpdatesController(context: AccountContext) -> ViewController {
+    return UpdatesViewControllerImpl(context: context)
 }

@@ -3,244 +3,778 @@ import UIKit
 import Display
 import SwiftSignalKit
 import TelegramPresentationData
-import ItemListUI
-import PresentationDataUtils
 import AccountContext
+import BeyGramDesign
 import BeyGramKit
 import BeyGramYandexMusic
 
-private final class BeyGramYandexArguments {
-    let accept: () -> Void
-    let revoke: () -> Void
-    let signIn: () -> Void
-    let cancelSignIn: () -> Void
-    let openVerification: () -> Void
-    let signOut: () -> Void
-
-    init(accept: @escaping () -> Void, revoke: @escaping () -> Void, signIn: @escaping () -> Void, cancelSignIn: @escaping () -> Void, openVerification: @escaping () -> Void, signOut: @escaping () -> Void) {
-        self.accept = accept
-        self.revoke = revoke
-        self.signIn = signIn
-        self.cancelSignIn = cancelSignIn
-        self.openVerification = openVerification
-        self.signOut = signOut
+private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewController, UITextFieldDelegate {
+    private enum SectionTab: Int {
+        case myWave = 0
+        case search = 1
+        case likes = 2
+        case playlists = 3
     }
-}
 
-private enum BeyGramYandexSection: Int32 {
-    case warning
-    case account
-    case info
-}
+    private let service = BGYandexRuntime.shared
+    private var activeTab: SectionTab = .myWave
+    private var accepted: Bool = UserDefaults.standard.bool(forKey: "beygram.yandex.consentAccepted")
+    private var waitingCode: String?
+    private var verificationUrl: String?
+    private var codeCopied: Bool = false
+    private var authFailure: String?
 
-/// The screen state that the entries are drawn from.
-private struct BeyGramYandexState: Equatable {
-    var accepted: Bool
-    var configured: Bool
-    var signedIn: Bool
-    var waitingCode: String?
-    var verificationUrl: String?
-    var failure: String?
-}
+    private var waveQueue: BGYandexWaveQueue?
+    private var currentWaveTrack: BGYandexTrack?
+    private var waveLoading: Bool = false
+    private var waveError: String?
+    private var waveLiked: Bool = false
 
-private enum BeyGramYandexEntry: ItemListNodeEntry {
-    case warning(String)
-    case accept(String)
-    case notConfigured(String)
-    case signIn(String)
-    case code(String)
-    case openVerification(String)
-    case cancelSignIn(String)
-    case signedIn(String)
-    case signOut(String)
-    case revoke(String)
-    case failure(String)
+    private var searchQuery: String = ""
+    private var searchResults: [BGYandexTrack] = []
+    private var searchLoading: Bool = false
+    private var searchError: String?
 
-    var section: ItemListSectionId {
-        switch self {
-        case .warning, .accept:
-            return BeyGramYandexSection.warning.rawValue
-        case .notConfigured, .signIn, .code, .openVerification, .cancelSignIn, .signedIn, .signOut, .failure:
-            return BeyGramYandexSection.account.rawValue
-        case .revoke:
-            return BeyGramYandexSection.info.rawValue
+    private var likedTracks: [BGYandexTrack] = []
+    private var likesLoaded: Bool = false
+    private var likesLoading: Bool = false
+
+    private var playlists: [BGYandexPlaylist] = []
+    private var playlistsLoaded: Bool = false
+    private var playlistsLoading: Bool = false
+    private var selectedPlaylist: BGYandexPlaylist?
+    private var selectedPlaylistTracks: [BGYandexTrack] = []
+
+    private var musicStateDisposable: Disposable?
+    private var musicState = BeyGramMusicSession.shared.currentState
+    private var lastWaveTrackIdPlayed: String?
+
+    // Onboarding / Auth UI
+    private let authCard = BeyGramCardView(spacing: 12)
+    private let authTitleLabel = BeyGramTypography.makeLabel(style: .title3, weight: .bold, lines: 0)
+    private let authBodyLabel = BeyGramTypography.makeLabel(style: .subheadline, weight: .regular, lines: 0)
+    private let codeLabel = BeyGramTypography.makeLabel(style: .title1, weight: .bold, lines: 1)
+    private let authPrimaryButton = BeyGramActionButton(style: .primary)
+    private let authSecondaryButton = BeyGramActionButton(style: .secondary)
+    private let authErrorLabel = BeyGramTypography.makeLabel(style: .footnote, weight: .medium, lines: 0)
+
+    // Signed-in Hub UI
+    private let profileCard = BeyGramCardView(spacing: 8)
+    private let profileTitleLabel = BeyGramTypography.makeLabel(style: .headline, weight: .semibold, lines: 1)
+    private let profileBadge = BeyGramPillBadge()
+    private let signOutButton = UIButton(type: .system)
+
+    private let tabControl = UISegmentedControl(items: ["My Wave", "Search", "Likes", "Playlists"])
+
+    // My Wave Card
+    private let waveCard = BeyGramCardView(spacing: 12)
+    private let waveCoverView = UIImageView()
+    private let waveTrackTitle = BeyGramTypography.makeLabel(style: .title3, weight: .bold, lines: 2)
+    private let waveTrackArtist = BeyGramTypography.makeLabel(style: .subheadline, weight: .medium, lines: 1)
+    private let wavePlayButton = BeyGramActionButton(style: .primary)
+    private let waveNextButton = BeyGramActionButton(style: .secondary)
+    private let waveLikeButton = BeyGramActionButton(style: .secondary)
+    private let waveStatusLabel = BeyGramTypography.makeLabel(style: .footnote, weight: .regular, lines: 0)
+
+    // Search Card
+    private let searchContainer = UIStackView()
+    private let searchField = UITextField()
+    private let searchButton = BeyGramActionButton(style: .primary)
+    private let tracksListCard = BeyGramCardView(spacing: 0, insets: UIEdgeInsets(top: 4, left: 16, bottom: 4, right: 16))
+    private let listEmptyLabel = BeyGramTypography.makeLabel(style: .subheadline, weight: .regular, lines: 0)
+
+    private var miniPlayerBar: BeyGramMiniPlayerBar!
+    private var loadedWaveCoverURL: URL?
+
+    deinit {
+        self.musicStateDisposable?.dispose()
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        self.setupUI()
+        self.service.onAccountStateChange = { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.render()
+            }
+        }
+        self.musicStateDisposable = (BeyGramMusicSession.shared.stateSignal
+        |> deliverOnMainQueue).start(next: { [weak self] state in
+            guard let self else { return }
+            let previousTrack = self.musicState.currentTrack
+            self.musicState = state
+            self.handleMusicAdvanceIfWaveActive(previous: previousTrack, current: state.currentTrack)
+            self.render()
+        })
+        self.render()
+    }
+
+    private func setupUI() {
+        // Auth Card
+        self.codeLabel.textAlignment = .center
+        self.authPrimaryButton.addTarget(self, action: #selector(self.authPrimaryTapped), for: .touchUpInside)
+        self.authSecondaryButton.addTarget(self, action: #selector(self.authSecondaryTapped), for: .touchUpInside)
+        self.authCard.contentStack.addArrangedSubview(self.authTitleLabel)
+        self.authCard.contentStack.addArrangedSubview(self.authBodyLabel)
+        self.authCard.contentStack.addArrangedSubview(self.codeLabel)
+        self.authCard.contentStack.addArrangedSubview(self.authErrorLabel)
+        self.authCard.contentStack.addArrangedSubview(self.authPrimaryButton)
+        self.authCard.contentStack.addArrangedSubview(self.authSecondaryButton)
+        self.stackView.addArrangedSubview(self.authCard)
+
+        // Profile Card
+        self.signOutButton.titleLabel?.font = BeyGramTypography.font(style: .footnote, weight: .semibold)
+        self.signOutButton.addTarget(self, action: #selector(self.signOutTapped), for: .touchUpInside)
+        let profileRow = UIStackView(arrangedSubviews: [self.profileTitleLabel, self.profileBadge, UIView(), self.signOutButton])
+        profileRow.axis = .horizontal
+        profileRow.alignment = .center
+        profileRow.spacing = 8
+        self.profileCard.contentStack.addArrangedSubview(profileRow)
+        self.stackView.addArrangedSubview(self.profileCard)
+
+        // Segmented Tabs
+        self.tabControl.selectedSegmentIndex = 0
+        self.tabControl.addTarget(self, action: #selector(self.tabChanged), for: .valueChanged)
+        self.stackView.addArrangedSubview(self.tabControl)
+
+        // My Wave Card
+        self.waveCoverView.contentMode = .scaleAspectFill
+        self.waveCoverView.layer.cornerRadius = 16
+        self.waveCoverView.layer.cornerCurve = .continuous
+        self.waveCoverView.clipsToBounds = true
+        self.waveCoverView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            self.waveCoverView.heightAnchor.constraint(equalToConstant: 180)
+        ])
+        self.waveTrackTitle.textAlignment = .center
+        self.waveTrackArtist.textAlignment = .center
+        self.wavePlayButton.addTarget(self, action: #selector(self.wavePlayTapped), for: .touchUpInside)
+        self.waveNextButton.addTarget(self, action: #selector(self.waveNextTapped), for: .touchUpInside)
+        self.waveLikeButton.addTarget(self, action: #selector(self.waveLikeTapped), for: .touchUpInside)
+        let waveActions = UIStackView(arrangedSubviews: [self.wavePlayButton, self.waveNextButton, self.waveLikeButton])
+        waveActions.axis = .horizontal
+        waveActions.spacing = 8
+        waveActions.distribution = .fillEqually
+        self.waveStatusLabel.textAlignment = .center
+
+        self.waveCard.contentStack.addArrangedSubview(self.waveCoverView)
+        self.waveCard.contentStack.addArrangedSubview(self.waveTrackTitle)
+        self.waveCard.contentStack.addArrangedSubview(self.waveTrackArtist)
+        self.waveCard.contentStack.addArrangedSubview(waveActions)
+        self.waveCard.contentStack.addArrangedSubview(self.waveStatusLabel)
+        self.stackView.addArrangedSubview(self.waveCard)
+
+        // Search Row
+        self.searchContainer.axis = .horizontal
+        self.searchContainer.spacing = 8
+        self.searchField.borderStyle = .roundedRect
+        self.searchField.returnKeyType = .search
+        self.searchField.clearButtonMode = .whileEditing
+        self.searchField.font = BeyGramTypography.font(style: .body)
+        self.searchField.adjustsFontForContentSizeCategory = true
+        self.searchField.delegate = self
+        self.searchButton.setContentHuggingPriority(.required, for: .horizontal)
+        self.searchButton.addTarget(self, action: #selector(self.searchTapped), for: .touchUpInside)
+        self.searchContainer.addArrangedSubview(self.searchField)
+        self.searchContainer.addArrangedSubview(self.searchButton)
+        self.stackView.addArrangedSubview(self.searchContainer)
+
+        // List Card
+        self.listEmptyLabel.textAlignment = .center
+        self.stackView.addArrangedSubview(self.tracksListCard)
+        self.stackView.addArrangedSubview(self.listEmptyLabel)
+
+        // Mini-Player Bar
+        self.miniPlayerBar = BeyGramMiniPlayerBar(onOpenPlayer: { [weak self] in
+            guard let self else { return }
+            (self.navigationController as? NavigationController)?.pushViewController(BeyGramNowPlayingViewController(context: self.context))
+        })
+        self.miniPlayerBar.translatesAutoresizingMaskIntoConstraints = false
+        self.displayNode.view.addSubview(self.miniPlayerBar)
+        NSLayoutConstraint.activate([
+            self.miniPlayerBar.leadingAnchor.constraint(equalTo: self.displayNode.view.leadingAnchor, constant: 12),
+            self.miniPlayerBar.trailingAnchor.constraint(equalTo: self.displayNode.view.trailingAnchor, constant: -12),
+            self.miniPlayerBar.bottomAnchor.constraint(equalTo: self.displayNode.view.safeAreaLayoutGuide.bottomAnchor, constant: -10)
+        ])
+    }
+
+    override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
+        super.containerLayoutUpdated(layout, transition: transition)
+        let extraBottom: CGFloat = self.miniPlayerBar.isHidden ? 16 : 82
+        self.scrollView.contentInset.bottom = layout.intrinsicInsets.bottom + extraBottom
+        self.scrollView.scrollIndicatorInsets = self.scrollView.contentInset
+    }
+
+    override func applyPresentationData(_ presentationData: PresentationData) {
+        super.applyPresentationData(presentationData)
+        self.render()
+    }
+
+    private func render() {
+        let lang = self.presentationData.strings.primaryComponent.languageCode
+        let isRu = lang.lowercased().hasPrefix("ru")
+        let l10n = BeyGramL10n.shared
+        let palette = BeyGramThemePalette(theme: self.presentationData.theme)
+
+        self.title = l10n.string(.yandexTitle, languageCode: lang)
+        self.miniPlayerBar?.apply(theme: self.presentationData.theme)
+
+        let signedInAccount: BGYandexAccount?
+        switch self.service.accountState {
+        case .signedOut:
+            signedInAccount = nil
+        case let .signedIn(account):
+            signedInAccount = account
+        }
+
+        let showHub = self.accepted && self.service.credentials.isConfigured && signedInAccount != nil
+        self.authCard.isHidden = showHub
+        self.profileCard.isHidden = !showHub
+        self.tabControl.isHidden = !showHub
+        self.waveCard.isHidden = !showHub || self.activeTab != .myWave
+        self.searchContainer.isHidden = !showHub || self.activeTab != .search
+        self.tracksListCard.isHidden = !showHub || self.activeTab == .myWave
+        self.listEmptyLabel.isHidden = !showHub || self.activeTab == .myWave
+
+        if !showHub {
+            self.renderAuth(palette: palette, l10n: l10n, lang: lang, isRu: isRu)
+            return
+        }
+
+        guard let account = signedInAccount else { return }
+        self.profileCard.apply(palette: palette)
+        self.profileTitleLabel.text = account.displayName
+        self.profileTitleLabel.textColor = palette.primaryText
+        self.profileBadge.configure(
+            text: account.hasPlus ? "Plus" : "Free",
+            textColor: account.hasPlus ? palette.success : palette.warning,
+            backgroundColor: account.hasPlus ? palette.successSoft : palette.warningSoft
+        )
+        self.signOutButton.setTitle(l10n.string(.yandexSignOut, languageCode: lang), for: .normal)
+        self.signOutButton.tintColor = palette.destructive
+
+        self.tabControl.setTitle(isRu ? "Моя волна" : "My Wave", forSegmentAt: 0)
+        self.tabControl.setTitle(isRu ? "Поиск" : "Search", forSegmentAt: 1)
+        self.tabControl.setTitle(isRu ? "Лайки" : "Likes", forSegmentAt: 2)
+        self.tabControl.setTitle(isRu ? "Плейлисты" : "Playlists", forSegmentAt: 3)
+
+        switch self.activeTab {
+        case .myWave:
+            self.renderMyWave(palette: palette, isRu: isRu)
+        case .search:
+            self.renderSearch(palette: palette, isRu: isRu)
+        case .likes:
+            self.loadLikesIfNeeded()
+            self.renderTrackList(
+                tracks: self.likedTracks,
+                loading: self.likesLoading,
+                emptyText: isRu ? "Любимые треки не найдены." : "No liked tracks found.",
+                palette: palette,
+                isRu: isRu
+            )
+        case .playlists:
+            self.loadPlaylistsIfNeeded()
+            self.renderPlaylists(palette: palette, isRu: isRu)
         }
     }
 
-    var stableId: Int32 {
-        switch self {
-        case .warning: return 0
-        case .accept: return 1
-        case .notConfigured: return 2
-        case .signIn: return 3
-        case .code: return 4
-        case .openVerification: return 5
-        case .cancelSignIn: return 6
-        case .signedIn: return 7
-        case .signOut: return 8
-        case .failure: return 9
-        case .revoke: return 10
+    private func renderAuth(palette: BeyGramThemePalette, l10n: BeyGramL10n, lang: String, isRu: Bool) {
+        self.authCard.apply(palette: palette)
+        self.authTitleLabel.textColor = palette.primaryText
+        self.authBodyLabel.textColor = palette.secondaryText
+        self.codeLabel.textColor = palette.accent
+
+        if let err = self.authFailure {
+            self.authErrorLabel.isHidden = false
+            self.authErrorLabel.text = err
+            self.authErrorLabel.textColor = palette.destructive
+        } else {
+            self.authErrorLabel.isHidden = true
+        }
+
+        if !self.accepted {
+            self.authTitleLabel.text = l10n.string(.yandexWarningTitle, languageCode: lang)
+            self.authBodyLabel.text = l10n.string(.yandexWarningBody, languageCode: lang)
+            self.codeLabel.isHidden = true
+            self.authPrimaryButton.configure(title: l10n.string(.yandexAcceptConsent, languageCode: lang), style: .primary, palette: palette)
+            self.authSecondaryButton.isHidden = true
+        } else if !self.service.credentials.isConfigured {
+            self.authTitleLabel.text = l10n.string(.yandexNotConfiguredTitle, languageCode: lang)
+            self.authBodyLabel.text = l10n.string(.yandexNotConfiguredBody, languageCode: lang)
+            self.codeLabel.isHidden = true
+            self.authPrimaryButton.isHidden = true
+            self.authSecondaryButton.isHidden = true
+        } else if let code = self.waitingCode {
+            self.authTitleLabel.text = l10n.string(.yandexWaitingTitle, languageCode: lang)
+            self.authBodyLabel.text = l10n.string(.yandexOpenVerification, languageCode: lang)
+            self.codeLabel.isHidden = false
+            self.codeLabel.text = code
+            self.authPrimaryButton.isHidden = false
+            self.authPrimaryButton.configure(
+                title: self.codeCopied ? l10n.string(.commonCopied, languageCode: lang) : l10n.string(.yandexCopyCode, languageCode: lang),
+                style: .primary,
+                palette: palette
+            )
+            self.authSecondaryButton.isHidden = false
+            self.authSecondaryButton.configure(title: isRu ? "Открыть ссылку" : "Open Verification Page", style: .secondary, palette: palette)
+        } else {
+            self.authTitleLabel.text = l10n.string(.yandexTitle, languageCode: lang)
+            self.authBodyLabel.text = isRu ? "Войдите в аккаунт Яндекс, чтобы слушать Мою волну, лайки и плейлисты." : "Sign in to your Yandex account for My Wave, likes, and playlists."
+            self.codeLabel.isHidden = true
+            self.authPrimaryButton.isHidden = false
+            self.authPrimaryButton.configure(title: l10n.string(.yandexSignIn, languageCode: lang), style: .primary, palette: palette)
+            self.authSecondaryButton.isHidden = true
         }
     }
 
-    static func ==(lhs: BeyGramYandexEntry, rhs: BeyGramYandexEntry) -> Bool {
-        return lhs.stableId == rhs.stableId && lhs.text == rhs.text
-    }
+    private func renderMyWave(palette: BeyGramThemePalette, isRu: Bool) {
+        self.waveCard.apply(palette: palette)
+        let track = self.currentWaveTrack
+        self.waveTrackTitle.text = track?.title ?? (isRu ? "Моя волна" : "My Wave")
+        self.waveTrackTitle.textColor = palette.primaryText
+        let artistJoined = track?.artists.joined(separator: ", ") ?? ""
+        self.waveTrackArtist.text = artistJoined.isEmpty ? (isRu ? "Персональный поток музыки" : "Your personal continuous radio") : artistJoined
+        self.waveTrackArtist.textColor = palette.secondaryText
 
-    static func <(lhs: BeyGramYandexEntry, rhs: BeyGramYandexEntry) -> Bool {
-        return lhs.stableId < rhs.stableId
-    }
-
-    var text: String {
-        switch self {
-        case let .warning(text), let .accept(text), let .notConfigured(text), let .signIn(text), let .code(text),
-             let .openVerification(text), let .cancelSignIn(text), let .signedIn(text), let .signOut(text), let .failure(text), let .revoke(text):
-            return text
-        }
-    }
-
-    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
-        let arguments = arguments as! BeyGramYandexArguments
-        switch self {
-        case let .warning(text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case let .accept(title):
-            return ItemListActionItem(presentationData: presentationData, title: title, kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.accept()
-            })
-        case let .notConfigured(text), let .code(text), let .signedIn(text), let .failure(text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case let .signIn(title):
-            return ItemListActionItem(presentationData: presentationData, title: title, kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.signIn()
-            })
-        case let .openVerification(title):
-            return ItemListActionItem(presentationData: presentationData, title: title, kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.openVerification()
-            })
-        case let .cancelSignIn(title):
-            return ItemListActionItem(presentationData: presentationData, title: title, kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.cancelSignIn()
-            })
-        case let .signOut(title):
-            return ItemListActionItem(presentationData: presentationData, title: title, kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.signOut()
-            })
-        case let .revoke(title):
-            return ItemListActionItem(presentationData: presentationData, title: title, kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.revoke()
-            })
-        }
-    }
-}
-
-private func beyGramYandexEntries(state: BeyGramYandexState, isRussian: Bool) -> [BeyGramYandexEntry] {
-    var entries: [BeyGramYandexEntry] = []
-    entries.append(.warning(BGYandexWarning.text(isRussian: isRussian)))
-    if !state.accepted {
-        entries.append(.accept(isRussian ? "Принимаю риск и включаю" : "I accept the risk and turn it on"))
-        return entries
-    }
-    if !state.configured {
-        entries.append(.notConfigured(isRussian
-            ? "В этой сборке не задана OAuth-пара Яндекса, поэтому источник скрыт."
-            : "This build has no Yandex OAuth pair, so the source stays hidden."))
-        entries.append(.revoke(isRussian ? "Отозвать согласие" : "Revoke consent"))
-        return entries
-    }
-    if state.signedIn {
-        entries.append(.signedIn(isRussian ? "Вход выполнен. Токен хранится в Keychain." : "Signed in. The token is kept in the Keychain."))
-        entries.append(.signOut(isRussian ? "Выйти и удалить кэш треков" : "Sign out and delete cached tracks"))
-    } else if let code = state.waitingCode {
-        entries.append(.code(isRussian ? "Введите код на странице Яндекса: \(code)" : "Enter this code on the Yandex page: \(code)"))
-        entries.append(.openVerification(isRussian ? "Открыть страницу входа" : "Open the sign-in page"))
-        entries.append(.cancelSignIn(isRussian ? "Отменить вход" : "Cancel sign-in"))
-    } else {
-        entries.append(.signIn(isRussian ? "Войти через Яндекс" : "Sign in with Yandex"))
-    }
-    if let failure = state.failure {
-        entries.append(.failure(failure))
-    }
-    entries.append(.revoke(isRussian ? "Отозвать согласие и выйти" : "Revoke consent and sign out"))
-    return entries
-}
-
-/// The Yandex Music screen: the warning, acceptance, device sign-in, and sign-out. Off unless the flag is on.
-public func beyGramYandexMusicController(context: AccountContext) -> ViewController {
-    let service = BGYandexService(
-        credentials: BGYandexCredentials.fromBundle(),
-        cacheDirectory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("beygram/yandex", isDirectory: true)
-    )
-    let consent = BGYandexConsent(defaults: .standard)
-    var state = BeyGramYandexState(accepted: consent.isAccepted, configured: service.credentials.isConfigured, signedIn: service.isSignedIn, waitingCode: nil, verificationUrl: nil, failure: nil)
-    var refreshCount = 0
-    let refresh = ValuePromise<Int>(0, ignoreRepeated: false)
-    let update: () -> Void = {
-        refreshCount += 1
-        refresh.set(refreshCount)
-    }
-
-    let arguments = BeyGramYandexArguments(
-        accept: {
-            consent.accept()
-            state.accepted = true
-            update()
-        },
-        revoke: {
-            service.cancelSignIn()
-            service.signOut()
-            consent.revoke()
-            state = BeyGramYandexState(accepted: false, configured: state.configured, signedIn: false, waitingCode: nil, verificationUrl: nil, failure: nil)
-            update()
-        },
-        signIn: {
-            state.failure = nil
-            state.waitingCode = nil
-            service.startSignIn { event in
-                switch event {
-                case let .code(code):
-                    state.waitingCode = code.userCode
-                    state.verificationUrl = code.verificationUrl
-                case .finished:
-                    state.waitingCode = nil
-                    state.verificationUrl = nil
-                    state.signedIn = true
-                case let .failed(reason):
-                    state.waitingCode = nil
-                    state.verificationUrl = nil
-                    state.failure = "\(reason)"
+        let coverURL = track.flatMap { BGYandexTrackInfo(track: $0).coverURL }
+        if self.loadedWaveCoverURL != coverURL {
+            self.loadedWaveCoverURL = coverURL
+            self.waveCoverView.image = UIImage(systemName: "waveform.circle.fill")
+            self.waveCoverView.tintColor = palette.accent
+            self.waveCoverView.backgroundColor = palette.accentSoft
+            self.waveCoverView.contentMode = .scaleAspectFit
+            BeyGramTrackMetadataStore.shared.loadCover(url: coverURL) { [weak self] image in
+                guard let self, self.loadedWaveCoverURL == coverURL, let image else { return }
+                self.waveCoverView.contentMode = .scaleAspectFill
+                UIView.transition(with: self.waveCoverView, duration: 0.25, options: .transitionCrossDissolve) {
+                    self.waveCoverView.image = image
                 }
-                update()
             }
-            update()
-        },
-        cancelSignIn: {
-            service.cancelSignIn()
-            state.waitingCode = nil
-            state.verificationUrl = nil
-            update()
-        },
-        openVerification: {
-            if let url = state.verificationUrl {
-                context.sharedContext.applicationBindings.openUrl(url)
-            }
-        },
-        signOut: {
-            service.signOut()
-            state.signedIn = false
-            update()
         }
-    )
 
-    let signal = combineLatest(context.sharedContext.presentationData, refresh.get())
-    |> deliverOnMainQueue
-    |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
-        let isRussian = presentationData.strings.primaryComponent.languageCode == "ru"
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Яндекс Музыка"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
-        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: beyGramYandexEntries(state: state, isRussian: isRussian), style: .blocks)
-        return (controllerState, (listState, arguments))
+        let isThisPlaying = self.musicState.isPlaying && (track == nil || self.musicState.currentTrack?.yandexTrackId == track?.trackId)
+        self.wavePlayButton.configure(
+            title: track == nil ? (isRu ? "Запустить" : "Start") : (isThisPlaying ? (isRu ? "Пауза" : "Pause") : (isRu ? "Играть" : "Play")),
+            style: .primary,
+            palette: palette,
+            isLoading: self.waveLoading
+        )
+        self.waveNextButton.configure(title: isRu ? "Дальше" : "Skip", style: .secondary, palette: palette, isEnabled: track != nil)
+        self.waveLikeButton.configure(
+            title: self.waveLiked ? (isRu ? "В любимом" : "Liked") : (isRu ? "Нравится" : "Like"),
+            style: .secondary,
+            palette: palette,
+            isEnabled: track != nil
+        )
+
+        if let waveError {
+            self.waveStatusLabel.isHidden = false
+            self.waveStatusLabel.text = waveError
+            self.waveStatusLabel.textColor = palette.destructive
+        } else if let q = self.waveQueue, !q.upcomingTracks.isEmpty {
+            self.waveStatusLabel.isHidden = false
+            self.waveStatusLabel.text = isRu ? "Впереди ещё треков: \(q.upcomingTracks.count) (автоподгрузка)" : "\(q.upcomingTracks.count) tracks queued ahead (auto-refill)"
+            self.waveStatusLabel.textColor = palette.secondaryText
+        } else {
+            self.waveStatusLabel.isHidden = true
+        }
     }
 
-    return ItemListController(context: context, state: signal)
+    private func renderSearch(palette: BeyGramThemePalette, isRu: Bool) {
+        self.searchField.placeholder = isRu ? "Трек, исполнитель или альбом…" : "Track, artist, or album…"
+        self.searchField.textColor = palette.primaryText
+        self.searchField.backgroundColor = palette.cardBackground
+        self.searchButton.configure(title: isRu ? "Найти" : "Search", style: .primary, palette: palette, isLoading: self.searchLoading)
+
+        if let err = self.searchError {
+            self.renderTrackList(tracks: [], loading: false, emptyText: err, palette: palette, isRu: isRu)
+        } else {
+            self.renderTrackList(
+                tracks: self.searchResults,
+                loading: self.searchLoading,
+                emptyText: isRu ? "Введите запрос для поиска." : "Enter a query to search Yandex Music.",
+                palette: palette,
+                isRu: isRu
+            )
+        }
+    }
+
+    private func renderTrackList(tracks: [BGYandexTrack], loading: Bool, emptyText: String, palette: BeyGramThemePalette, isRu: Bool) {
+        self.tracksListCard.apply(palette: palette)
+        for subview in self.tracksListCard.contentStack.arrangedSubviews {
+            self.tracksListCard.contentStack.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
+        }
+        if loading {
+            self.tracksListCard.isHidden = true
+            self.listEmptyLabel.isHidden = false
+            self.listEmptyLabel.text = isRu ? "Загрузка…" : "Loading…"
+            self.listEmptyLabel.textColor = palette.secondaryText
+            return
+        }
+        if tracks.isEmpty {
+            self.tracksListCard.isHidden = true
+            self.listEmptyLabel.isHidden = false
+            self.listEmptyLabel.text = emptyText
+            self.listEmptyLabel.textColor = palette.secondaryText
+            return
+        }
+        self.tracksListCard.isHidden = false
+        self.listEmptyLabel.isHidden = true
+        for (idx, track) in tracks.prefix(40).enumerated() {
+            BeyGramTrackMetadataStore.shared.registerYandexTrack(track)
+            let row = BeyGramRowView()
+            let totalSec = Int(track.durationMs / 1000)
+            let durationText = totalSec > 0 ? String(format: "%d:%02d", totalSec / 60, totalSec % 60) : nil
+            let artistText = track.artists.joined(separator: ", ")
+            row.configure(
+                iconName: "music.note",
+                iconTint: palette.accent,
+                title: track.title,
+                subtitle: artistText.isEmpty ? nil : artistText,
+                value: durationText,
+                showSeparator: idx < min(tracks.count, 40) - 1,
+                palette: palette,
+                onTap: { [weak self] in
+                    self?.playSingleYandexTrack(track)
+                }
+            )
+            self.tracksListCard.contentStack.addArrangedSubview(row)
+        }
+    }
+
+    private func renderPlaylists(palette: BeyGramThemePalette, isRu: Bool) {
+        if let selected = self.selectedPlaylist {
+            self.tracksListCard.apply(palette: palette)
+            for subview in self.tracksListCard.contentStack.arrangedSubviews {
+                self.tracksListCard.contentStack.removeArrangedSubview(subview)
+                subview.removeFromSuperview()
+            }
+            let backRow = BeyGramRowView()
+            backRow.configure(
+                iconName: "chevron.left",
+                iconTint: palette.accent,
+                title: isRu ? "Назад к плейлистам (\(selected.title))" : "Back to Playlists (\(selected.title))",
+                showSeparator: !self.selectedPlaylistTracks.isEmpty,
+                palette: palette,
+                onTap: { [weak self] in
+                    self?.selectedPlaylist = nil
+                    self?.selectedPlaylistTracks = []
+                    self?.render()
+                }
+            )
+            self.tracksListCard.contentStack.addArrangedSubview(backRow)
+            for (idx, track) in self.selectedPlaylistTracks.prefix(40).enumerated() {
+                BeyGramTrackMetadataStore.shared.registerYandexTrack(track)
+                let row = BeyGramRowView()
+                let artistText = track.artists.joined(separator: ", ")
+                row.configure(
+                    iconName: "music.note",
+                    iconTint: palette.accent,
+                    title: track.title,
+                    subtitle: artistText.isEmpty ? nil : artistText,
+                    showSeparator: idx < min(self.selectedPlaylistTracks.count, 40) - 1,
+                    palette: palette,
+                    onTap: { [weak self] in
+                        self?.playSingleYandexTrack(track)
+                    }
+                )
+                self.tracksListCard.contentStack.addArrangedSubview(row)
+            }
+            self.tracksListCard.isHidden = false
+            self.listEmptyLabel.isHidden = true
+            return
+        }
+
+        self.tracksListCard.apply(palette: palette)
+        for subview in self.tracksListCard.contentStack.arrangedSubviews {
+            self.tracksListCard.contentStack.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
+        }
+        if self.playlistsLoading {
+            self.tracksListCard.isHidden = true
+            self.listEmptyLabel.isHidden = false
+            self.listEmptyLabel.text = isRu ? "Загрузка плейлистов…" : "Loading playlists…"
+            self.listEmptyLabel.textColor = palette.secondaryText
+            return
+        }
+        if self.playlists.isEmpty {
+            self.tracksListCard.isHidden = true
+            self.listEmptyLabel.isHidden = false
+            self.listEmptyLabel.text = isRu ? "Плейлисты не найдены." : "No playlists found."
+            self.listEmptyLabel.textColor = palette.secondaryText
+            return
+        }
+        self.tracksListCard.isHidden = false
+        self.listEmptyLabel.isHidden = true
+        for (idx, playlist) in self.playlists.enumerated() {
+            let row = BeyGramRowView()
+            row.configure(
+                iconName: "music.note.list",
+                iconTint: palette.accent,
+                title: playlist.title,
+                value: "\(playlist.trackCount)",
+                showsChevron: true,
+                showSeparator: idx < self.playlists.count - 1,
+                palette: palette,
+                onTap: { [weak self] in
+                    self?.openPlaylist(playlist)
+                }
+            )
+            self.tracksListCard.contentStack.addArrangedSubview(row)
+        }
+    }
+
+    private func ensureWaveQueue() -> BGYandexWaveQueue {
+        if let existing = self.waveQueue {
+            return existing
+        }
+        let session = self.service.makeWave(seeds: ["user:onyourwave"])
+        let queue = BGYandexWaveQueue(source: session, prepare: { [weak self] track in
+            BeyGramTrackMetadataStore.shared.registerYandexTrack(track)
+            self?.service.localFile(trackId: track.trackId) { result in
+                if case let .success(url) = result {
+                    BeyGramTrackMetadataStore.shared.associate(localURL: url, with: track)
+                }
+            }
+        })
+        self.waveQueue = queue
+        return queue
+    }
+
+    private func startOrPlayWave() {
+        let queue = self.ensureWaveQueue()
+        if let current = self.currentWaveTrack {
+            if self.musicState.currentTrack?.yandexTrackId == current.trackId {
+                BeyGramMusicSession.shared.togglePlayPause()
+                return
+            }
+            self.playWaveTrack(current)
+            return
+        }
+        self.waveLoading = true
+        self.waveError = nil
+        self.render()
+        queue.start { [weak self] result in
+            guard let self else { return }
+            self.waveLoading = false
+            switch result {
+            case let .success(firstTrack):
+                if let firstTrack {
+                    self.playWaveTrack(firstTrack)
+                } else {
+                    self.waveError = "My Wave returned no tracks."
+                    self.render()
+                }
+            case let .failure(error):
+                self.waveError = String(describing: error)
+                self.render()
+            }
+        }
+    }
+
+    private func playWaveTrack(_ track: BGYandexTrack) {
+        self.currentWaveTrack = track
+        self.waveLiked = false
+        self.waveError = nil
+        self.lastWaveTrackIdPlayed = track.trackId
+        self.render()
+        BeyGramMusicSession.shared.playYandexTrack(track, replaceQueue: true) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.waveQueue?.trackStarted(rowKey: "ym:\(track.trackId)")
+                // Pre-enqueue the next upcoming wave track so BG Mix can crossfade seamlessly.
+                if let upcoming = self.waveQueue?.upcomingTracks.first {
+                    BeyGramMusicSession.shared.playYandexTrack(upcoming, replaceQueue: false)
+                }
+            case let .failure(err):
+                self.waveError = String(describing: err)
+                self.render()
+            }
+        }
+    }
+
+    private func handleMusicAdvanceIfWaveActive(previous: BeyGramMusicTrack?, current: BeyGramMusicTrack?) {
+        guard self.waveQueue != nil, let prevId = previous?.yandexTrackId, prevId == self.lastWaveTrackIdPlayed,
+              current?.yandexTrackId != prevId else {
+            return
+        }
+        self.waveQueue?.trackFinished(rowKey: "ym:\(prevId)", playedSeconds: self.musicState.duration)
+        if let next = self.waveQueue?.takeNext() {
+            self.currentWaveTrack = next
+            self.lastWaveTrackIdPlayed = next.trackId
+            self.waveQueue?.trackStarted(rowKey: "ym:\(next.trackId)")
+            if let upcoming = self.waveQueue?.upcomingTracks.first {
+                BeyGramMusicSession.shared.playYandexTrack(upcoming, replaceQueue: false)
+            }
+        }
+    }
+
+    private func playSingleYandexTrack(_ track: BGYandexTrack) {
+        BeyGramMusicSession.shared.playYandexTrack(track, replaceQueue: true) { [weak self] result in
+            guard let self else { return }
+            if case let .failure(err) = result {
+                let alert = UIAlertController(title: "Yandex Music", message: String(describing: err), preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_OK, style: .default))
+                self.present(alert, animated: true, completion: nil)
+            }
+        }
+    }
+
+    private func loadLikesIfNeeded() {
+        if self.likesLoaded || self.likesLoading { return }
+        self.likesLoading = true
+        self.service.likedTracks { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.likesLoading = false
+                self.likesLoaded = true
+                if case let .success(tracks) = result {
+                    self.likedTracks = tracks
+                }
+                self.render()
+            }
+        }
+    }
+
+    private func loadPlaylistsIfNeeded() {
+        if self.playlistsLoaded || self.playlistsLoading { return }
+        self.playlistsLoading = true
+        self.service.playlists { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.playlistsLoading = false
+                self.playlistsLoaded = true
+                if case let .success(items) = result {
+                    self.playlists = items
+                }
+                self.render()
+            }
+        }
+    }
+
+    private func openPlaylist(_ playlist: BGYandexPlaylist) {
+        self.selectedPlaylist = playlist
+        self.selectedPlaylistTracks = []
+        self.render()
+        self.service.playlistTracks(kind: playlist.kind, ownerUid: playlist.ownerUid) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if case let .success(tracks) = result {
+                    self.selectedPlaylistTracks = tracks
+                }
+                self.render()
+            }
+        }
+    }
+
+    @objc private func authPrimaryTapped() {
+        if !self.accepted {
+            self.accepted = true
+            UserDefaults.standard.set(true, forKey: "beygram.yandex.consentAccepted")
+            self.render()
+            return
+        }
+        if let code = self.waitingCode {
+            UIPasteboard.general.string = code
+            self.codeCopied = true
+            self.render()
+            return
+        }
+        self.authFailure = nil
+        self.service.startSignIn { [weak self] event in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch event {
+                case let .code(deviceCode):
+                    self.waitingCode = deviceCode.userCode
+                    self.verificationUrl = deviceCode.verificationUrl
+                    self.codeCopied = false
+                case .finished:
+                    self.waitingCode = nil
+                    self.verificationUrl = nil
+                case let .failed(err):
+                    self.waitingCode = nil
+                    self.authFailure = String(describing: err)
+                }
+                self.render()
+            }
+        }
+    }
+
+    @objc private func authSecondaryTapped() {
+        if let urlStr = self.verificationUrl, let url = URL(string: urlStr) {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    @objc private func signOutTapped() {
+        self.waveQueue?.stop()
+        self.waveQueue = nil
+        self.currentWaveTrack = nil
+        self.service.signOut()
+        self.render()
+    }
+
+    @objc private func tabChanged() {
+        self.activeTab = SectionTab(rawValue: self.tabControl.selectedSegmentIndex) ?? .myWave
+        self.render()
+    }
+
+    @objc private func wavePlayTapped() {
+        self.startOrPlayWave()
+    }
+
+    @objc private func waveNextTapped() {
+        guard let current = self.currentWaveTrack else { return }
+        self.waveQueue?.trackSkipped(rowKey: "ym:\(current.trackId)", playedSeconds: self.musicState.position)
+        if let next = self.waveQueue?.takeNext() {
+            self.playWaveTrack(next)
+        } else {
+            self.currentWaveTrack = nil
+            self.startOrPlayWave()
+        }
+    }
+
+    @objc private func waveLikeTapped() {
+        guard let current = self.currentWaveTrack else { return }
+        self.waveLiked.toggle()
+        let next = self.waveLiked
+        self.waveQueue?.setLiked(trackId: current.trackId, liked: next)
+        self.service.setLiked(trackId: current.trackId, liked: next) { _ in }
+        self.render()
+    }
+
+    @objc private func searchTapped() {
+        self.searchField.resignFirstResponder()
+        let query = (self.searchField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        self.searchQuery = query
+        self.searchLoading = true
+        self.searchError = nil
+        self.render()
+        self.service.search(text: query, limit: 30) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.searchLoading = false
+                switch result {
+                case let .success(tracks):
+                    self.searchResults = tracks
+                case let .failure(err):
+                    self.searchError = String(describing: err)
+                }
+                self.render()
+            }
+        }
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        self.searchTapped()
+        return true
+    }
+}
+
+public func beyGramYandexMusicController(context: AccountContext) -> ViewController {
+    return BeyGramYandexMusicViewControllerImpl(context: context)
 }
