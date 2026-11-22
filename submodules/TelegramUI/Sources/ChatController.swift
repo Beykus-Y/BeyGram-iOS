@@ -4159,6 +4159,14 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                                 refusalBody = isRu
                                     ? "Не удалось подготовить отложенную отправку, сообщение не отправлено. Попробуйте снова."
                                     : "The delayed send could not be prepared, so the message was not sent. Try again."
+                            case .viewOnceOrLiveLocation:
+                                refusalBody = isRu
+                                    ? "Одноразовые медиа и трансляцию геопозиции нельзя отправить по расписанию. Отправьте их сейчас или удалите."
+                                    : "View-once media and live location cannot be sent on a schedule. Send them now or delete them."
+                            case .directMessages:
+                                refusalBody = isRu
+                                    ? "В личных сообщениях канала отложенная отправка недоступна. Отправьте сообщение сейчас или удалите его."
+                                    : "Stealth sending is not available in channel direct messages. Send the message now or delete it."
                             }
                         } else {
                             refusalBody = l10n.string(.stealthRefusedBody, languageCode: lang)
