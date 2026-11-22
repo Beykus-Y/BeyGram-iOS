@@ -1,4 +1,4 @@
-load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library", "swift_test")
 
 swift_library(
     name = "BeyGramKit",
@@ -12,5 +12,15 @@ swift_library(
     deps = [],
     visibility = [
         "//visibility:public",
+    ],
+)
+
+swift_test(
+    name = "BeyGramKitTests",
+    srcs = glob([
+        "Tests/**/*.swift",
+    ]),
+    deps = [
+        ":BeyGramKit",
     ],
 )

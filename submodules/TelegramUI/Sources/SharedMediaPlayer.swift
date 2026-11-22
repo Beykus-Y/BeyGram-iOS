@@ -9,6 +9,8 @@ import AccountContext
 import TelegramUniversalVideoContent
 import DeviceProximity
 import PeerMessagesMediaPlaylist
+import BeyGramKit
+import BeyGramYandexMusic
 
 private enum SharedMediaPlaybackItem: Equatable {
     case audio(MediaPlayer)
@@ -179,6 +181,13 @@ final class SharedMediaPlayer {
     private let prefetchDisposable = MetaDisposable()
     
     let type: MediaManagerPlayerType
+    // BG Mix as the engine of a music playlist, when the music library feature is on (SharedMediaBGMix.swift).
+    private var bgMix: SharedMediaBGMixBackend?
+    /// The item the playlist was asked to leave, for BG Mix. If the list settles on that same item, short of its end, BG Mix starts it again.
+    private var bgMixAdvanceFrom: AnyHashable?
+    /// Items in a row that BG Mix could not play. Reaching the limit pauses playback rather than cycling through the list.
+    private var bgMixFailureStreak = 0
+    private static let maxBGMixFailureStreak = 5
     
     init(context: AccountContext, mediaManager: MediaManager, inForeground: Signal<Bool, NoError>, engine: TelegramEngine, audioSession: ManagedAudioSession, overlayMediaManager: OverlayMediaManager, playlist: SharedMediaPlaylist, initialOrder: MusicPlaybackSettingsOrder, initialLooping: MusicPlaybackSettingsLooping, initialPlaybackRate: AudioPlaybackRate, playerIndex: Int32, controlPlaybackWithProximity: Bool, type: MediaManagerPlayerType, continueInstantVideoLoopAfterFinish: Bool) {
         self.context = context
@@ -204,11 +213,31 @@ final class SharedMediaPlayer {
             self?.cancelled?()
         }
         
+        // BG Mix plays the music playlist when its feature is on. It is set up before the playlist state is first
+        // read, so that the first item already goes to BG Mix.
+        if type == .music && BeyGramSettings.shared.isEnabled(.musicLibrary) {
+            let backend = SharedMediaBGMixBackend(engine: engine, audioSession: audioSession)
+            backend.onItemEnded = { [weak self] in
+                self?.handleBGMixItemEnded()
+            }
+            backend.onAdvanceRequested = { [weak self] in
+                self?.playlist.control(.next)
+            }
+            backend.onCurrentItemFailed = { [weak self] failure in
+                self?.handleBGMixItemFailed(failure)
+            }
+            self.bgMix = backend
+        }
+
         self.stateDisposable = (playlist.state
         |> deliverOnMainQueue).startStrict(next: { [weak self] state in
             if let strongSelf = self {
                 let previousPlaybackItem = strongSelf.playbackItem
                 strongSelf.updatePrefetchItems(item: state.item, previousItem: state.previousItem, nextItem: state.nextItem, ordering: state.order)
+                if let bgMix = strongSelf.bgMix {
+                    strongSelf.applyBGMixState(state, bgMix: bgMix)
+                    return
+                }
                 if state.item?.playbackData != strongSelf.stateValue?.item?.playbackData {
                     if let playbackItem = strongSelf.playbackItem {
                         switch playbackItem {
@@ -233,6 +262,9 @@ final class SharedMediaPlayer {
                                 switch playbackData.source {
                                     case let .telegramFile(fileReference, _, _):
                                     strongSelf.playbackItem = .audio(MediaPlayer(audioSessionManager: strongSelf.audioSession, postbox: strongSelf.engine.account.postbox, userLocation: .other,  userContentType: .audio, resourceReference: fileReference.resourceReference(fileReference.media.resource), streamable: playbackData.type == .music ? .conservative : .none, video: false, preferSoftwareDecoding: false, enableSound: true, baseRate: rateValue, fetchAutomatically: true, playAndRecord: controlPlaybackWithProximity, isAudioVideoMessage: playbackData.type == .voice))
+                                    case .yandexTrack, .localFile:
+                                        // A Yandex track or a local file has no Telegram resource for MediaPlayer. BG Mix plays it (see fileResult(for:)).
+                                        break
                                 }
                             case .instantVideo:
                                 if let mediaManager = strongSelf.mediaManager, let context = strongSelf.context, let item = item as? MessageMediaPlaylistItem {
@@ -244,6 +276,8 @@ final class SharedMediaPlayer {
                                             strongSelf.playbackItem = .instantVideo(videoNode)
                                             videoNode.setSoundEnabled(true)
                                         videoNode.setBaseRate(rateValue)
+                                    case .yandexTrack, .localFile:
+                                        break
                                     }
                                 }
                         }
@@ -404,6 +438,7 @@ final class SharedMediaPlayer {
     }
     
     deinit {
+        self.bgMix?.shutdown()
         self.stateDisposable?.dispose()
         self.markItemAsPlayedDisposable.dispose()
         self.inForegroundDisposable?.dispose()
@@ -427,6 +462,40 @@ final class SharedMediaPlayer {
     }
     
     func control(_ action: SharedMediaPlayerControlAction) {
+        if let bgMix = self.bgMix {
+            // A control from the user or the system starts the count of failures in a row again.
+            self.bgMixFailureStreak = 0
+            switch action {
+                case .next:
+                    bgMix.play()
+                    self.playlist.control(.next)
+                    return
+                case .previous:
+                    let threshold: Double = 5.0
+                    if let playbackStateValue = self._playbackStateValue, case let .item(item) = playbackStateValue, item.status.duration > threshold, item.status.timestamp > threshold {
+                        bgMix.seek(0.0)
+                    } else {
+                        bgMix.play()
+                        self.playlist.control(.previous)
+                    }
+                    return
+                case let .playback(playbackAction):
+                    switch playbackAction {
+                        case .play:
+                            bgMix.play()
+                        case .pause:
+                            bgMix.pause()
+                        case .togglePlayPause:
+                            bgMix.togglePlayPause()
+                    }
+                    return
+                case let .seek(timestamp):
+                    bgMix.seek(timestamp)
+                    return
+                default:
+                    break
+            }
+        }
         switch action {
             case .next:
                 self.scheduledPlaybackAction = .play
@@ -478,6 +547,10 @@ final class SharedMediaPlayer {
     }
     
     func stop() {
+        if let bgMix = self.bgMix {
+            bgMix.pause()
+            return
+        }
         if let playbackItem = self.playbackItem {
             switch playbackItem {
                 case let .audio(player):
@@ -488,6 +561,112 @@ final class SharedMediaPlayer {
         }
     }
     
+    /// A BG Mix track has finished. As on the MediaPlayer path, a repeated item plays again, and anything else moves
+    /// the playlist on.
+    private func handleBGMixItemEnded() {
+        switch self.playlist.looping {
+            case .item:
+                self.bgMix?.restartCurrent()
+            default:
+                self.advanceBGMix()
+        }
+    }
+
+    /// BG Mix could not play the current item. The playlist moves on. A refusal that holds for the whole Yandex account
+    /// stops playback at once, because the next Yandex track would fail the same way. After a run of other failures
+    /// playback stops at the limit, so a list of broken items does not cycle forever.
+    private func handleBGMixItemFailed(_ failure: SharedMediaBGMixFailure) {
+        self.bgMixFailureStreak += 1
+        Logger.shared.log("SharedMediaPlayer", "BG Mix could not play the current item (\(self.bgMixFailureStreak) in a row): \(failure)")
+        if SharedMediaPlayer.stopsBGMixAtOnce(failure) || self.bgMixFailureStreak >= SharedMediaPlayer.maxBGMixFailureStreak {
+            self.bgMixFailureStreak = 0
+            self.bgMix?.pause()
+            return
+        }
+        self.advanceBGMix()
+    }
+
+    /// A refusal that holds for the whole account: nobody is signed in to Yandex, or the account has no subscription.
+    private static func stopsBGMixAtOnce(_ failure: SharedMediaBGMixFailure) -> Bool {
+        guard case let .yandex(error) = failure else {
+            return false
+        }
+        switch error {
+        case .notSignedIn, .subscriptionRequired:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Moves the playlist on and remembers the item it leaves. If the list settles on that same item, short of its end, BG Mix
+    /// starts it again (see `applyBGMixState`): a single item on repeat-all, or a failed item that gets another try.
+    private func advanceBGMix() {
+        self.bgMixAdvanceFrom = self.stateValue?.item?.stableId
+        self.playlist.control(.next)
+    }
+
+    /// Publishes the playlist state while BG Mix plays it. The item's status comes from BG Mix in the same shape
+    /// MediaPlayer gives, so the lock screen and the player UI see no difference.
+    private func applyBGMixState(_ state: SharedMediaPlaylistState, bgMix: SharedMediaBGMixBackend) {
+        if self.currentPlayedToEnd != state.playedToEnd {
+            self.currentPlayedToEnd = state.playedToEnd
+            if state.playedToEnd {
+                bgMix.pause()
+                self.playedToEnd?()
+            }
+        }
+        let stateChanged = self.stateValue != state
+        self.stateValue = state
+        var restartsItem = false
+        if let advanceFrom = self.bgMixAdvanceFrom, !state.loading {
+            self.bgMixAdvanceFrom = nil
+            // The list settled on the item it left, short of its end: a single item on repeat-all, or a failed item that gets
+            // another try. Its state does not change, so BG Mix starts the item here.
+            restartsItem = !state.playedToEnd && state.item?.stableId == advanceFrom
+        }
+        if stateChanged {
+            // Repeat-one queues only the current item, so AutoMix cannot crossfade on into another track.
+            bgMix.update(current: state.item, next: state.looping == .item ? nil : state.nextItem)
+        }
+        if restartsItem {
+            bgMix.restartCurrent()
+        }
+        guard stateChanged else {
+            return
+        }
+
+        let playlistId = self.playlist.id
+        let playlistLocation = self.playlist.location
+        let playerIndex = self.playerIndex
+        if let item = state.item {
+            self.playbackStateValue.set(bgMix.status(for: item)
+            |> map { itemStatus in
+                return .item(SharedMediaPlayerItemPlaybackState(playlistId: playlistId, playlistLocation: playlistLocation, item: item, previousItem: state.previousItem, nextItem: state.nextItem, status: itemStatus, order: state.order, looping: state.looping, playerIndex: playerIndex))
+            })
+            self.markItemAsPlayedDisposable.set((bgMix.status(for: item)
+            |> filter { status in
+                if case .playing = status.status {
+                    return true
+                } else {
+                    return false
+                }
+            }
+            |> take(1)
+            |> deliverOnMainQueue).startStrict(next: { [weak self] _ in
+                // An item that plays starts the count of failures in a row again.
+                self?.bgMixFailureStreak = 0
+                self?.playlist.onItemPlaybackStarted(item)
+            }))
+        } else {
+            if state.loading {
+                self.playbackStateValue.set(.single(.loading))
+            } else {
+                self.playbackStateValue.set(.single(nil))
+            }
+        }
+    }
+
     private func updatePrefetchItems(item: SharedMediaPlaylistItem?, previousItem: SharedMediaPlaylistItem?, nextItem: SharedMediaPlaylistItem?, ordering: MusicPlaybackSettingsOrder) {
         var prefetchItems: (SharedMediaPlaybackDataSource, SharedMediaPlaybackDataSource)?
         if let playbackData = item?.playbackData {
@@ -521,6 +700,9 @@ final class SharedMediaPlayer {
                         }
                         |> take(1)
                         |> ignoreValues
+                    case .yandexTrack, .localFile:
+                        // A Yandex track or a local file has no Telegram resource to fetch. BG Mix asks for its file when it needs it.
+                        fetchedCurrentSignal = .complete()
                 }
                 switch next {
                     case let .telegramFile(file, _, _):
@@ -529,6 +711,9 @@ final class SharedMediaPlayer {
                         |> `catch` { _ -> Signal<Never, NoError> in
                             return .complete()
                         }
+                    case .yandexTrack, .localFile:
+                        // Same as the current track: the file is asked for when BG Mix needs it.
+                        fetchedNextSignal = .complete()
                 }
                 self.prefetchDisposable.set((fetchedCurrentSignal |> then(fetchedNextSignal)).startStrict())
             } else {

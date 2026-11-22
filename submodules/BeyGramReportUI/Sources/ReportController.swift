@@ -3,182 +3,205 @@ import UIKit
 import Display
 import SwiftSignalKit
 import TelegramPresentationData
-import ItemListUI
-import PresentationDataUtils
 import AccountContext
+import BeyGramDesign
 import BeyGramDiagnostics
+import BeyGramKit
 
-/// Report server for BeyGram. Set to the deployed Diagnostics server; this is the only place it is configured.
 private let reportServerURL = URL(string: "https://beygram.beykus.fun")!
 
-private final class ReportState {
-    var description = ""
-    var nonce = ""
-    var flow: BugReportFlowState = .idle
-    var isSending = false
-}
+private final class ReportViewControllerImpl: BeyGramScrollViewController, UITextViewDelegate, UITextFieldDelegate {
+    private let client = BugReportClient(baseURL: reportServerURL)
+    private var flow: BugReportFlowState = .idle
+    private var isSending = false
 
-private final class ReportArguments {
-    let setDescription: (String) -> Void
-    let setNonce: (String) -> Void
-    let send: () -> Void
+    private let introCard = BeyGramCardView(spacing: 8)
+    private let introTitle = BeyGramTypography.makeLabel(style: .headline, weight: .semibold, lines: 0)
+    private let introBody = BeyGramTypography.makeLabel(style: .subheadline, weight: .regular, lines: 0)
 
-    init(setDescription: @escaping (String) -> Void, setNonce: @escaping (String) -> Void, send: @escaping () -> Void) {
-        self.setDescription = setDescription
-        self.setNonce = setNonce
-        self.send = send
+    private let formCard = BeyGramCardView(spacing: 12)
+    private let descHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let descView = UITextView()
+    private let nonceHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let nonceField = UITextField()
+    private let sendButton = BeyGramActionButton(style: .primary)
+    private let statusBadge = BeyGramPillBadge()
+    private let statusLabel = BeyGramTypography.makeLabel(style: .footnote, weight: .medium, lines: 0)
+
+    private let previewCard = BeyGramCardView(spacing: 8)
+    private let previewTitle = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
+    private let previewBody = BeyGramTypography.makeLabel(style: .footnote, weight: .regular, lines: 0)
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        self.setupUI()
+        self.render()
     }
-}
 
-private enum ReportSection: Int32 {
-    case instructions
-    case form
-    case status
-}
+    private func setupUI() {
+        self.introCard.contentStack.addArrangedSubview(self.introTitle)
+        self.introCard.contentStack.addArrangedSubview(self.introBody)
+        self.stackView.addArrangedSubview(self.introCard)
 
-private enum ReportEntry: ItemListNodeEntry, Equatable {
-    case instructions(String)
-    case description(String)
-    case nonce(String)
-    case send(Bool)
-    case status(String)
+        self.descView.font = BeyGramTypography.font(style: .body)
+        self.descView.adjustsFontForContentSizeCategory = true
+        self.descView.layer.cornerRadius = 10
+        self.descView.layer.borderWidth = 1.0 / UIScreen.main.scale
+        self.descView.textContainerInset = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
+        self.descView.delegate = self
+        self.descView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            self.descView.heightAnchor.constraint(greaterThanOrEqualToConstant: 110)
+        ])
 
-    var section: ItemListSectionId {
-        switch self {
-        case .instructions: return ReportSection.instructions.rawValue
-        case .description, .nonce, .send: return ReportSection.form.rawValue
-        case .status: return ReportSection.status.rawValue
+        self.nonceField.borderStyle = .roundedRect
+        self.nonceField.autocorrectionType = .no
+        self.nonceField.autocapitalizationType = .none
+        self.nonceField.font = BeyGramTypography.font(style: .body)
+        self.nonceField.adjustsFontForContentSizeCategory = true
+        self.nonceField.delegate = self
+        self.nonceField.addTarget(self, action: #selector(self.nonceChanged), for: .editingChanged)
+
+        self.sendButton.addTarget(self, action: #selector(self.sendTapped), for: .touchUpInside)
+
+        self.formCard.contentStack.addArrangedSubview(self.descHeader)
+        self.formCard.contentStack.addArrangedSubview(self.descView)
+        self.formCard.contentStack.addArrangedSubview(self.nonceHeader)
+        self.formCard.contentStack.addArrangedSubview(self.nonceField)
+        self.formCard.contentStack.addArrangedSubview(self.sendButton)
+        self.formCard.contentStack.addArrangedSubview(self.statusBadge)
+        self.formCard.contentStack.addArrangedSubview(self.statusLabel)
+        self.stackView.addArrangedSubview(self.formCard)
+
+        self.previewCard.contentStack.addArrangedSubview(self.previewTitle)
+        self.previewCard.contentStack.addArrangedSubview(self.previewBody)
+        self.stackView.addArrangedSubview(self.previewCard)
+    }
+
+    override func applyPresentationData(_ presentationData: PresentationData) {
+        super.applyPresentationData(presentationData)
+        self.render()
+    }
+
+    private func render() {
+        let lang = self.presentationData.strings.primaryComponent.languageCode
+        let isRu = lang.lowercased().hasPrefix("ru")
+        let l10n = BeyGramL10n.shared
+        let palette = BeyGramThemePalette(theme: self.presentationData.theme)
+
+        self.title = l10n.string(.diagnosticsTitle, languageCode: lang)
+
+        self.introCard.apply(palette: palette)
+        self.introTitle.text = l10n.string(.diagnosticsTitle, languageCode: lang)
+        self.introTitle.textColor = palette.primaryText
+        self.introBody.text = l10n.string(.diagnosticsInstructions, languageCode: lang)
+        self.introBody.textColor = palette.secondaryText
+
+        self.formCard.apply(palette: palette)
+        self.descHeader.text = (isRu ? "ОПИСАНИЕ ПРОБЛЕМЫ" : "PROBLEM DESCRIPTION")
+        self.descHeader.textColor = palette.secondaryText
+        self.descView.backgroundColor = palette.elevatedBackground
+        self.descView.textColor = palette.primaryText
+        self.descView.layer.borderColor = palette.separator.withAlphaComponent(0.35).cgColor
+
+        self.nonceHeader.text = (isRu ? "КОД ПОДТВЕРЖДЕНИЯ (NONCE)" : "VERIFICATION NONCE")
+        self.nonceHeader.textColor = palette.secondaryText
+        self.nonceField.placeholder = l10n.string(.diagnosticsNoncePlaceholder, languageCode: lang)
+        self.nonceField.backgroundColor = palette.elevatedBackground
+        self.nonceField.textColor = palette.primaryText
+
+        let descTrimmed = (self.descView.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let nonceTrimmed = (self.nonceField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let canSend = !self.isSending && !descTrimmed.isEmpty && !nonceTrimmed.isEmpty
+        self.sendButton.configure(
+            title: l10n.string(.diagnosticsSendButton, languageCode: lang),
+            style: .primary,
+            palette: palette,
+            isLoading: self.isSending,
+            isEnabled: canSend
+        )
+
+        self.statusBadge.isHidden = true
+        self.statusLabel.isHidden = true
+        switch self.flow {
+        case .idle, .awaitingNonce:
+            break
+        case .uploading:
+            self.statusBadge.isHidden = false
+            self.statusBadge.configure(text: l10n.string(.diagnosticsStageUploading, languageCode: lang), textColor: palette.warning, backgroundColor: palette.warningSoft)
+        case let .delivered(reportId, _):
+            self.statusBadge.isHidden = false
+            self.statusBadge.configure(text: l10n.string(.diagnosticsStageDelivered, languageCode: lang), textColor: palette.success, backgroundColor: palette.successSoft)
+            self.statusLabel.isHidden = false
+            self.statusLabel.text = "ID: \(reportId)"
+            self.statusLabel.textColor = palette.secondaryText
+        case let .failed(_, reason):
+            self.statusBadge.isHidden = false
+            self.statusBadge.configure(text: l10n.string(.commonError, languageCode: lang), textColor: palette.destructive, backgroundColor: palette.destructiveSoft)
+            self.statusLabel.isHidden = false
+            self.statusLabel.text = "\(l10n.string(.diagnosticsStageError, languageCode: lang)): \(reason)"
+            self.statusLabel.textColor = palette.destructive
         }
+
+        self.previewCard.apply(palette: palette)
+        self.previewTitle.text = l10n.string(.diagnosticsPreviewTitle, languageCode: lang).uppercased()
+        self.previewTitle.textColor = palette.secondaryText
+        let meta = BugReportDeviceInfo.current()
+        let buildCode = meta.appVersionCode.map { "(\($0))" }
+        let deviceLine = [meta.deviceModel, meta.osVersion, meta.appVersion, buildCode].compactMap { $0 }.joined(separator: " · ")
+        self.previewBody.text = l10n.string(.diagnosticsPreviewBody, languageCode: lang) + (deviceLine.isEmpty ? "" : "\n\n\(deviceLine)")
+        self.previewBody.textColor = palette.secondaryText
     }
 
-    var stableId: Int64 {
-        switch self {
-        case .instructions: return 0
-        case .description: return 1
-        case .nonce: return 2
-        case .send: return 3
-        case .status: return 4
-        }
+    func textViewDidChange(_ textView: UITextView) {
+        self.render()
     }
 
-    static func < (lhs: ReportEntry, rhs: ReportEntry) -> Bool {
-        return lhs.stableId < rhs.stableId
+    @objc private func nonceChanged() {
+        self.render()
     }
 
-    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
-        let arguments = arguments as! ReportArguments
-        switch self {
-        case let .instructions(text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case let .description(text):
-            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(string: "", textColor: .black), text: text, placeholder: "What went wrong", type: .regular(capitalization: true, autocorrection: true), spacing: 0.0, clearType: .always, enabled: true, sectionId: self.section, textUpdated: { updated in
-                arguments.setDescription(updated)
-            }, action: {})
-        case let .nonce(text):
-            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(string: "", textColor: .black), text: text, placeholder: "Code from the report bot", type: .regular(capitalization: false, autocorrection: false), spacing: 0.0, clearType: .always, enabled: true, sectionId: self.section, textUpdated: { updated in
-                arguments.setNonce(updated)
-            }, action: {})
-        case let .send(enabled):
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Send report", kind: enabled ? .generic : .disabled, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                arguments.send()
-            })
-        case let .status(text):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        }
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
     }
-}
 
-private func statusText(for flow: BugReportFlowState) -> String? {
-    switch flow {
-    case .idle:
-        return nil
-    case .awaitingNonce:
-        return "Send /report to the BeyGram report bot, then paste the code here."
-    case .uploading:
-        return "Sending…"
-    case .delivered:
-        return "Sent. Thank you."
-    case let .failed(_, reason):
-        switch reason {
-        case .nonceRejected: return "The code is wrong or expired. Ask the bot for a new one."
-        case .notAllowedOrLimited: return "This account cannot send reports right now, or the limit was reached."
-        case .conflict: return "This code was already used. Ask the bot for a new one."
-        case .tooLarge: return "The report is too large."
-        case .invalidBody: return "The server rejected the report."
-        case .transient: return "Network error. Try again."
-        }
-    }
-}
+    @objc private func sendTapped() {
+        let description = (self.descView.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let nonce = (self.nonceField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !self.isSending, !description.isEmpty, !nonce.isEmpty else { return }
 
-/// Report screen. Sending uses the nonce from the report bot as the Bearer token; the flow reducer decides
-/// the state, and the upload client maps the HTTP response to its events.
-public func reportController(context: AccountContext, appVersion: String) -> ViewController {
-    let state = ReportState()
-    let revision = ValuePromise<Int>(0, ignoreRepeated: false)
-    var counter = 0
-    let bump: () -> Void = {
-        counter += 1
-        revision.set(counter)
-    }
-    let client = BugReportClient(baseURL: reportServerURL)
-
-    let arguments = ReportArguments(setDescription: { text in
-        state.description = text
-    }, setNonce: { text in
-        state.nonce = text
-    }, send: {
-        let description = state.description.trimmingCharacters(in: .whitespacesAndNewlines)
-        let nonce = state.nonce.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !state.isSending, !description.isEmpty, !nonce.isEmpty else {
-            return
-        }
-        // A new report gets a new id. A retry after a failure keeps the id, since the server treats it as idempotent.
         let reportId: String
-        switch state.flow {
+        switch self.flow {
         case let .awaitingNonce(id), let .failed(id, _):
             reportId = id
         case .idle, .delivered, .uploading:
-            guard case let .awaitingNonce(id) = BugReportFlow.reduce(.idle, .start) else {
-                return
-            }
+            guard case let .awaitingNonce(id) = BugReportFlow.reduce(.idle, .start) else { return }
             reportId = id
         }
-        state.flow = .awaitingNonce(reportId: reportId)
-        state.flow = BugReportFlow.reduce(state.flow, .nonceReceived(nonce))
-        guard case let .uploading(id, sentNonce) = state.flow else {
-            bump()
+        self.flow = .awaitingNonce(reportId: reportId)
+        self.flow = BugReportFlow.reduce(self.flow, .nonceReceived(nonce))
+        guard case let .uploading(id, sentNonce) = self.flow else {
+            self.render()
             return
         }
-        state.isSending = true
-        bump()
+        self.isSending = true
+        self.render()
+
         Task { @MainActor in
             do {
-                let (body, _) = try BugReportBuilder.makeBody(reportId: id, description: description, summary: nil, meta: BugReportClientMeta(appVersion: appVersion), events: [])
-                let event = await client.upload(body: body, nonce: sentNonce)
-                state.flow = BugReportFlow.reduce(state.flow, event)
+                let (body, _) = try BugReportSnapshot.makeBody(reportId: id, description: description, meta: BugReportDeviceInfo.current())
+                let event = await self.client.upload(body: body, nonce: sentNonce)
+                self.flow = BugReportFlow.reduce(self.flow, event)
             } catch {
-                state.flow = .failed(reportId: id, reason: .invalidBody)
+                self.flow = .failed(reportId: id, reason: .invalidBody)
             }
-            state.isSending = false
-            bump()
+            self.isSending = false
+            self.render()
         }
-    })
+    }
+}
 
-    let signal = combineLatest(context.sharedContext.presentationData, revision.get())
-        |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
-            let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Report a problem"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
-            var entries: [ReportEntry] = [
-                .instructions("Describe the problem, then send /report to the BeyGram report bot and paste the code it sends back. Reports may contain the text you typed here."),
-                .description(state.description),
-                .nonce(state.nonce),
-                .send(!state.isSending && !state.nonce.isEmpty && !state.description.isEmpty)
-            ]
-            if let status = statusText(for: state.flow) {
-                entries.append(.status(status))
-            }
-            let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
-            return (controllerState, (listState, arguments))
-        }
-
-    return ItemListController(context: context, state: signal)
+public func reportController(context: AccountContext, appVersion: String) -> ViewController {
+    return ReportViewControllerImpl(context: context)
 }

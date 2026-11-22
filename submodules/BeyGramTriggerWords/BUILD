@@ -10,6 +10,9 @@ swift_library(
     copts = [
         "-warnings-as-errors",
     ],
+    deps = [
+        "//third-party/re2:BeyGramRE2",
+    ],
     visibility = [
         "//visibility:public",
     ],
@@ -20,6 +23,10 @@ swift_test(
     name = "BeyGramTriggerWordsTests",
     srcs = glob([
         "Tests/**/*.swift",
+    ]),
+    # The shared regex parity fixtures (byte-identical to the Android copy), read at run time.
+    data = glob([
+        "Tests/Fixtures/**",
     ]),
     copts = [
         "-warnings-as-errors",

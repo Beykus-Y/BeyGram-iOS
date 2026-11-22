@@ -54,8 +54,9 @@ const (
 	inletDialTimeout = 500 * time.Millisecond
 )
 
-// Core owns the in-process Mihomo instance. Every call takes the mutex, so
-// Mihomo never runs two actions at once.
+// Core owns the in-process Mihomo instance. Every action takes the mutex, so
+// Mihomo never runs two actions at once. The one exception is the delay probe,
+// which holds the mutex only to read the proxy table (see run).
 type Core struct {
 	mu        sync.Mutex
 	homeReady bool
@@ -86,13 +87,44 @@ func (c *Core) Invoke(raw []byte) []byte {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return encode(reply{Code: 1, Message: "некорректный запрос"})
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	data, err := c.safeDispatch(req.Method, req.Data)
+	data, err := c.run(req.Method, req.Data)
 	if err != nil {
 		return encode(reply{ID: req.ID, Code: 1, Message: err.Error()})
 	}
 	return encode(reply{ID: req.ID, Code: 0, Data: data})
+}
+
+// run executes one action. Every action holds the mutex, except testDelay: a probe waits on the network for up to its
+// timeout, so it holds the mutex only while it reads the proxy table. Holding the mutex for the whole probe made a mass
+// delay check block stop, setup and select for as long as it ran.
+func (c *Core) run(method string, data json.RawMessage) (any, error) {
+	if method == "testDelay" {
+		return c.safeTestDelay(data)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.safeDispatch(method, data)
+}
+
+// safeTestDelay is a probe that runs without the mutex. A panic becomes an error reply, as in safeDispatch.
+func (c *Core) safeTestDelay(data json.RawMessage) (result any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			result, err = nil, fmt.Errorf("внутренняя ошибка ядра: %v", r)
+		}
+	}()
+	target, err := c.delayTargetLocked(data)
+	if err != nil {
+		return nil, err
+	}
+	return target.measure()
+}
+
+// delayTargetLocked reads a probe's target under the mutex, because setup replaces the proxy table.
+func (c *Core) delayTargetLocked(data json.RawMessage) (delayTarget, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return delayTargetFor(data)
 }
 
 func encode(r reply) []byte {
@@ -302,18 +334,36 @@ func selectNode(data json.RawMessage) error {
 	return nil
 }
 
+// testDelay is the probe for a caller that already holds the mutex. Invoke reaches the probe through safeTestDelay.
 func testDelay(data json.RawMessage) (any, error) {
+	target, err := delayTargetFor(data)
+	if err != nil {
+		return nil, err
+	}
+	return target.measure()
+}
+
+// delayTarget is one probe, read from a testDelay request.
+type delayTarget struct {
+	node     C.Proxy
+	testURL  string
+	expected utils.IntRanges[uint16]
+	timeout  time.Duration
+}
+
+// delayTargetFor reads the node that a testDelay request names. It reads the proxy table, so the caller holds the mutex.
+func delayTargetFor(data json.RawMessage) (delayTarget, error) {
 	var args struct {
 		ProxyName string `json:"proxy-name"`
 		TestURL   string `json:"test-url"`
 		Timeout   int    `json:"timeout"`
 	}
 	if err := json.Unmarshal(data, &args); err != nil || args.ProxyName == "" {
-		return nil, errors.New("не задан сервер")
+		return delayTarget{}, errors.New("не задан сервер")
 	}
 	node, ok := tunnel.Proxies()[args.ProxyName]
 	if !ok {
-		return nil, errors.New("сервер не найден")
+		return delayTarget{}, errors.New("сервер не найден")
 	}
 	testURL := args.TestURL
 	if testURL == "" {
@@ -326,11 +376,17 @@ func testDelay(data json.RawMessage) (any, error) {
 	timeout = min(max(timeout, minProbeTimeout), maxProbeTimeout)
 	expected, err := utils.NewUnsignedRanges[uint16]("200-399")
 	if err != nil {
-		return nil, err
+		return delayTarget{}, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return delayTarget{node: node, testURL: testURL, expected: expected, timeout: timeout}, nil
+}
+
+// measure runs the probe and returns {"delay"} in ms, or -1 with the error text. It waits on the network, so it runs
+// without the mutex.
+func (t delayTarget) measure() (any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), t.timeout)
 	defer cancel()
-	delay, err := node.URLTest(ctx, testURL, expected)
+	delay, err := t.node.URLTest(ctx, t.testURL, t.expected)
 	if err != nil {
 		return map[string]any{"delay": -1, "error": err.Error()}, nil
 	}
