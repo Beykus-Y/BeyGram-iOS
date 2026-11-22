@@ -5,6 +5,8 @@ import Foundation
 enum BGMusicInflate {
     enum Failure: Error {
         case corrupt
+        /// The output would pass the limit. Kept apart from `corrupt` so the archive layer reports the right size error.
+        case overflow
     }
 
     private static let lengthBase: [Int] = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258]
@@ -130,8 +132,11 @@ enum BGMusicInflate {
         guard length == (~inverted & 0xFFFF) else {
             throw Failure.corrupt
         }
-        guard reader.position + length <= reader.input.count, output.count + length <= limit else {
+        guard reader.position + length <= reader.input.count else {
             throw Failure.corrupt
+        }
+        guard output.count + length <= limit else {
+            throw Failure.overflow
         }
         output.append(contentsOf: reader.input[reader.position..<(reader.position + length)])
         reader.position += length
@@ -204,7 +209,7 @@ enum BGMusicInflate {
             let symbol = try reader.decode(literal)
             if symbol < 256 {
                 guard output.count < limit else {
-                    throw Failure.corrupt
+                    throw Failure.overflow
                 }
                 output.append(UInt8(symbol))
             } else if symbol == 256 {
@@ -220,8 +225,11 @@ enum BGMusicInflate {
                     throw Failure.corrupt
                 }
                 let distanceValue = try distBase[distanceSymbol] + reader.bits(distExtra[distanceSymbol])
-                guard distanceValue <= output.count, output.count + length <= limit else {
+                guard distanceValue <= output.count else {
                     throw Failure.corrupt
+                }
+                guard output.count + length <= limit else {
+                    throw Failure.overflow
                 }
                 for _ in 0..<length {
                     output.append(output[output.count - distanceValue])

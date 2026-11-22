@@ -15,9 +15,11 @@ swift_library(
         "//submodules/ItemListUI:ItemListUI",
         "//submodules/PresentationDataUtils:PresentationDataUtils",
         "//submodules/AccountContext:AccountContext",
+        "//submodules/BeyGramDesign:BeyGramDesign",
         "//submodules/BeyGramKit:BeyGramKit",
         "//submodules/BeyGramMedia:BeyGramMedia",
         "//submodules/BeyGramMusicFormat:BeyGramMusicFormat",
+        "//submodules/BeyGramMusicLibrary:BeyGramMusicLibrary",
         "//submodules/BeyGramYandexMusic:BeyGramYandexMusic",
     ],
     visibility = [

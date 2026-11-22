@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "description": "Regex parity fixtures for trigger words. Shared with the Android repository: the copy there is app/src/test/resources/triggers/regex_parity.json and must stay byte-identical. Texts are matched after NFKC normalisation and removal of Cf characters, as TriggerMatcher does. validate expects OK, BAD_REGEX or REGEX_MATCHES_EMPTY (TriggerProblem). Each matches case runs the pattern, with the ignoreCase flag, over the text repeated repeat times followed by suffix, and expects fires.",
+  "validate": [
+    {"pattern": "((a+)+)+b", "ignoreCase": true, "expect": "OK", "source": "TriggerWordsTest.nestedQuantifiersFinishQuickly"},
+    {"pattern": "a(?=b)", "ignoreCase": true, "expect": "BAD_REGEX", "source": "TriggerWordsTest.regexFoldsUnicodeCaseAndRejectsLookaround"},
+    {"pattern": "[", "ignoreCase": true, "expect": "BAD_REGEX", "source": "TriggerWordsTest.validationRejectsEmptyLongAndBrokenPatterns"},
+    {"pattern": "a*", "ignoreCase": true, "expect": "REGEX_MATCHES_EMPTY", "source": "TriggerWordsTest.validationRejectsEmptyLongAndBrokenPatterns"},
+    {"pattern": "\\s*", "ignoreCase": true, "expect": "REGEX_MATCHES_EMPTY", "source": "TriggerWordsTest.validationRejectsEmptyLongAndBrokenPatterns"},
+    {"pattern": "\\p{L}+ать", "ignoreCase": true, "expect": "OK", "source": "TriggerWordsTest.validationRejectsEmptyLongAndBrokenPatterns"},
+    {"pattern": "\\bdead\\w*", "ignoreCase": false, "expect": "OK", "source": "TriggerWordsTest.rulesRoundTripThroughJsonAndInvalidEntriesAreDropped"}
+  ],
+  "matches": [
+    {"pattern": "((a+)+)+b", "ignoreCase": true, "text": "a", "repeat": 4096, "suffix": "", "fires": false, "source": "TriggerWordsTest.nestedQuantifiersFinishQuickly"},
+    {"pattern": "(a|b)*c", "ignoreCase": true, "text": "ab", "repeat": 2048, "suffix": "", "fires": false, "source": "TriggerWordsTest.alternationOverLongTextDoesNotEscapeAsAnError"},
+    {"pattern": "a*b", "ignoreCase": true, "text": "a", "repeat": 4096, "suffix": "b", "fires": true, "source": "TriggerWordsTest.ordinaryExpressionStillMatchesLongText"},
+    {"pattern": "привет\\s+мир", "ignoreCase": true, "text": "ПРИВЕТ   Мир", "repeat": 1, "suffix": "", "fires": true, "source": "TriggerWordsTest.regexFoldsUnicodeCaseAndRejectsLookaround"},
+    {"pattern": "привет", "ignoreCase": false, "text": "ПРИВЕТ", "repeat": 1, "suffix": "", "fires": false, "source": "TriggerWordsTest.regexFoldsUnicodeCaseAndRejectsLookaround"},
+    {"pattern": "\\p{L}+ать", "ignoreCase": true, "text": "писать", "repeat": 1, "suffix": "", "fires": true, "source": "TriggerWordsTest.regexFoldsUnicodeCaseAndRejectsLookaround"},
+    {"pattern": "\\bdeadline\\b", "ignoreCase": true, "text": "The Deadline is near", "repeat": 1, "suffix": "", "fires": true, "source": "TriggerWordsTest.regexRunsOnTextAsWritten"},
+    {"pattern": "\\bdeadline\\b", "ignoreCase": true, "text": "deadlines", "repeat": 1, "suffix": "", "fires": false, "source": "TriggerWordsTest.regexRunsOnTextAsWritten"},
+    {"pattern": "\\bdeadline\\b", "ignoreCase": false, "text": "The DEADLINE", "repeat": 1, "suffix": "", "fires": false, "source": "TriggerWordsTest.regexRunsOnTextAsWritten"},
+    {"pattern": "\\bпривет\\b", "ignoreCase": true, "text": "привет всем", "repeat": 1, "suffix": "", "fires": false, "source": "TriggerWords.kt comment: \\w and \\b are ASCII. No Android test covers this yet."}
+  ]
+}
