@@ -64,6 +64,7 @@ cc_library(
 # through one serial queue. The audio render block calls the runtime's real-time pull and nothing else.
 objc_library(
     name = "BGWaveListenerSession",
+    module_name = "BGWaveListenerSession",
     srcs = ["Sources/BGWaveListenerSession.mm"],
     hdrs = ["PublicHeaders/BGWaveListener/BGWaveListenerSession.h"],
     includes = ["PublicHeaders"],
@@ -87,6 +88,7 @@ objc_library(
 # docs/bg-wave-ui-contract.md. It is not compiled in this checkout (no macOS build here), so a Mac build comes first.
 objc_library(
     name = "BGWaveSessionController",
+    module_name = "BGWaveSessionController",
     srcs = ["Sources/BGWaveSessionController.mm"],
     hdrs = ["PublicHeaders/BGWaveListener/BGWaveSessionController.h"],
     includes = ["PublicHeaders"],
