@@ -10,6 +10,7 @@ swift_library(
         "-warnings-as-errors",
     ],
     deps = [
+        "//submodules/BeyGramAppearance:BeyGramAppearance",
         "//submodules/AsyncDisplayKit",
         "//submodules/Display",
     	"//submodules/SSignalKit/SwiftSignalKit",

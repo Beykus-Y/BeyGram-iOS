@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import BeyGramAppearance
 import AsyncDisplayKit
 import Display
 import TelegramPresentationData
@@ -238,8 +239,14 @@ final class TabBarControllerNode: ASDisplayNode {
             // iOS 27 floats the bar at least 21pt above the bottom edge and from the sides (`minimumPlatterInsets`),
             // and higher by as much as the safe area reaches past the home affordance's 21pt allowance in a 34pt
             // portrait inset.
-            tabBarBottomInset = max(max(21.0, params.layout.insets(options: []).bottom - 13.0), keyboardBottomInset)
-            tabBarSideInset = 21.0
+            if let beyGramSpec = BeyGramAppearance.shared.navigationSpec {
+                // A BeyGram style floats its dock with the margins of its NavigationSpec (#145).
+                tabBarBottomInset = max(max(beyGramSpec.bottomMargin, params.layout.insets(options: []).bottom - 13.0), keyboardBottomInset)
+                tabBarSideInset = beyGramSpec.horizontalMargin
+            } else {
+                tabBarBottomInset = max(max(21.0, params.layout.insets(options: []).bottom - 13.0), keyboardBottomInset)
+                tabBarSideInset = 21.0
+            }
         } else {
             tabBarBottomInset = max(panelsBottomInset, keyboardBottomInset)
             tabBarSideInset = sideInset
