@@ -1875,6 +1875,13 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             
             self.openMessageReactionContextMenu(message: EngineMessage(message), sourceView: sourceView, gesture: gesture, value: value)
         }, updateMessageReaction: { [weak self] initialMessage, reaction, force, sourceView in
+            // Stealth risk warning (issue #136): ask once per screen before a reaction, then repeat it.
+            if let self, self.beyGramRiskyActionPending() {
+                self.beyGramConfirmRiskyAction(retry: { [weak self] in
+                    self?.controllerInteraction?.updateMessageReaction(initialMessage, reaction, force, sourceView)
+                })
+                return
+            }
             guard let strongSelf = self else {
                 return
             }
@@ -4250,6 +4257,13 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                 strongSelf.present(controller, in: .window(.root))
             }
         }, requestSelectMessagePollOptions: { [weak self] id, opaqueIdentifiers in
+            // Stealth risk warning (issue #136): ask once per screen before a poll vote, then repeat it.
+            if let self, self.beyGramRiskyActionPending() {
+                self.beyGramConfirmRiskyAction(retry: { [weak self] in
+                    self?.controllerInteraction?.requestSelectMessagePollOptions(id, opaqueIdentifiers)
+                })
+                return
+            }
             guard let strongSelf = self, let controllerInteraction = strongSelf.controllerInteraction else {
                 return
             }
