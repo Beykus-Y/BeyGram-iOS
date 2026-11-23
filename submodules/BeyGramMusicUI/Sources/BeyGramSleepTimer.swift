@@ -5,7 +5,7 @@ public enum BeyGramSleepTimerMode: Equatable {
     case off
     /// Pause after this many minutes.
     case minutes(Int)
-    /// Pause when the current track ends. The session does not yet observe the track end (see the issue #140 note).
+    /// Pause when the current track ends (observed in `BeyGramMusicSession.checkSleepEndOfTrack`).
     case endOfTrack
 }
 

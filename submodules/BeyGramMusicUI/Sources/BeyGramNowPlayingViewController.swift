@@ -468,6 +468,10 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
                 BeyGramMusicSession.shared.setSleepTimerMinutes(minutes)
             }))
         }
+        items.append(ActionSheetButtonItem(title: isRu ? "До конца трека" : "End of track", color: .accent, action: { [weak sheet] in
+            sheet?.dismissAnimated()
+            BeyGramMusicSession.shared.setSleepTimerEndOfTrack()
+        }))
         items.append(ActionSheetButtonItem(title: isRu ? "Выключить таймер" : "Turn off timer", color: .destructive, action: { [weak sheet] in
             sheet?.dismissAnimated()
             BeyGramMusicSession.shared.cancelSleepTimer()

@@ -137,6 +137,8 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
     private var externalAudioObserver: NSObjectProtocol?
     private var sleepTimer = BeyGramSleepTimerState()
     private var sleepTimerTask: DispatchWorkItem?
+    /// Track that was playing when the "end of track" timer started (issue #140).
+    private var sleepEndTrackIdentifier: UInt64?
 
     private override init() {
         self.player = BGMixPlayer.shared()
@@ -272,6 +274,8 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
             }
         }
 
+        self.checkSleepEndOfTrack(snapshot)
+
         let currentTrack = snapshot.currentTrack
         let nextReady = snapshot.nextTrack?.state == .ready
         self.waveCoordinator?.handlePlaybackUpdate(
@@ -348,8 +352,37 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
         }
     }
 
+    /// Pauses when the current track ends (issue #140).
+    public func setSleepTimerEndOfTrack() {
+        DispatchQueue.main.async {
+            self.sleepTimerTask?.cancel()
+            self.sleepTimerTask = nil
+            self.sleepTimer.startEndOfTrack()
+            self.sleepEndTrackIdentifier = self.currentState.currentTrack?.id
+        }
+    }
+
+    /// Called with every player snapshot: pauses once the track of an "end of track" timer is over or a new one began.
+    private func checkSleepEndOfTrack(_ snapshot: BGMixSnapshot) {
+        guard case .endOfTrack = self.sleepTimer.mode else {
+            return
+        }
+        let identifier = snapshot.currentTrack?.identifier
+        guard let started = self.sleepEndTrackIdentifier else {
+            self.sleepEndTrackIdentifier = identifier
+            return
+        }
+        let ended = identifier != started || snapshot.currentTrack?.state == .played || (snapshot.duration > 0.0 && snapshot.duration - snapshot.position <= 0.4)
+        if ended {
+            self.sleepTimer.cancel()
+            self.sleepEndTrackIdentifier = nil
+            self.pause()
+        }
+    }
+
     public func cancelSleepTimer() {
         DispatchQueue.main.async {
+            self.sleepEndTrackIdentifier = nil
             self.sleepTimer.cancel()
             self.sleepTimerTask?.cancel()
             self.sleepTimerTask = nil
