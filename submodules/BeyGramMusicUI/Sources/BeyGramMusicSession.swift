@@ -135,6 +135,8 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
     private var nowPlayingCenter: BeyGramNowPlayingCenter!
     private var metadataObserver: NSObjectProtocol?
     private var externalAudioObserver: NSObjectProtocol?
+    private var sleepTimer = BeyGramSleepTimerState()
+    private var sleepTimerTask: DispatchWorkItem?
 
     private override init() {
         self.player = BGMixPlayer.shared()
@@ -336,6 +338,44 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
         DispatchQueue.main.async {
             self.player.pause()
         }
+    }
+
+    /// Pauses playback after `minutes` minutes (issue #140). A new choice replaces the running timer.
+    public func setSleepTimerMinutes(_ minutes: Int) {
+        DispatchQueue.main.async {
+            self.sleepTimer.start(minutes: minutes, now: Date())
+            self.scheduleSleepTimer()
+        }
+    }
+
+    public func cancelSleepTimer() {
+        DispatchQueue.main.async {
+            self.sleepTimer.cancel()
+            self.sleepTimerTask?.cancel()
+            self.sleepTimerTask = nil
+        }
+    }
+
+    private func scheduleSleepTimer() {
+        self.sleepTimerTask?.cancel()
+        self.sleepTimerTask = nil
+        guard let remaining = self.sleepTimer.remainingSeconds(now: Date()) else {
+            return
+        }
+        let task = DispatchWorkItem { [weak self] in
+            self?.sleepTimerFired()
+        }
+        self.sleepTimerTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: task)
+    }
+
+    private func sleepTimerFired() {
+        self.sleepTimerTask = nil
+        guard self.sleepTimer.isExpired(now: Date()) else {
+            return
+        }
+        self.sleepTimer.cancel()
+        self.pause()
     }
 
     public func togglePlayPause() {
