@@ -12,6 +12,14 @@ public enum BeyGramStealthHooks {
         return BeyGramStealthStore.shared.settings(accountPeerId: accountPeerId).allows(effect, chatPeerId: chatPeerId)
     }
 
+    /// Whether opening a one-time media may be reported to the server. Off while `noContentOpen` is on.
+    public static func allowsOpenContentReceipt(accountPeerId: Int64) -> Bool {
+        guard BeyGramSettings.shared.isEnabled(.privacyPolicy) else {
+            return true
+        }
+        return !BeyGramStealthStore.shared.settings(accountPeerId: accountPeerId).noContentOpen
+    }
+
     /// The decision for one outgoing message. See `BeyGramStealthSettings.sendDecision`.
     public static func sendDecision(accountPeerId: Int64, explicitScheduleTime: Int32?, unschedulableReason: BeyGramStealthRefusal?, nowSeconds: Int32) -> BeyGramStealthSendDecision {
         guard BeyGramSettings.shared.isEnabled(.privacyPolicy) else {

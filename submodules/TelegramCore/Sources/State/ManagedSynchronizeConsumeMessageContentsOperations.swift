@@ -3,6 +3,7 @@ import Postbox
 import SwiftSignalKit
 internal import TelegramApi
 import MtProtoKit
+import BeyGramStealth
 
 
 private final class ManagedSynchronizeConsumeMessageContentsOperationHelper {
@@ -110,6 +111,10 @@ func managedSynchronizeConsumeMessageContentOperations(postbox: Postbox, network
 }
 
 private func synchronizeConsumeMessageContents(transaction: Transaction, network: Network, stateManager: AccountStateManager, peerId: PeerId, operation: SynchronizeConsumeMessageContentsOperation) -> Signal<Void, NoError> {
+    // Stealth `noContentOpen`: the open is kept on this device only. The operation is confirmed without a request.
+    if !BeyGramStealthHooks.allowsOpenContentReceipt(accountPeerId: stateManager.accountPeerId.toInt64()) {
+        return .complete()
+    }
     if peerId.namespace == Namespaces.Peer.CloudUser || peerId.namespace == Namespaces.Peer.CloudGroup {
         return network.request(Api.functions.messages.readMessageContents(id: operation.messageIds.map { $0.id }))
         |> map(Optional.init)

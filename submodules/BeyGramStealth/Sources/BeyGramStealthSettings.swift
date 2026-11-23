@@ -43,6 +43,7 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
         chatModes: [:],
         noStoryViews: true,
         warnRiskyActions: true,
+        noContentOpen: true,
         failClosed: true
     )
 
@@ -53,6 +54,8 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
     public var noStoryViews: Bool
     /// Ask before a reaction or a bot button while `hideOnline` is on (Android `warnRiskyActions`, `StealthRiskGuard`).
     public var warnRiskyActions: Bool
+    /// Opening a one-time media (view-once) is not reported to the server (`messages.readMessageContents`), Android `noContentOpen`.
+    public var noContentOpen: Bool
     public var serverScheduledSend: Bool
     public var scheduledSendDelaySeconds: Int32
     /// Per-chat overrides keyed by the chat's peer id as a decimal string.
@@ -67,6 +70,7 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
         case hideTyping = "hide_typing"
         case noStoryViews = "no_story_views"
         case warnRiskyActions = "warn_risky_actions"
+        case noContentOpen = "no_content_open"
         case serverScheduledSend = "scheduled_send"
         case scheduledSendDelaySeconds = "scheduled_send_delay"
         case chatModes = "chats"
@@ -81,6 +85,7 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
         chatModes: [String: BeyGramStealthChatMode] = [:],
         noStoryViews: Bool = false,
         warnRiskyActions: Bool = false,
+        noContentOpen: Bool = false,
         failClosed: Bool = false
     ) {
         self.hideReadReceipts = hideReadReceipts
@@ -91,6 +96,7 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
         self.chatModes = chatModes
         self.noStoryViews = noStoryViews
         self.warnRiskyActions = warnRiskyActions
+        self.noContentOpen = noContentOpen
         self.failClosed = failClosed
     }
 
@@ -103,6 +109,7 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
         self.hideTyping = try container.decodeIfPresent(Bool.self, forKey: .hideTyping) ?? false
         self.noStoryViews = try container.decodeIfPresent(Bool.self, forKey: .noStoryViews) ?? false
         self.warnRiskyActions = try container.decodeIfPresent(Bool.self, forKey: .warnRiskyActions) ?? false
+        self.noContentOpen = try container.decodeIfPresent(Bool.self, forKey: .noContentOpen) ?? false
         self.serverScheduledSend = try container.decodeIfPresent(Bool.self, forKey: .serverScheduledSend) ?? false
         self.scheduledSendDelaySeconds = try container.decodeIfPresent(Int32.self, forKey: .scheduledSendDelaySeconds) ?? 15
         self.chatModes = try container.decodeIfPresent([String: BeyGramStealthChatMode].self, forKey: .chatModes) ?? [:]
