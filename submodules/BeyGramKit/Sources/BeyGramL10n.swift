@@ -99,6 +99,8 @@ public enum BeyGramStringKey: String, CaseIterable {
     case stealthRiskyTitle = "stealth.risky.title"
     case stealthRiskyText = "stealth.risky.text"
     case stealthRiskyConfirm = "stealth.risky.confirm"
+    case stealthViewOnceTitle = "stealth.viewonce.title"
+    case stealthViewOnceText = "stealth.viewonce.text"
 
     // Mihomo
     case mihomoTitle = "mihomo.title"

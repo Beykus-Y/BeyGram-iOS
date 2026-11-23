@@ -349,6 +349,8 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     let messageActionCallbackDisposable = MetaDisposable()
     /// Stealth risk warning (issue #136): true once the user has confirmed a risky action on this screen.
     var beyGramRiskConfirmed = false
+    /// Stealth consent (issue #137): true only while the confirmed opening of a one-time media runs.
+    var beyGramViewOnceConsentGiven = false
     let messageActionUrlAuthDisposable = MetaDisposable()
     let editMessageDisposable = MetaDisposable()
     let editMessageErrorsDisposable = MetaDisposable()

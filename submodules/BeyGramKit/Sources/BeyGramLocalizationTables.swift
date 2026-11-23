@@ -100,6 +100,8 @@ public enum BeyGramLocalizationTables {
         .stealthRiskyTitle: "This action may show you online",
         .stealthRiskyText: "Reactions, poll votes and bot buttons are visible to others, and Telegram may show you online for a while. Continue?",
         .stealthRiskyConfirm: "Continue",
+        .stealthViewOnceTitle: "Open one-time media?",
+        .stealthViewOnceText: "Hidden mode is on: opening this will not be reported to the sender, so it stays unopened on their side.",
         .stealthSendNowConfirm: "Send now",
 
         // Mihomo
@@ -404,6 +406,8 @@ public enum BeyGramLocalizationTables {
         .stealthRiskyTitle: "Действие может показать вас в сети",
         .stealthRiskyText: "Реакции, голоса в опросах и нажатия кнопок ботов видны другим, и Telegram может ненадолго показать вас в сети. Продолжить?",
         .stealthRiskyConfirm: "Продолжить",
+        .stealthViewOnceTitle: "Открыть одноразовое медиа?",
+        .stealthViewOnceText: "Включён скрытый режим: открытие не будет передано отправителю, у него оно останется непросмотренным.",
         .stealthSendNowConfirm: "Отправить сейчас",
 
         // Mihomo
