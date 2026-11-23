@@ -3,6 +3,7 @@ import UIKit
 import Display
 import AppBundle
 import PresentationStrings
+import BeyGramAppearance
 
 private func generateStatusCheckImage(theme: PresentationTheme, single: Bool) -> UIImage? {
     return generateImage(CGSize(width: single ? 13.0 : 18.0, height: 13.0), rotatedContext: { size, context in
