@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import BeyGramAppearance
 import AsyncDisplayKit
 
 final class AlertControllerNode: ASDisplayNode {
@@ -48,7 +49,8 @@ final class AlertControllerNode: ASDisplayNode {
         self.rightDimView.backgroundColor = dimColor
         
         self.containerNode = ASDisplayNode()
-        self.containerNode.layer.cornerRadius = 14.0
+        // A BeyGram style sets the radius of dialogs (#148).
+        self.containerNode.layer.cornerRadius = BeyGramAppearance.shared.surfaceSpec?.dialogRadius ?? 14.0
         self.containerNode.layer.masksToBounds = true
         
         self.backgroundNode = ASDisplayNode()

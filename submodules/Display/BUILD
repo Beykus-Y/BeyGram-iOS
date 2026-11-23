@@ -17,6 +17,7 @@ swift_library(
         "-DBEYGRAM_ENABLE_RESERVED_REGIONS",
     ] if IOS_SDK_HAS_RESERVED_REGIONS else []),
     deps = [
+        "//submodules/BeyGramAppearance:BeyGramAppearance",
     	"//submodules/ObjCRuntimeUtils:ObjCRuntimeUtils",
     	"//submodules/UIKitRuntimeUtils:UIKitRuntimeUtils",
         "//submodules/AppBundle:AppBundle",
