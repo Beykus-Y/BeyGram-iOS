@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import Display
+import BeyGramAppearance
 import AppBundle
 
 public func generateItemListCheckIcon(color: UIColor) -> UIImage? {
@@ -363,6 +364,34 @@ public struct PresentationResourcesItemList {
         if !top && !bottom {
             return nil
         }
+        // A BeyGram style sets the group card radius (#148). The result is cached by theme, radius and corners.
+        if let spec = BeyGramAppearance.shared.surfaceSpec {
+            let radius = min(spec.groupCardRadius, 27.0)
+            let cacheKey = "\(ObjectIdentifier(theme).hashValue)|\(radius)|\(top)|\(bottom)" as NSString
+            if let cached = beyGramCornersCache.object(forKey: cacheKey) {
+                return cached
+            }
+            let image = generateImage(CGSize(width: 56.0, height: 56.0), rotatedContext: { (size, context) in
+                let bounds = CGRect(origin: CGPoint(), size: size)
+                context.setFillColor(theme.list.blocksBackgroundColor.cgColor)
+                context.fill(bounds)
+                context.setBlendMode(.clear)
+                var corners: UIRectCorner = []
+                if top {
+                    corners.insert([.topLeft, .topRight])
+                }
+                if bottom {
+                    corners.insert([.bottomLeft, .bottomRight])
+                }
+                let path = UIBezierPath(roundedRect: bounds, byRoundingCorners: corners, cornerRadii: CGSize(width: radius, height: radius))
+                context.addPath(path.cgPath)
+                context.fillPath()
+            })?.stretchableImage(withLeftCapWidth: 28, topCapHeight: 28)
+            if let image {
+                beyGramCornersCache.setObject(image, forKey: cacheKey)
+            }
+            return image
+        }
         let key: PresentationResourceKey
         if top && bottom {
             key = glass ? PresentationResourceKey.itemListCornersBothGlass : PresentationResourceKey.itemListCornersBoth
@@ -502,3 +531,5 @@ public struct PresentationResourcesItemList {
         })
     }
 }
+
+private let beyGramCornersCache = NSCache<NSString, UIImage>()
