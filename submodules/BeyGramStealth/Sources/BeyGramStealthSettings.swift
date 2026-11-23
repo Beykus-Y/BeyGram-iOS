@@ -42,6 +42,7 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
         scheduledSendDelaySeconds: BeyGramStealthSettings.minimumServerLeadSeconds,
         chatModes: [:],
         noStoryViews: true,
+        warnRiskyActions: true,
         failClosed: true
     )
 
@@ -50,6 +51,8 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
     public var hideTyping: Bool
     /// Story views are not reported to the server (`stories.readStories`, `stories.incrementStoryViews`).
     public var noStoryViews: Bool
+    /// Ask before a reaction or a bot button while `hideOnline` is on (Android `warnRiskyActions`, `StealthRiskGuard`).
+    public var warnRiskyActions: Bool
     public var serverScheduledSend: Bool
     public var scheduledSendDelaySeconds: Int32
     /// Per-chat overrides keyed by the chat's peer id as a decimal string.
@@ -63,6 +66,7 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
         case hideOnline = "hide_online"
         case hideTyping = "hide_typing"
         case noStoryViews = "no_story_views"
+        case warnRiskyActions = "warn_risky_actions"
         case serverScheduledSend = "scheduled_send"
         case scheduledSendDelaySeconds = "scheduled_send_delay"
         case chatModes = "chats"
@@ -76,6 +80,7 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
         scheduledSendDelaySeconds: Int32 = 15,
         chatModes: [String: BeyGramStealthChatMode] = [:],
         noStoryViews: Bool = false,
+        warnRiskyActions: Bool = false,
         failClosed: Bool = false
     ) {
         self.hideReadReceipts = hideReadReceipts
@@ -85,6 +90,7 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
         self.scheduledSendDelaySeconds = scheduledSendDelaySeconds
         self.chatModes = chatModes
         self.noStoryViews = noStoryViews
+        self.warnRiskyActions = warnRiskyActions
         self.failClosed = failClosed
     }
 
@@ -96,10 +102,17 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
         self.hideOnline = try container.decodeIfPresent(Bool.self, forKey: .hideOnline) ?? false
         self.hideTyping = try container.decodeIfPresent(Bool.self, forKey: .hideTyping) ?? false
         self.noStoryViews = try container.decodeIfPresent(Bool.self, forKey: .noStoryViews) ?? false
+        self.warnRiskyActions = try container.decodeIfPresent(Bool.self, forKey: .warnRiskyActions) ?? false
         self.serverScheduledSend = try container.decodeIfPresent(Bool.self, forKey: .serverScheduledSend) ?? false
         self.scheduledSendDelaySeconds = try container.decodeIfPresent(Int32.self, forKey: .scheduledSendDelaySeconds) ?? 15
         self.chatModes = try container.decodeIfPresent([String: BeyGramStealthChatMode].self, forKey: .chatModes) ?? [:]
         self.failClosed = false
+    }
+
+    /// Whether a risky action (a reaction, a bot button) should ask first: hidden presence is on and the warning is on.
+    /// Fail closed gives both, so the question is asked.
+    public var confirmsRiskyActions: Bool {
+        return self.hideOnline && self.warnRiskyActions
     }
 
     /// Whether `effect` may happen in the chat `chatPeerId` (nil for account-wide actions).
