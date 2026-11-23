@@ -67,6 +67,27 @@ public final class BeyGramAppearance {
         return self.isEnabled ? 24.0 : defaultRadius
     }
 
+    private static let navigationVariantKey = "BeyGram.Appearance.NavigationVariant"
+
+    /// Which of the five bottom-bar styles (Android `NavigationSpec`) the BeyGram style uses. Read at layout time.
+    public var navigationVariant: BeyGramNavigationVariant {
+        get {
+            let raw = UserDefaults.standard.string(forKey: BeyGramAppearance.navigationVariantKey) ?? ""
+            return BeyGramNavigationVariant(rawValue: raw) ?? .floatingGlass
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: BeyGramAppearance.navigationVariantKey)
+        }
+    }
+
+    /// The spec of the bottom bar, or nil when the Telegram style is on (its bar is never changed).
+    public var navigationSpec: BeyGramNavigationSpec? {
+        guard self.isEnabled else {
+            return nil
+        }
+        return BeyGramNavigationCatalog.spec(for: self.navigationVariant)
+    }
+
     /// The largest avatar diameter in the chat list. BeyGram uses 54pt, Telegram keeps 60pt.
     public var chatListAvatarMaxDiameter: CGFloat {
         return self.isEnabled ? 54.0 : 60.0

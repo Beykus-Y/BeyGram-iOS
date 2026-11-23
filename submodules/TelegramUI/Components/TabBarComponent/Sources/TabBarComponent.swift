@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import Display
+import BeyGramAppearance
 import TelegramPresentationData
 import ComponentFlow
 import ComponentDisplayAdapters
@@ -1322,7 +1323,11 @@ private final class ItemComponent: Component {
             self.state = state
 
             let unselectedColor = tabBarUnselectedItemColor(theme: component.theme)
-            let iconTintColor = (component.isSelected && component.tintSelectedItem && !component.isSearchActive) ? component.theme.rootController.tabBar.selectedTextColor : unselectedColor
+            var iconSelectedColor = component.theme.rootController.tabBar.selectedTextColor
+            if let spec = BeyGramAppearance.shared.navigationSpec, spec.selectedInk {
+                iconSelectedColor = component.theme.list.itemPrimaryTextColor
+            }
+            let iconTintColor = (component.isSelected && component.tintSelectedItem && !component.isSearchActive) ? iconSelectedColor : unselectedColor
 
             let title: String
             let badgeValue: String?
@@ -1527,11 +1532,33 @@ private final class ItemComponent: Component {
             }
 
             // `_UITabBarItemData`'s stacked title: 10pt medium, semibold when selected (its state 2).
-            let titleFont = component.isSelected ? Font.semibold(10.0) : Font.medium(10.0)
+            // BeyGram's bottom bar takes the label size and weights of the chosen NavigationSpec (#145).
+            let beyGramSpec = BeyGramAppearance.shared.navigationSpec
+            func beyGramWeightedFont(_ weight: BeyGramNavigationLabelWeight, size: CGFloat) -> UIFont {
+                switch weight {
+                case .normal:
+                    return Font.regular(size)
+                case .medium:
+                    return Font.medium(size)
+                case .semiBold:
+                    return Font.semibold(size)
+                case .bold:
+                    return Font.bold(size)
+                }
+            }
+            var titleFont = component.isSelected ? Font.semibold(10.0) : Font.medium(10.0)
+            if let beyGramSpec {
+                titleFont = beyGramWeightedFont(component.isSelected ? beyGramSpec.selectedLabelWeight : beyGramSpec.labelWeight, size: beyGramSpec.labelSize)
+            }
+            var titleSelectedColor = component.theme.rootController.tabBar.selectedTextColor
+            if let beyGramSpec, beyGramSpec.selectedInk || beyGramSpec.selectedLabelOnSurface {
+                // Signature draws the active tab in ink, Material 3 keeps the label in the primary text colour.
+                titleSelectedColor = component.theme.list.itemPrimaryTextColor
+            }
             let titleSize = self.title.update(
                 transition: .immediate,
                 component: AnyComponent(MultilineTextComponent(
-                    text: .plain(NSAttributedString(string: title, font: titleFont, textColor: (component.isSelected && component.tintSelectedItem) ? component.theme.rootController.tabBar.selectedTextColor : unselectedColor))
+                    text: .plain(NSAttributedString(string: title, font: titleFont, textColor: (component.isSelected && component.tintSelectedItem) ? titleSelectedColor : unselectedColor))
                 )),
                 environment: {},
                 containerSize: CGSize(width: availableSize.width, height: 100.0)
