@@ -136,7 +136,7 @@ extension ChatControllerImpl {
         if isIncoming, !self.beyGramViewOnceConsentGiven, !BeyGramStealthHooks.allowsOpenContentReceipt(accountPeerId: self.context.account.peerId.toInt64()) {
             let consentController = textAlertController(context: self.context, updatedPresentationData: self.updatedPresentationData, title: BeyGramL10n.shared.string(.stealthViewOnceTitle), text: BeyGramL10n.shared.string(.stealthViewOnceText), actions: [
                 TextAlertAction(type: .genericAction, title: self.presentationData.strings.Common_Cancel, action: {}),
-                TextAlertAction(type: .defaultAction, title: self.presentationData.strings.Common_Open, action: { [weak self] in
+                TextAlertAction(type: .defaultAction, title: BeyGramL10n.shared.string(.stealthRiskyConfirm), action: { [weak self] in
                     guard let self else {
                         return
                     }
