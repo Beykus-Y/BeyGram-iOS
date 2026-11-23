@@ -140,9 +140,6 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
 
     private override init() {
         self.player = BGMixPlayer.shared()
-        self.waveSessionController.hostTapHandler = { [weak self] tap in
-            self?.player.setPcmTap(tap)
-        }
         let initial = BeyGramMusicState()
         self.stateValue = Atomic(value: initial)
         self.statePromise = ValuePromise(initial, ignoreRepeated: true)
@@ -150,6 +147,10 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
         self.waveStateValue = Atomic(value: initialWave)
         self.waveStatePromise = ValuePromise(initialWave, ignoreRepeated: true)
         super.init()
+
+        self.waveSessionController.hostTapHandler = { [weak self] tap in
+            self?.player.setPcmTap(tap)
+        }
 
         let coordinator = BGYandexWavePlaybackCoordinator(
             makeQueue: {
