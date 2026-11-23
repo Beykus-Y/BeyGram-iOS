@@ -347,6 +347,8 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     let sentPeerMediaMessageEventsDisposable = MetaDisposable()
     weak var currentFailedMessagesAlertController: ViewController?
     let messageActionCallbackDisposable = MetaDisposable()
+    /// Stealth risk warning (issue #136): true once the user has confirmed a risky action on this screen.
+    var beyGramRiskConfirmed = false
     let messageActionUrlAuthDisposable = MetaDisposable()
     let editMessageDisposable = MetaDisposable()
     let editMessageErrorsDisposable = MetaDisposable()
@@ -2828,6 +2830,13 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             }
             self.openGifEditing(file: file, addCaption: addCaption)
         }, requestMessageActionCallback: { [weak self] message, data, isGame, requiresPassword, progress in
+            // Stealth risk warning (issue #136): ask once per screen before a bot button, then run the same request.
+            if let self, self.beyGramRiskyActionPending() {
+                self.beyGramConfirmRiskyAction(retry: { [weak self] in
+                    self?.controllerInteraction?.requestMessageActionCallback(message, data, isGame, requiresPassword, progress)
+                })
+                return
+            }
             guard let strongSelf = self else {
                 return
             }

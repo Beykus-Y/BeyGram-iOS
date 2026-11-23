@@ -95,6 +95,11 @@ public enum BeyGramStringKey: String, CaseIterable {
     case chatStealthAllow = "chat.stealth.allow"
     case chatStealthBlock = "chat.stealth.block"
 
+    // Risky-action warning (issue #136)
+    case stealthRiskyTitle = "stealth.risky.title"
+    case stealthRiskyText = "stealth.risky.text"
+    case stealthRiskyConfirm = "stealth.risky.confirm"
+
     // Mihomo
     case mihomoTitle = "mihomo.title"
     case mihomoStatusConnected = "mihomo.status.connected"

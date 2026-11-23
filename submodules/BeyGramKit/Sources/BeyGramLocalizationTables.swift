@@ -97,6 +97,9 @@ public enum BeyGramLocalizationTables {
         .chatStealthInherit: "As in settings",
         .chatStealthAllow: "Allow",
         .chatStealthBlock: "Block",
+        .stealthRiskyTitle: "This action may show you online",
+        .stealthRiskyText: "Reactions, poll votes and bot buttons are visible to others, and Telegram may show you online for a while. Continue?",
+        .stealthRiskyConfirm: "Continue",
         .stealthSendNowConfirm: "Send now",
 
         // Mihomo
@@ -398,6 +401,9 @@ public enum BeyGramLocalizationTables {
         .chatStealthInherit: "Как в настройках",
         .chatStealthAllow: "Разрешить",
         .chatStealthBlock: "Блокировать",
+        .stealthRiskyTitle: "Действие может показать вас в сети",
+        .stealthRiskyText: "Реакции, голоса в опросах и нажатия кнопок ботов видны другим, и Telegram может ненадолго показать вас в сети. Продолжить?",
+        .stealthRiskyConfirm: "Продолжить",
         .stealthSendNowConfirm: "Отправить сейчас",
 
         // Mihomo
