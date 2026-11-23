@@ -16,13 +16,16 @@ private enum StealthPresetKind: Equatable {
 }
 
 private func matchingStealthPreset(_ settings: BeyGramStealthSettings) -> StealthPresetKind {
-    if !settings.hideTyping && !settings.hideReadReceipts && !settings.hideOnline && !settings.serverScheduledSend {
+    if settings.failClosed {
+        return .custom
+    }
+    if !settings.hideTyping && !settings.hideReadReceipts && !settings.hideOnline && !settings.noStoryViews && !settings.serverScheduledSend {
         return .normal
     }
-    if settings.hideTyping && settings.hideReadReceipts && !settings.hideOnline && !settings.serverScheduledSend {
+    if settings.hideTyping && settings.hideReadReceipts && !settings.hideOnline && settings.noStoryViews && !settings.serverScheduledSend {
         return .hiddenReading
     }
-    if settings.hideTyping && settings.hideReadReceipts && settings.hideOnline && settings.serverScheduledSend {
+    if settings.hideTyping && settings.hideReadReceipts && settings.hideOnline && settings.noStoryViews && settings.serverScheduledSend {
         return .maximum
     }
     return .custom
@@ -50,6 +53,7 @@ private final class BeyGramPrivacyViewControllerImpl: BeyGramScrollViewControlle
     private let hideTypingRow = BeyGramRowView()
     private let hideReadRow = BeyGramRowView()
     private let hideOnlineRow = BeyGramRowView()
+    private let storyViewsRow = BeyGramRowView()
 
     private let sendHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
     private let sendCard = BeyGramCardView(spacing: 12)
@@ -138,6 +142,7 @@ private final class BeyGramPrivacyViewControllerImpl: BeyGramScrollViewControlle
         self.hideCard.contentStack.addArrangedSubview(self.hideTypingRow)
         self.hideCard.contentStack.addArrangedSubview(self.hideReadRow)
         self.hideCard.contentStack.addArrangedSubview(self.hideOnlineRow)
+        self.hideCard.contentStack.addArrangedSubview(self.storyViewsRow)
         self.stackView.addArrangedSubview(self.hideCard)
 
         // Server Scheduled Send + Delay Pills
@@ -212,9 +217,15 @@ private final class BeyGramPrivacyViewControllerImpl: BeyGramScrollViewControlle
             }
             self.statusBadge.configure(text: badgeText, textColor: palette.success, backgroundColor: palette.successSoft)
         }
-        self.statusBodyLabel.text = active
-            ? l10n.string(.privacyMasterActiveSummary, languageCode: lang)
-            : l10n.string(.privacyMasterInactiveSummary, languageCode: lang)
+        if active && self.settings.failClosed {
+            self.statusBodyLabel.text = isRu
+                ? "Сохранённые настройки не удалось прочитать. Вся защита включена, а отправка идёт по расписанию, пока вы не измените переключатель."
+                : "The saved settings could not be read. All protection stays on and sends are scheduled until you change a switch."
+        } else {
+            self.statusBodyLabel.text = active
+                ? l10n.string(.privacyMasterActiveSummary, languageCode: lang)
+                : l10n.string(.privacyMasterInactiveSummary, languageCode: lang)
+        }
         self.statusBodyLabel.textColor = palette.secondaryText
 
         // Presets
@@ -276,10 +287,23 @@ private final class BeyGramPrivacyViewControllerImpl: BeyGramScrollViewControlle
             subtitle: isRu ? "Применяется сразу для всего аккаунта" : "Applies immediately across the whole account",
             switchValue: self.settings.hideOnline,
             isEnabled: active,
-            showSeparator: false,
+            showSeparator: true,
             palette: palette,
             onSwitch: { val in
                 BeyGramStealthStore.shared.update(accountPeerId: peerId) { $0.hideOnline = val }
+            }
+        )
+        self.storyViewsRow.configure(
+            iconName: "eye.slash",
+            iconTint: palette.accent,
+            title: isRu ? "Не отмечать просмотр историй" : "Don't mark story views",
+            subtitle: isRu ? "Истории остаются непросмотренными, автор не видит просмотр" : "Stories stay unseen, so the author sees no view",
+            switchValue: self.settings.noStoryViews,
+            isEnabled: active,
+            showSeparator: false,
+            palette: palette,
+            onSwitch: { val in
+                BeyGramStealthStore.shared.update(accountPeerId: peerId) { $0.noStoryViews = val }
             }
         )
 
@@ -336,16 +360,19 @@ private final class BeyGramPrivacyViewControllerImpl: BeyGramScrollViewControlle
                 s.hideTyping = false
                 s.hideReadReceipts = false
                 s.hideOnline = false
+                s.noStoryViews = false
                 s.serverScheduledSend = false
             case .hiddenReading:
                 s.hideTyping = true
                 s.hideReadReceipts = true
                 s.hideOnline = false
+                s.noStoryViews = true
                 s.serverScheduledSend = false
             case .maximum:
                 s.hideTyping = true
                 s.hideReadReceipts = true
                 s.hideOnline = true
+                s.noStoryViews = true
                 s.serverScheduledSend = true
             case .custom:
                 break

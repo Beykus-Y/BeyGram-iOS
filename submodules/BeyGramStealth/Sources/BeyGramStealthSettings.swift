@@ -1,10 +1,11 @@
 import Foundation
 
-/// What stealth mode can hide. Presence is account-wide; read receipts and typing can also be decided per chat.
+/// What stealth mode can hide. Presence is account-wide; read receipts, typing and story views can also be decided per chat.
 public enum BeyGramStealthEffect: Sendable {
     case readHistory
     case onlinePresence
     case typing
+    case storyView
 }
 
 /// A per-chat override. `inherit` follows the account setting.
@@ -30,20 +31,38 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
     public static let minimumServerLeadSeconds: Int32 = 15
     /// Lead choices offered by the settings screen.
     public static let scheduleDelayChoices: [Int32] = [15, 30, 60, 120]
+    /// What applies while the stored settings cannot be read: every protection that has a hook is on, and every send is scheduled
+    /// (Android's `StealthSettings.FailClosed`). Android also turns on its content-open and risky-action switches, which iOS does
+    /// not have yet. The state is not stored: the first valid write replaces it.
+    public static let failClosedFallback = BeyGramStealthSettings(
+        hideReadReceipts: true,
+        hideOnline: true,
+        hideTyping: true,
+        serverScheduledSend: true,
+        scheduledSendDelaySeconds: BeyGramStealthSettings.minimumServerLeadSeconds,
+        chatModes: [:],
+        noStoryViews: true,
+        failClosed: true
+    )
 
     public var hideReadReceipts: Bool
     public var hideOnline: Bool
     public var hideTyping: Bool
+    /// Story views are not reported to the server (`stories.readStories`, `stories.incrementStoryViews`).
+    public var noStoryViews: Bool
     public var serverScheduledSend: Bool
     public var scheduledSendDelaySeconds: Int32
     /// Per-chat overrides keyed by the chat's peer id as a decimal string.
     public var chatModes: [String: BeyGramStealthChatMode]
+    /// True while the stored settings cannot be read (see `failClosedFallback`). Never stored.
+    public internal(set) var failClosed: Bool
 
     /// The stored keys are the Android ones (`StealthSettingsStore.kt`), so the two apps name each setting alike.
     private enum CodingKeys: String, CodingKey {
         case hideReadReceipts = "no_read_receipts"
         case hideOnline = "hide_online"
         case hideTyping = "hide_typing"
+        case noStoryViews = "no_story_views"
         case serverScheduledSend = "scheduled_send"
         case scheduledSendDelaySeconds = "scheduled_send_delay"
         case chatModes = "chats"
@@ -55,7 +74,9 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
         hideTyping: Bool = false,
         serverScheduledSend: Bool = false,
         scheduledSendDelaySeconds: Int32 = 15,
-        chatModes: [String: BeyGramStealthChatMode] = [:]
+        chatModes: [String: BeyGramStealthChatMode] = [:],
+        noStoryViews: Bool = false,
+        failClosed: Bool = false
     ) {
         self.hideReadReceipts = hideReadReceipts
         self.hideOnline = hideOnline
@@ -63,10 +84,29 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
         self.serverScheduledSend = serverScheduledSend
         self.scheduledSendDelaySeconds = scheduledSendDelaySeconds
         self.chatModes = chatModes
+        self.noStoryViews = noStoryViews
+        self.failClosed = failClosed
+    }
+
+    /// A key missing from stored data takes its default, so settings written before a key existed keep what the user chose.
+    /// A value of the wrong type still fails the decode, and the store then fails closed.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.hideReadReceipts = try container.decodeIfPresent(Bool.self, forKey: .hideReadReceipts) ?? false
+        self.hideOnline = try container.decodeIfPresent(Bool.self, forKey: .hideOnline) ?? false
+        self.hideTyping = try container.decodeIfPresent(Bool.self, forKey: .hideTyping) ?? false
+        self.noStoryViews = try container.decodeIfPresent(Bool.self, forKey: .noStoryViews) ?? false
+        self.serverScheduledSend = try container.decodeIfPresent(Bool.self, forKey: .serverScheduledSend) ?? false
+        self.scheduledSendDelaySeconds = try container.decodeIfPresent(Int32.self, forKey: .scheduledSendDelaySeconds) ?? 15
+        self.chatModes = try container.decodeIfPresent([String: BeyGramStealthChatMode].self, forKey: .chatModes) ?? [:]
+        self.failClosed = false
     }
 
     /// Whether `effect` may happen in the chat `chatPeerId` (nil for account-wide actions).
     public func allows(_ effect: BeyGramStealthEffect, chatPeerId: Int64?) -> Bool {
+        if self.failClosed {
+            return false
+        }
         switch effect {
         case .onlinePresence:
             // Presence is account-wide: no chat override applies to it.
@@ -75,6 +115,8 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
             return self.allowsInChat(chatPeerId: chatPeerId, accountAllows: !self.hideReadReceipts)
         case .typing:
             return self.allowsInChat(chatPeerId: chatPeerId, accountAllows: !self.hideTyping)
+        case .storyView:
+            return self.allowsInChat(chatPeerId: chatPeerId, accountAllows: !self.noStoryViews)
         }
     }
 
@@ -84,7 +126,7 @@ public struct BeyGramStealthSettings: Codable, Equatable, Sendable {
     ///   - unschedulableReason: why Telegram cannot schedule this message (a secret chat or a paid message), or nil when it can.
     ///   - nowSeconds: the server clock (`network.globalTime`) at the moment of the request.
     public func sendDecision(explicitScheduleTime: Int32?, unschedulableReason: BeyGramStealthRefusal?, nowSeconds: Int32) -> BeyGramStealthSendDecision {
-        guard self.serverScheduledSend else {
+        guard self.serverScheduledSend || self.failClosed else {
             return .unchanged
         }
         if explicitScheduleTime != nil {

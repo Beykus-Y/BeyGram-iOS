@@ -1,6 +1,7 @@
 import Foundation
 import SwiftSignalKit
 import Postbox
+import BeyGramStealth
 internal import TelegramApi
 
 public enum EngineStoryInputMedia {
@@ -2108,6 +2109,11 @@ func _internal_deleteStories(account: Account, peerId: PeerId, ids: [Int32]) -> 
 }
 
 func _internal_markStoryAsSeen(account: Account, peerId: PeerId, id: Int32, asPinned: Bool) -> Signal<Never, NoError> {
+    // BeyGram stealth: a story that stealth mode refuses is not marked as seen, neither on the server nor locally (Android's
+    // StealthSettings: no OpenStory, so no read mark either).
+    guard BeyGramStealthHooks.allows(.storyView, accountPeerId: account.peerId.toInt64(), chatPeerId: peerId.toInt64()) else {
+        return .complete()
+    }
     if asPinned {
         return account.postbox.transaction { transaction -> Api.InputPeer? in
             return transaction.getPeer(peerId).flatMap(apiInputPeer)

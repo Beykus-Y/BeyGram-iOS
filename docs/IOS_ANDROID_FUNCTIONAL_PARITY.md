@@ -245,8 +245,10 @@ DTLS-SRTP, STUN, без TURN), `WaveSignaling` (бинарный v1, SDP-под�
 | Несколько аккаунтов | Настройки по `accountPeerId` (`BeyGramStealthStore`). Логика по аккаунтам подтверждена кодом |
 | Серверная отложенная отправка | Есть, включена в `enqueueMessages` (`EnqueueMessage.swift`, вызов `beyGramStealthPreparedMessages` около строки 762) |
 | Режимы по чатам | Модель есть (`chatModes`, `BeyGramStealthChatMode`), **ни один экран их не меняет**. Только backend |
-| Не открывать контент (view-once), истории, предупреждение о рискованных действиях, `failClosed` | Отсутствуют (нет полей в `BeyGramStealthSettings`) |
-| Локальная очередь отложенной отправки | Отсутствует |
+| Истории (`noStoryViews`) | Есть: хук в `_internal_markStoryAsSeen`, переключатель в настройках приватности. Сделано 2026-11-23 на `integration/parity-ci`, не собрано |
+| `failClosed` при нечитаемом хранилище | Есть: вся защита включена, отправка по расписанию, сбрасывается первой записью. Сделано 2026-11-23 на `integration/parity-ci`, не собрано |
+| Не открывать контент (view-once), предупреждение о рискованных действиях | Отсутствуют (нет полей `noContentOpen` и `warnRiskyActions`). Согласие на одноразовые медиа нужно делать в просмотрщике |
+| Локальная очередь отложенной отправки | Модель есть (`BeyGramStealthDelayedSend.swift`), не подключена к отправке и к UI |
 | Ответ из уведомления (`StealthReplyPolicy` на Android) | Не сравнивалось: на iOS BG Push открывает приложение по `beygram://` |
 
 **Потеря сообщения закрыта PR #64 на `DEV`** (слит 2026-11-20 18:20Z, по описанию PR; код в этой правке не перечитан). Ниже описано состояние на ревизии аудита. **Подтверждённая потеря сообщения.** `BeyGramStealthSettings.sendDecision` возвращает `.refused`, если сообщение
@@ -316,6 +318,8 @@ DTLS-SRTP, STUN, без TURN), `WaveSignaling` (бинарный v1, SDP-под�
    чата. Для iOS это новое, а не паритетное требование.
 7. Stealth: потеря сообщения подтверждена в `enqueueMessages`. Закрыто PR #64 (слит на `DEV`, по его описанию). Режимы по чатам существуют в модели, но не в UI.
 8. Mihomo: смена сети не отслеживается (`NWPathMonitor` не используется), триггера по `Connecting` TDLib нет.
+9. BG Mix, поправка 2026-11-23: сеттеры ядра (тип перехода, tempo ramp, pitch lock, агрессивность, фразы, автоочередь, адаптив, Bass Swap) на Android не вызываются. `bgmix_jni.cpp` вызывает только `setPcmTap`, а `BgMixSettingsStore` хранит один переключатель `bgmix_enabled`. Значит, ядро работает со своими умолчаниями на обеих платформах, и это не разрыв паритета. Строки §4.2 про «Seek», «Состояние активного перехода» и «Автоподбор» читать с этой поправкой: `seekToPosition:` в `BGMixPlayer.h` есть, а `BGMixSnapshot` отдаёт `transitionActive`, `transitionProgress`, `preparingNext` и `lastError`.
+10. Стелс, 2026-11-23: истории (`noStoryViews`) и `failClosed` сделаны на `integration/parity-ci`, без сборки и без устройства. Осталось: `noContentOpen` с согласием на view-once, `warnRiskyActions`, режимы по чатам в интерфейсе, подключение локальной очереди.
 
 ## 10. Рекомендуемый порядок
 
