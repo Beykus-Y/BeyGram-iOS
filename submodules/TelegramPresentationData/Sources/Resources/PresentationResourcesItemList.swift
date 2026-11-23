@@ -373,7 +373,7 @@ public struct PresentationResourcesItemList {
         } else {
             key = glass ? PresentationResourceKey.itemListCornersBottomGlass : PresentationResourceKey.itemListCornersBottom
         }
-        let cacheKey = design.isBeyGramActive ? (key.rawValue &+ UInt32(design.style.rawValue) &* 100003) : key.rawValue
+        let cacheKey = design.isBeyGramActive ? (key.rawValue &+ design.style.rawValue &* 100003) : key.rawValue
         return theme.image(cacheKey, { theme in
             return generateImage(CGSize(width: 56.0, height: 56.0), rotatedContext: { (size, context) in
                 let bounds = CGRect(origin: CGPoint(), size: size)
