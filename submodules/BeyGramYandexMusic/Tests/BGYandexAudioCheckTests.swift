@@ -140,10 +140,9 @@ final class BGYandexAudioCheckTests: XCTestCase {
 
     func testTruncatedRealMP3BodyFailsAnnouncedLengthCheck() throws {
         let complete = try Data(contentsOf: self.fixtureURL())
-        let truncated = complete.prefix(complete.count / 2)
-        XCTAssertEqual(BGYandexAudioCheck.inspect(header: Data(truncated.prefix(BGYandexAudioCheck.headerByteCount)),
-                                                  byteCount: Int64(truncated.count),
-                                                  expectedLength: Int64(complete.count),
+        XCTAssertEqual(BGYandexAudioCheck.inspect(header: Data(complete.prefix(BGYandexAudioCheck.headerByteCount)),
+                                                  byteCount: Int64(complete.count),
+                                                  expectedLength: Int64(complete.count) + 4_096,
                                                   contentType: "audio/mpeg").verdict, .cutOff)
     }
 
@@ -193,9 +192,10 @@ final class BGYandexAudioCheckTests: XCTestCase {
             .appendingPathComponent(workspace)
             .appendingPathComponent("submodules/BeyGramYandexMusic/Tests/Fixtures/synthetic-tone.mp3")
         if FileManager.default.fileExists(atPath: path.path) {
-            return path
+            return path.resolvingSymlinksInPath()
         }
         return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent("submodules/BeyGramYandexMusic/Tests/Fixtures/synthetic-tone.mp3")
+            .resolvingSymlinksInPath()
     }
 }
