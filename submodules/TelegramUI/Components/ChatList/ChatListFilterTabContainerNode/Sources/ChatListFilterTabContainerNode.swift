@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import AsyncDisplayKit
 import Display
+import BeyGramAppearance
 import TelegramCore
 import TelegramPresentationData
 import TextNodeWithEntities
@@ -716,7 +717,11 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
         let previousContentWidth = self.scrollNode.view.contentSize.width
         
         if self.currentParams?.presentationData.theme !== presentationData.theme {
-            self.selectedBackgroundNode.image = generateStretchableFilledCircleImage(diameter: 36.0, color: presentationData.theme.chatList.itemHighlightedBackgroundColor)
+            if let beyGramSpec = BeyGramAppearance.shared.chatListSpec {
+                self.selectedBackgroundNode.image = beyGramFolderChipImage(spec: beyGramSpec, theme: presentationData.theme)
+            } else {
+                self.selectedBackgroundNode.image = generateStretchableFilledCircleImage(diameter: 36.0, color: presentationData.theme.chatList.itemHighlightedBackgroundColor)
+            }
         }
         
         if isReordering {
@@ -1125,4 +1130,42 @@ private final class ReorderingGestureRecognizer: UIGestureRecognizer, UIGestureR
             }
         }
     }
+}
+
+/// The selected folder's background in a BeyGram style (issue #146): radius and fill follow the style's chip kind.
+private func beyGramFolderChipImage(spec: BeyGramChatListSpec, theme: PresentationTheme) -> UIImage? {
+    let height: CGFloat = 36.0
+    let radius = min(spec.chipRadius, height * 0.5)
+    let accent = theme.rootController.tabBar.selectedIconColor
+    let size = CGSize(width: radius * 2.0 + 2.0, height: height)
+    let image = generateImage(size, rotatedContext: { size, context in
+        context.clear(CGRect(origin: CGPoint(), size: size))
+        let rect = CGRect(origin: CGPoint(), size: size)
+        switch spec.chipKind {
+        case .accentFilled:
+            context.setFillColor(accent.withAlphaComponent(0.18).cgColor)
+            context.addPath(UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath)
+            context.fillPath()
+        case .underlined:
+            context.setFillColor(accent.cgColor)
+            context.fill(CGRect(x: 0.0, y: size.height - 2.0, width: size.width, height: 2.0))
+        case .tonalOutlined:
+            context.setFillColor(theme.chatList.itemHighlightedBackgroundColor.cgColor)
+            context.addPath(UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath)
+            context.fillPath()
+            context.setStrokeColor(theme.chatList.itemSeparatorColor.cgColor)
+            context.setLineWidth(1.0)
+            context.addPath(UIBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), cornerRadius: radius).cgPath)
+            context.strokePath()
+        case .tonal:
+            context.setFillColor(theme.chatList.itemHighlightedBackgroundColor.cgColor)
+            context.addPath(UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath)
+            context.fillPath()
+        case .ink:
+            context.setFillColor(theme.chatList.titleColor.cgColor)
+            context.addPath(UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath)
+            context.fillPath()
+        }
+    })
+    return image?.stretchableImage(withLeftCapWidth: Int(radius + 1.0), topCapHeight: Int(height * 0.5))
 }
