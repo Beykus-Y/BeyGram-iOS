@@ -22,7 +22,6 @@ DerivedData
 .DS_Store
 *.dSYM
 *.dSYM.zip
-*.ipa
 */xcuserdata/*
 buck-out/*
 .buckd/*
@@ -88,3 +87,4 @@ submodules/TelegramApi/Tests/SwiftPMGenerated/
 build/accessibility/
 /.bazelrc.local
 submodules/BeyGramProxy/CoreBridge/lib/
+/BEYGRAM_BUILD_LOCAL.md

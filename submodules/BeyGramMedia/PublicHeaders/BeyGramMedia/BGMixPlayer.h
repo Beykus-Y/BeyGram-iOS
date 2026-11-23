@@ -63,6 +63,14 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 - (void)mixPlayer:(BGMixPlayer *)player didUpdateSnapshot:(BGMixSnapshot *)snapshot;
 @end
 
+// Posted on the main thread when a BGMixPlayer that manages its own AVAudioSession starts playback,
+// so Telegram's native MediaPlayer can pause cleanly without conflicting audio output.
+extern NSNotificationName const BGMixPlayerDidStartPlaybackNotification;
+
+// Posted on the main thread when the shared BGMixPlayer is stopped because Telegram's native
+// MediaPlayer is taking over audio playback, so BG Mix releases system Now Playing controls cleanly.
+extern NSNotificationName const BGMixPlayerDidStopForExternalAudioNotification;
+
 // BG Mix (AutoMix) for iOS: a queue of local audio files, prepared in the background (decode,
 // BG Beat analysis, BG Mix features) and played through AVAudioEngine with smart crossfades.
 // All methods and all observer callbacks run on the main thread. The contract is in
@@ -73,6 +81,10 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 // the mix. Created on first use.
 + (BGMixPlayer *)sharedPlayer;
 
+// If the shared player already exists and is currently playing, pauses and stops its audio engine.
+// Never instantiates the shared player if it has not been created yet.
++ (void)stopSharedEngineIfRunning;
+
 // Documents/bgmix: the queued copies and the analysis caches. Created on first use.
 + (NSURL *)mixDirectory;
 
@@ -81,6 +93,9 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 
 // Queue. addTrackAtURL: returns a non-zero track identifier, or 0 when the file is rejected.
 - (uint64_t)addTrackAtURL:(NSURL *)url NS_SWIFT_NAME(addTrack(at:));
+// Atomically stops playback, drains and clears both decks, adds `url`, and starts playback.
+// Prevents "busy deck" races when replacing the queue while audio is playing.
+- (uint64_t)replaceQueueAndPlayTrackAtURL:(NSURL *)url NS_SWIFT_NAME(replaceQueueAndPlayTrack(at:));
 // Returns NO when no track has this identifier.
 - (BOOL)removeTrackWithIdentifier:(uint64_t)identifier NS_SWIFT_NAME(removeTrack(withIdentifier:));
 - (void)clearQueue;
@@ -90,6 +105,10 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 - (void)pause;
 // Starts a smooth crossfade to the next prepared track.
 - (void)next;
+// Attempts to start a crossfade to the next prepared track. Returns YES only if the engine
+// actually entered an active transition; returns NO if the next track is not ready or the
+// transition plan was rejected.
+- (BOOL)tryStartNextTransition;
 - (void)stopAll;
 // Moves the master deck to `seconds`. Returns NO during a transition, when nothing is loaded, or
 // for a negative or non-finite value.
@@ -116,8 +135,15 @@ typedef NS_ENUM(NSInteger, BGMixTransport) {
 // Pauses, then stops the audio engine at once. The session manager calls it when it takes the session away.
 - (void)stopEngine;
 
-// Stops the audio engine and the update loop, and drops the observers. Call before releasing the player.
-// The shared player is not invalidated in normal use.
+// Host tap for BG Wave. `tap` is a `bgmedia::IPcmOutputTap *`, passed as an opaque pointer so that this
+// header stays plain Objective-C. The realtime render thread calls its onPcmRendered after each rendered
+// chunk (up to 4096 frames): interleaved stereo float at 48 kHz, no allocation. Pass NULL to detach. The
+// call returns only after the render thread has left any call into the previous tap, so the owner may
+// destroy that tap afterwards. Main thread only.
+- (void)setPcmTap:(nullable void *)tap;
+
+// Stops the audio engine and the update loop, detaches the host tap, and drops the observers. Call before
+// releasing the player. The shared player is not invalidated in normal use.
 - (void)invalidate;
 
 @end

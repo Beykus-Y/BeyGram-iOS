@@ -123,20 +123,53 @@ public struct BeyGramMusicState: Equatable {
 /// Thin Swift reactive adapter over `BGMixPlayer.sharedPlayer()` (`BGMixPlayerObserver`).
 ///
 /// There is only one global player instance (`BGMixPlayer.sharedPlayer()`), owned by `BeyGramMedia`.
-public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
+public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexWavePlayerAdapter {
     public static let shared = BeyGramMusicSession()
 
     private let player: BGMixPlayer
     private let stateValue: Atomic<BeyGramMusicState>
     private let statePromise: ValuePromise<BeyGramMusicState>
+    private let waveStateValue: Atomic<BGYandexWaveState>
+    private let waveStatePromise: ValuePromise<BGYandexWaveState>
+    private var waveCoordinator: BGYandexWavePlaybackCoordinator!
+    private var nowPlayingCenter: BeyGramNowPlayingCenter!
     private var metadataObserver: NSObjectProtocol?
+    private var externalAudioObserver: NSObjectProtocol?
 
     private override init() {
         self.player = BGMixPlayer.shared()
         let initial = BeyGramMusicState()
         self.stateValue = Atomic(value: initial)
         self.statePromise = ValuePromise(initial, ignoreRepeated: true)
+        let initialWave = BGYandexWaveState()
+        self.waveStateValue = Atomic(value: initialWave)
+        self.waveStatePromise = ValuePromise(initialWave, ignoreRepeated: true)
         super.init()
+
+        let coordinator = BGYandexWavePlaybackCoordinator(
+            makeQueue: {
+                let session = BGYandexRuntime.shared.makeWave(seeds: ["user:onyourwave"])
+                return BGYandexWaveQueue(source: session, prepare: { track in
+                    BeyGramTrackMetadataStore.shared.registerYandexTrack(track)
+                    BGYandexRuntime.shared.localFile(trackId: track.trackId) { result in
+                        if case let .success(url) = result {
+                            BeyGramTrackMetadataStore.shared.associate(localURL: url, with: track)
+                        }
+                    }
+                })
+            },
+            player: self,
+            onLikeTrack: { trackId, liked in
+                BGYandexRuntime.shared.setLiked(trackId: trackId, liked: liked) { _ in }
+            }
+        )
+        coordinator.onStateChanged = { [weak self] waveState in
+            guard let self else { return }
+            _ = self.waveStateValue.swap(waveState)
+            self.waveStatePromise.set(waveState)
+        }
+        self.waveCoordinator = coordinator
+        self.nowPlayingCenter = BeyGramNowPlayingCenter(session: self)
 
         self.player.setTransitionDuration(initial.transitionDuration)
         self.player.setAdaptiveTransitions(initial.adaptiveTransitions)
@@ -146,12 +179,19 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
             guard let self else { return }
             self.mixPlayer(self.player, didUpdate: self.player.snapshot)
         }
+        self.externalAudioObserver = NotificationCenter.default.addObserver(forName: NSNotification.Name.BGMixPlayerDidStopForExternalAudio, object: nil, queue: .main) { [weak self] _ in
+            self?.nowPlayingCenter?.relinquishForExternalAudio()
+        }
     }
 
     deinit {
         if let metadataObserver {
             NotificationCenter.default.removeObserver(metadataObserver)
         }
+        if let externalAudioObserver {
+            NotificationCenter.default.removeObserver(externalAudioObserver)
+        }
+        self.nowPlayingCenter?.relinquish()
         self.player.remove(self)
     }
 
@@ -161,6 +201,38 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
 
     public var currentState: BeyGramMusicState {
         return self.stateValue.with { $0 }
+    }
+
+    public var waveStateSignal: Signal<BGYandexWaveState, NoError> {
+        return self.waveStatePromise.get()
+    }
+
+    public var currentWaveState: BGYandexWaveState {
+        return self.waveStateValue.with { $0 }
+    }
+
+    public func startOrToggleWave() {
+        DispatchQueue.main.async {
+            self.waveCoordinator.startOrTogglePlay()
+        }
+    }
+
+    public func skipWaveTrack() {
+        DispatchQueue.main.async {
+            self.waveCoordinator.skip()
+        }
+    }
+
+    public func toggleWaveLike() {
+        DispatchQueue.main.async {
+            self.waveCoordinator.toggleLike()
+        }
+    }
+
+    public func stopWave() {
+        DispatchQueue.main.async {
+            self.waveCoordinator.stop()
+        }
     }
 
     private func mutate(_ update: (inout BeyGramMusicState) -> Void) {
@@ -197,6 +269,25 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
                 }
             }
         }
+
+        let currentTrack = snapshot.currentTrack
+        let nextReady = snapshot.nextTrack?.state == .ready
+        self.waveCoordinator?.handlePlaybackUpdate(
+            currentItemId: currentTrack?.identifier,
+            currentItemFailed: currentTrack?.state == .failed,
+            currentItemPlayed: currentTrack?.state == .played,
+            nextItemReady: nextReady,
+            transitionActive: snapshot.transitionActive,
+            isStopped: snapshot.transport == .stopped,
+            position: snapshot.position,
+            duration: snapshot.duration
+        )
+
+        self.nowPlayingCenter?.update(
+            state: self.currentState,
+            managesAudioSession: self.player.managesAudioSession,
+            waveActive: self.currentWaveState.isActive
+        )
     }
 
     public func addTracks(urls: [URL]) {
@@ -257,7 +348,12 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
 
     public func next() {
         DispatchQueue.main.async {
-            self.player.next()
+            if self.player.tryStartNextTransition() {
+                return
+            }
+            if let nextTrack = self.player.snapshot.nextTrack {
+                _ = self.player.replaceQueueAndPlayTrack(at: nextTrack.fileURL)
+            }
         }
     }
 
@@ -295,6 +391,34 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
 
     /// Resolves a Yandex Music track through `BGYandexRuntime.shared`, registers its real title/artist/cover, and plays or enqueues it.
     public func playYandexTrack(_ track: BGYandexTrack, replaceQueue: Bool = false, completion: ((Result<Void, BGYandexPlaybackError>) -> Void)? = nil) {
+        if replaceQueue {
+            self.stopWave()
+        }
+        self.resolveAndQueueYandexTrack(track, replaceQueue: replaceQueue) { result in
+            switch result {
+            case .success:
+                completion?(.success(()))
+            case let .failure(error):
+                completion?(.failure(error))
+            }
+        }
+    }
+
+    // MARK: - BGYandexWavePlayerAdapter
+
+    public func playWaveTrack(_ track: BGYandexTrack, replaceQueue: Bool, completion: @escaping (Result<UInt64, BGYandexPlaybackError>) -> Void) {
+        self.resolveAndQueueYandexTrack(track, replaceQueue: replaceQueue, completion: completion)
+    }
+
+    public func skipToPreparedNextWaveTrack() -> Bool {
+        return self.player.tryStartNextTransition()
+    }
+
+    public func toggleWavePlayPause() {
+        self.togglePlayPause()
+    }
+
+    private func resolveAndQueueYandexTrack(_ track: BGYandexTrack, replaceQueue: Bool, completion: @escaping (Result<UInt64, BGYandexPlaybackError>) -> Void) {
         BeyGramTrackMetadataStore.shared.registerYandexTrack(track)
         BGYandexRuntime.shared.playableFile(rowKey: "ym:\(track.trackId)") { [weak self] result in
             guard let self else { return }
@@ -303,19 +427,24 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver {
                 BeyGramTrackMetadataStore.shared.associate(localURL: fileURL, with: track)
                 DispatchQueue.main.async {
                     self.player.managesAudioSession = true
+                    let itemId: UInt64
                     if replaceQueue {
-                        self.player.stopAll()
-                        self.player.clearQueue()
+                        itemId = self.player.replaceQueueAndPlayTrack(at: fileURL)
+                    } else {
+                        itemId = self.player.addTrack(at: fileURL)
+                        if itemId != 0 && !self.currentState.isPlaying {
+                            self.player.play()
+                        }
                     }
-                    _ = self.player.addTrack(at: fileURL)
-                    if replaceQueue || !self.currentState.isPlaying {
-                        self.player.play()
+                    guard itemId != 0 else {
+                        completion(.failure(.unavailable))
+                        return
                     }
-                    completion?(.success(()))
+                    completion(.success(itemId))
                 }
             case let .failure(error):
                 DispatchQueue.main.async {
-                    completion?(.failure(error))
+                    completion(.failure(error))
                 }
             }
         }

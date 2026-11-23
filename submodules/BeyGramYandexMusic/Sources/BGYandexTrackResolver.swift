@@ -72,7 +72,8 @@ public final class BGYandexTrackResolver {
         if let cached = cachedFile(trackId: trackId) {
             // A file that fails the check (kept before the check existed, or damaged on disk) is removed and downloaded again.
             if BGYandexAudioCheck.inspect(fileAt: cached).verdict == .audio {
-                report(.success(cached))
+                let normalized = normalizeCachedExtensionIfNeeded(cached, trackId: trackId)
+                report(.success(normalized))
                 return
             }
             try? fileManager.removeItem(at: cached)
@@ -151,6 +152,34 @@ public final class BGYandexTrackResolver {
                                                expectedLength: announced,
                                                contentType: response?.value(forHTTPHeaderField: "Content-Type"))
         return (probe, header)
+    }
+
+    /// If a valid cached file has a container header whose extension differs from its filename
+    /// (e.g. an M4A cached as `.mp3` by an earlier build), renames it in-place without re-downloading.
+    private func normalizeCachedExtensionIfNeeded(_ url: URL, trackId: String) -> URL {
+        var header = Data()
+        if let handle = try? FileHandle(forReadingFrom: url) {
+            header = (try? handle.read(upToCount: BGYandexAudioCheck.headerByteCount)) ?? Data()
+            try? handle.close()
+        }
+        guard !header.isEmpty else {
+            return url
+        }
+        let detectedExt = BGYandexAudioCheck.fileExtension(for: header)
+        let currentExt = url.pathExtension.lowercased()
+        guard detectedExt != currentExt else {
+            return url
+        }
+        let target = cacheURL(trackId: trackId, ext: detectedExt)
+        do {
+            if fileManager.fileExists(atPath: target.path) {
+                try fileManager.removeItem(at: target)
+            }
+            try fileManager.moveItem(at: url, to: target)
+            return target
+        } catch {
+            return url
+        }
     }
 
     public func forget(trackId: String) {

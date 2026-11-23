@@ -246,6 +246,8 @@ public final class BeyGramRowView: UIControl {
         let textStack = UIStackView(arrangedSubviews: [self.titleLabel, self.subtitleLabel])
         textStack.axis = .vertical
         textStack.spacing = 2.0
+        textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textStack.translatesAutoresizingMaskIntoConstraints = false
 
         self.valueLabel.textAlignment = .right
@@ -254,8 +256,10 @@ public final class BeyGramRowView: UIControl {
 
         self.chevronView.image = UIImage(systemName: "chevron.right")
         self.chevronView.contentMode = .scaleAspectFit
+        self.chevronView.setContentCompressionResistancePriority(.required, for: .horizontal)
         self.chevronView.setContentHuggingPriority(.required, for: .horizontal)
 
+        self.toggleSwitch.setContentCompressionResistancePriority(.required, for: .horizontal)
         self.toggleSwitch.setContentHuggingPriority(.required, for: .horizontal)
         self.toggleSwitch.addTarget(self, action: #selector(self.switchChanged), for: .valueChanged)
 
@@ -263,18 +267,15 @@ public final class BeyGramRowView: UIControl {
         mainStack.axis = .horizontal
         mainStack.alignment = .center
         mainStack.spacing = 12.0
-        mainStack.isUserInteractionEnabled = false
+        mainStack.isUserInteractionEnabled = true
         mainStack.translatesAutoresizingMaskIntoConstraints = false
         self.addSubview(mainStack)
 
         self.separator.translatesAutoresizingMaskIntoConstraints = false
         self.addSubview(self.separator)
 
-        // Allow switch interaction when visible.
-        self.toggleSwitch.isUserInteractionEnabled = true
-        self.addSubview(self.toggleSwitch)
-
         NSLayoutConstraint.activate([
+            self.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
             self.iconContainer.widthAnchor.constraint(equalToConstant: 32),
             self.iconContainer.heightAnchor.constraint(equalToConstant: 32),
             self.iconView.centerXAnchor.constraint(equalTo: self.iconContainer.centerXAnchor),
@@ -294,6 +295,19 @@ public final class BeyGramRowView: UIControl {
         ])
 
         self.addTarget(self, action: #selector(self.handleTap), for: .touchUpInside)
+    }
+
+    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard self.isUserInteractionEnabled, !self.isHidden, self.alpha >= 0.01, self.point(inside: point, with: event) else {
+            return nil
+        }
+        if !self.toggleSwitch.isHidden && self.toggleSwitch.isEnabled {
+            let switchPoint = self.convert(point, to: self.toggleSwitch)
+            if let hit = self.toggleSwitch.hitTest(switchPoint, with: event) {
+                return hit
+            }
+        }
+        return self
     }
 
     @available(*, unavailable)
@@ -364,13 +378,20 @@ public final class BeyGramRowView: UIControl {
         self.isUserInteractionEnabled = isEnabled && (onTap != nil || onSwitch != nil)
         self.isAccessibilityElement = true
         self.accessibilityLabel = [title, subtitle, value].compactMap { $0 }.joined(separator: ", ")
-        self.accessibilityTraits = onTap != nil ? .button : .staticText
+        if let switchValue {
+            self.accessibilityValue = switchValue ? "1" : "0"
+            self.accessibilityTraits = isEnabled ? .button : [.button, .notEnabled]
+        } else {
+            self.accessibilityValue = nil
+            self.accessibilityTraits = onTap != nil ? (isEnabled ? .button : [.button, .notEnabled]) : .staticText
+        }
     }
 
     @objc private func handleTap() {
-        if !self.toggleSwitch.isHidden, self.tapHandler == nil, let switchHandler = self.switchHandler {
+        if !self.toggleSwitch.isHidden, self.toggleSwitch.isEnabled, self.tapHandler == nil, let switchHandler = self.switchHandler {
             let next = !self.toggleSwitch.isOn
             self.toggleSwitch.setOn(next, animated: true)
+            self.accessibilityValue = next ? "1" : "0"
             switchHandler(next)
             return
         }
@@ -378,6 +399,7 @@ public final class BeyGramRowView: UIControl {
     }
 
     @objc private func switchChanged() {
+        self.accessibilityValue = self.toggleSwitch.isOn ? "1" : "0"
         self.switchHandler?(self.toggleSwitch.isOn)
     }
 }
@@ -388,6 +410,7 @@ open class BeyGramScrollViewController: ViewController {
     public let scrollView = UIScrollView()
     public let stackView = UIStackView()
     private var presentationDisposable: Disposable?
+    private var didSetInitialScrollOffset: Bool = false
     public private(set) var presentationData: PresentationData
 
     public init(context: AccountContext) {
@@ -410,8 +433,13 @@ open class BeyGramScrollViewController: ViewController {
         super.viewDidLoad()
         self.scrollView.alwaysBounceVertical = true
         self.scrollView.keyboardDismissMode = .interactive
+        self.scrollView.contentInsetAdjustmentBehavior = .never
         self.scrollView.translatesAutoresizingMaskIntoConstraints = false
-        self.displayNode.view.addSubview(self.scrollView)
+        if let navView = self.navigationBar?.view {
+            self.displayNode.view.insertSubview(self.scrollView, belowSubview: navView)
+        } else {
+            self.displayNode.view.insertSubview(self.scrollView, at: 0)
+        }
 
         self.stackView.axis = .vertical
         self.stackView.spacing = 14.0
@@ -443,8 +471,13 @@ open class BeyGramScrollViewController: ViewController {
     open override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)
         let topInset = self.navigationLayout(layout: layout).navigationFrame.maxY
-        self.scrollView.contentInset = UIEdgeInsets(top: topInset, left: 0, bottom: layout.intrinsicInsets.bottom + 16, right: 0)
+        let bottomInset = layout.intrinsicInsets.bottom + 16
+        self.scrollView.contentInset = UIEdgeInsets(top: topInset, left: layout.safeInsets.left, bottom: bottomInset, right: layout.safeInsets.right)
         self.scrollView.scrollIndicatorInsets = self.scrollView.contentInset
+        if !self.didSetInitialScrollOffset {
+            self.didSetInitialScrollOffset = true
+            self.scrollView.contentOffset = CGPoint(x: 0, y: -topInset)
+        }
     }
 
     open override var keyCommands: [UIKeyCommand]? {

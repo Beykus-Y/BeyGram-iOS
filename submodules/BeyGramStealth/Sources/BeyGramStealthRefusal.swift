@@ -13,6 +13,10 @@ public enum BeyGramStealthRefusal: String, Codable, Equatable, Sendable, CaseIte
     case ephemeral
     /// The scheduled date could not be recorded with the message, so it would have kept its enqueue-time date.
     case notRecorded
+    /// View-once media or a live location: Telegram cannot schedule either, and Android refuses both the same way.
+    case viewOnceOrLiveLocation
+    /// A message to the direct messages of a channel (a monoforum): Telegram does not schedule there, and Android refuses it.
+    case directMessages
 
     /// The key of the dialog text for this reason. The UI adds the strings (see docs/stealth-ui-contract.md).
     public var localizationKey: String {
@@ -27,6 +31,10 @@ public enum BeyGramStealthRefusal: String, Codable, Equatable, Sendable, CaseIte
             return "BeyGram.Stealth.Refusal.Ephemeral"
         case .notRecorded:
             return "BeyGram.Stealth.Refusal.NotRecorded"
+        case .viewOnceOrLiveLocation:
+            return "BeyGram.Stealth.Refusal.ViewOnceOrLiveLocation"
+        case .directMessages:
+            return "BeyGram.Stealth.Refusal.DirectMessages"
         }
     }
 }

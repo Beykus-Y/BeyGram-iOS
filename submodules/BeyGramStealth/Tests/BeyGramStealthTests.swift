@@ -55,6 +55,15 @@ final class BeyGramStealthTests: XCTestCase {
         XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: .paidStars, nowSeconds: 1000), .refused(.paidStars))
     }
 
+    func testViewOnceAndDirectMessagesAreRefusedAndNameTheirReason() {
+        let settings = BeyGramStealthSettings(serverScheduledSend: true, scheduledSendDelaySeconds: 30)
+        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: .viewOnceOrLiveLocation, nowSeconds: 1000), .refused(.viewOnceOrLiveLocation))
+        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: .directMessages, nowSeconds: 1000), .refused(.directMessages))
+        // The raw values are stored with refused messages, so they must not change.
+        XCTAssertEqual(BeyGramStealthRefusal.viewOnceOrLiveLocation.rawValue, "viewOnceOrLiveLocation")
+        XCTAssertEqual(BeyGramStealthRefusal.directMessages.rawValue, "directMessages")
+    }
+
     func testShortLeadIsRefusedAndNamesItsReason() {
         let settings = BeyGramStealthSettings(serverScheduledSend: true, scheduledSendDelaySeconds: 10)
         XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: nil, nowSeconds: 1000), .refused(.leadTooShort))
@@ -140,5 +149,53 @@ final class BeyGramStealthTests: XCTestCase {
         registry.record(accountPeerId: 1, messageKey: "a", refusal: .paidStars, nowSeconds: 1000)
         registry.record(accountPeerId: 1, messageKey: "a", refusal: .notRecorded, nowSeconds: 1010)
         XCTAssertEqual(registry.refusal(accountPeerId: 1, messageKey: "a"), BeyGramStealthRefusal.notRecorded)
+    }
+
+    func testStoryViewSwitchHidesOnlyStoryViews() {
+        let settings = BeyGramStealthSettings(noStoryViews: true)
+        XCTAssertFalse(settings.allows(.storyView, chatPeerId: 5))
+        XCTAssertTrue(settings.allows(.readHistory, chatPeerId: 5))
+        XCTAssertTrue(settings.allows(.onlinePresence, chatPeerId: nil))
+        let allowed = BeyGramStealthSettings(chatModes: ["5": .allow], noStoryViews: true)
+        XCTAssertTrue(allowed.allows(.storyView, chatPeerId: 5))
+        XCTAssertFalse(allowed.allows(.storyView, chatPeerId: 6))
+    }
+
+    func testSettingsWrittenBeforeAKeyExistedKeepTheirValues() throws {
+        // The JSON an earlier build wrote has no story-view key. Decoding must keep what the user had chosen.
+        let stored = #"{"no_read_receipts":true,"hide_online":true,"hide_typing":false,"scheduled_send":false,"scheduled_send_delay":15,"chats":{}}"#
+        let decoded = try JSONDecoder().decode(BeyGramStealthSettings.self, from: Data(stored.utf8))
+        XCTAssertTrue(decoded.hideReadReceipts)
+        XCTAssertTrue(decoded.hideOnline)
+        XCTAssertFalse(decoded.noStoryViews)
+        XCTAssertFalse(decoded.failClosed)
+    }
+
+    func testFailClosedRefusesEveryEffectAndSchedulesEverySend() {
+        let settings = BeyGramStealthSettings.failClosedFallback
+        XCTAssertFalse(settings.allows(.readHistory, chatPeerId: 1))
+        XCTAssertFalse(settings.allows(.typing, chatPeerId: 1))
+        XCTAssertFalse(settings.allows(.storyView, chatPeerId: 1))
+        XCTAssertFalse(settings.allows(.onlinePresence, chatPeerId: nil))
+        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: nil, nowSeconds: 1000), .scheduled(1015))
+        XCTAssertEqual(settings.sendDecision(explicitScheduleTime: nil, unschedulableReason: .secretChat, nowSeconds: 1000), .refused(.secretChat))
+        // A chat exception does not lift a fail-closed refusal, as on Android.
+        let excepted = BeyGramStealthSettings(chatModes: ["1": .allow], failClosed: true)
+        XCTAssertFalse(excepted.allows(.typing, chatPeerId: 1))
+    }
+
+    func testUnreadableStoredSettingsFailClosedUntilTheNextValidWrite() throws {
+        let (defaults, suite) = try temporaryDefaults()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        defaults.set(Data("not json".utf8), forKey: "beygram.stealth.settings.1")
+        let store = BeyGramStealthStore(defaults: defaults)
+        XCTAssertTrue(store.settings(accountPeerId: 1).failClosed)
+        XCTAssertFalse(store.settings(accountPeerId: 1).allows(.typing, chatPeerId: nil))
+        XCTAssertFalse(store.settings(accountPeerId: 2).failClosed)
+        store.update(accountPeerId: 1) { $0.hideTyping = false }
+        XCTAssertFalse(store.settings(accountPeerId: 1).failClosed)
+        XCTAssertTrue(store.settings(accountPeerId: 1).allows(.typing, chatPeerId: nil))
     }
 }

@@ -16,6 +16,11 @@ public enum BeyGramLocalizationTables {
     ]
 
     private static let englishStrings: [BeyGramStringKey: String] = [
+        // BG Wave local network hint
+        .bgWaveLocalNetworkTitle: "BG Wave cannot connect",
+        .bgWaveLocalNetworkMessage: "BG Wave may be blocked because BeyGram cannot reach your local network. In Settings, open BeyGram and turn on Local Network, then try again.",
+        .bgWaveLocalNetworkSettings: "Open Settings",
+        .bgWaveLocalNetworkNotNow: "Not now",
         // Common
         .commonBack: "Back",
         .commonCancel: "Cancel",
@@ -307,6 +312,11 @@ public enum BeyGramLocalizationTables {
     ]
 
     private static let russianStrings: [BeyGramStringKey: String] = [
+        // BG Wave local network hint
+        .bgWaveLocalNetworkTitle: "BG Wave не может подключиться",
+        .bgWaveLocalNetworkMessage: "BG Wave может быть заблокирован: BeyGram не может обращаться к локальной сети. В Настройках откройте BeyGram и включите «Локальная сеть», затем попробуйте снова.",
+        .bgWaveLocalNetworkSettings: "Открыть настройки",
+        .bgWaveLocalNetworkNotNow: "Не сейчас",
         // Common
         .commonBack: "Назад",
         .commonCancel: "Отмена",

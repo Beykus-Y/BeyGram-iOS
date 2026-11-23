@@ -37,6 +37,8 @@ public final class BeyGramStealthStore: @unchecked Sendable {
         let previous = self.cache[accountPeerId] ?? BeyGramStealthStore.load(defaults: self.defaults, accountPeerId: accountPeerId)
         var settings = previous
         transform(&settings)
+        // A valid write clears the fail-closed state: the stored values are trusted again once they are rewritten.
+        settings.failClosed = false
         self.cache[accountPeerId] = settings
         if let data = try? JSONEncoder().encode(settings) {
             self.defaults.set(data, forKey: BeyGramStealthStore.storageKey(accountPeerId: accountPeerId))
@@ -53,8 +55,13 @@ public final class BeyGramStealthStore: @unchecked Sendable {
     }
 
     private static func load(defaults: UserDefaults, accountPeerId: Int64) -> BeyGramStealthSettings {
-        guard let data = defaults.data(forKey: BeyGramStealthStore.storageKey(accountPeerId: accountPeerId)), let settings = try? JSONDecoder().decode(BeyGramStealthSettings.self, from: data) else {
+        guard let data = defaults.data(forKey: BeyGramStealthStore.storageKey(accountPeerId: accountPeerId)) else {
             return BeyGramStealthSettings()
+        }
+        // Stored data that cannot be read may hide protection the user turned on, so everything stays refused until a valid
+        // write (Android's StealthSettingsStore does the same).
+        guard let settings = try? JSONDecoder().decode(BeyGramStealthSettings.self, from: data) else {
+            return BeyGramStealthSettings.failClosedFallback
         }
         return settings
     }

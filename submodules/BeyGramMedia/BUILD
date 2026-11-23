@@ -81,6 +81,20 @@ cc_library(
     ],
 )
 
+# BG Wave adapter sources for BGWaveCore (submodules/BeyGramMedia/BGWaveCore). They are not part of the
+# BGMediaCore library above: the WebRTC and libopus adapters have their own dependencies. The paths are listed
+# one by one, so a moved or missing file fails the build instead of exporting nothing.
+filegroup(
+    name = "BGWaveAdapterSources",
+    srcs = [
+        "BGMediaCore/adapters/wave_webrtc/include/bgmedia/wave/WebRtcWaveTransport.hpp",
+        "BGMediaCore/adapters/wave_webrtc/src/WebRtcWaveTransport.cpp",
+        "BGMediaCore/adapters/wave_opus/include/bgmedia/wave/OpusWaveCodec.hpp",
+        "BGMediaCore/adapters/wave_opus/src/OpusWaveCodec.cpp",
+    ],
+    visibility = ["//submodules/BeyGramMedia:__subpackages__"],
+)
+
 # Pure C++ PCM limits for the iOS track pipeline. The host test runs with `bazel test` on a Mac.
 cc_library(
     name = "BGMediaPcmLimits",
@@ -110,6 +124,74 @@ cc_test(
     deps = [":BGMediaMixState"],
 )
 
+# Realtime handoff of the host tap into BGMixPlayer's render block. Host test as above; the header also
+# sits in the BeyGramMedia srcs glob, so the Objective-C++ file includes it from Sources/.
+cc_library(
+    name = "BGMixPcmTapSlot",
+    hdrs = ["Sources/BGMixPcmTapSlot.hpp"],
+    visibility = ["//visibility:private"],
+)
+
+cc_test(
+    name = "BGMixPcmTapSlotTests",
+    srcs = ["Tests/BGMixPcmTapSlotTests.cpp"],
+    copts = ["-std=c++20"],
+    deps = [":BGMixPcmTapSlot"],
+)
+
+cc_library(
+    name = "BGMediaMixPreparation",
+    srcs = ["Sources/BGMediaMixPreparation.cpp"],
+    hdrs = [
+        "Sources/BGMediaMixPreparation.hpp",
+        "Sources/BGMediaPcmLimits.hpp",
+    ],
+    copts = ["-std=c++20"],
+    deps = [":BGMediaCore"],
+    visibility = ["//visibility:private"],
+)
+
+cc_test(
+    name = "BGMediaMixSessionTransitionTests",
+    srcs = ["Tests/BGMediaMixSessionTransitionTests.cpp"],
+    copts = ["-std=c++20"],
+    deps = [
+        ":BGMediaCore",
+        ":BGMediaMixPreparation",
+        ":BGMediaMixState",
+    ],
+)
+
+objc_library(
+    name = "BGMediaAVFoundationDecoder",
+    srcs = ["Sources/BGMediaAVFoundationDecoder.mm"],
+    hdrs = [
+        "Sources/BGMediaAVFoundationDecoder.hpp",
+        "Sources/BGMediaMixPreparation.hpp",
+        "Sources/BGMediaPcmLimits.hpp",
+    ],
+    copts = [
+        "-std=c++20",
+        "-fobjc-arc",
+    ],
+    sdk_frameworks = [
+        "Foundation",
+        "AVFoundation",
+        "CoreMedia",
+    ],
+    visibility = ["//visibility:private"],
+    deps = [":BGMediaCore"],
+)
+
+cc_test(
+    name = "BGMediaAVFoundationDecoderTests",
+    srcs = ["Tests/BGMediaAVFoundationDecoderTests.cpp"],
+    copts = [
+        "-std=c++20",
+    ],
+    deps = [":BGMediaAVFoundationDecoder"],
+)
+
 objc_library(
     name = "BeyGramMedia",
     enable_modules = True,
@@ -133,6 +215,7 @@ objc_library(
     sdk_frameworks = [
         "Foundation",
         "AVFoundation",
+        "CoreMedia",
         "QuartzCore",
         "UIKit",
         "UniformTypeIdentifiers",
@@ -142,5 +225,35 @@ objc_library(
     ],
     deps = [
         ":BGMediaCore",
+    ],
+)
+
+# BG Wave adapters for the iOS session layer (stage 3 in docs/bg-wave-ios.md). Each adapter is its own target, because
+# its header has to be in `hdrs` to be visible to //submodules/BeyGramMedia/BGWaveListener, and the filegroup above
+# cannot split headers from sources. The files are the ones BGWaveAdapterSources lists.
+cc_library(
+    name = "BGWaveOpusAdapter",
+    srcs = ["BGMediaCore/adapters/wave_opus/src/OpusWaveCodec.cpp"],
+    hdrs = ["BGMediaCore/adapters/wave_opus/include/bgmedia/wave/OpusWaveCodec.hpp"],
+    includes = ["BGMediaCore/adapters/wave_opus/include"],
+    copts = ["-std=c++20"],
+    visibility = ["//submodules/BeyGramMedia:__subpackages__"],
+    deps = [
+        ":BGMediaCore",
+        "//third-party/opus:opus",
+    ],
+)
+
+# libdatachannel sets -Drtc=bgrtc through its `defines`, so the adapter's rtc:: names resolve to bgrtc:: here too.
+cc_library(
+    name = "BGWaveWebRtcAdapter",
+    srcs = ["BGMediaCore/adapters/wave_webrtc/src/WebRtcWaveTransport.cpp"],
+    hdrs = ["BGMediaCore/adapters/wave_webrtc/include/bgmedia/wave/WebRtcWaveTransport.hpp"],
+    includes = ["BGMediaCore/adapters/wave_webrtc/include"],
+    copts = ["-std=c++20"],
+    visibility = ["//submodules/BeyGramMedia:__subpackages__"],
+    deps = [
+        ":BGMediaCore",
+        "//third-party/libdatachannel:libdatachannel",
     ],
 )
