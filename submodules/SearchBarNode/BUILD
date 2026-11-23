@@ -16,6 +16,7 @@ swift_library(
         "//submodules/TelegramPresentationData:TelegramPresentationData",
         "//submodules/TelegramCore:TelegramCore",
         "//submodules/ActivityIndicator:ActivityIndicator",
+        "//submodules/BeyGramAppearance:BeyGramAppearance",
         "//submodules/AppBundle:AppBundle",
         "//submodules/ComponentFlow:ComponentFlow",
         "//submodules/AvatarNode:AvatarNode",
