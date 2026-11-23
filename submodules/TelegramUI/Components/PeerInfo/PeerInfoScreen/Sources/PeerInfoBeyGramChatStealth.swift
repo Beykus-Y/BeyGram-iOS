@@ -13,7 +13,7 @@ func beyGramChatStealthRowVisible() -> Bool {
     return BeyGramSettings.shared.isEnabled(.privacyPolicy)
 }
 
-func beyGramChatStealthMode(accountPeerId: Int64, chatPeerId: PeerId) -> BeyGramStealthChatMode {
+func beyGramChatStealthMode(accountPeerId: Int64, chatPeerId: EnginePeer.Id) -> BeyGramStealthChatMode {
     return BeyGramStealthStore.shared.settings(accountPeerId: accountPeerId).chatModes[String(chatPeerId.toInt64())] ?? .inherit
 }
 
@@ -29,7 +29,7 @@ func beyGramChatStealthModeTitle(_ mode: BeyGramStealthChatMode) -> String {
 }
 
 /// Opens the choice of the per-chat mode. The chosen mode is stored per account and per chat; `inherit` removes the override.
-func presentBeyGramChatStealthSheet(accountPeerId: Int64, chatPeerId: PeerId, presentationData: PresentationData, controller: ViewController?) {
+func presentBeyGramChatStealthSheet(accountPeerId: Int64, chatPeerId: EnginePeer.Id, presentationData: PresentationData, controller: ViewController?) {
     guard let controller else {
         return
     }
