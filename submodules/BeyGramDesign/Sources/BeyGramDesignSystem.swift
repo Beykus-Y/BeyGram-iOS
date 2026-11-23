@@ -4,10 +4,12 @@ import Display
 import SwiftSignalKit
 import TelegramPresentationData
 import AccountContext
+import BeyGramAppearance
 import BeyGramKit
 
 /// Semantic palette derived from the active Telegram `PresentationTheme`, supporting light, dark, and custom themes.
 public struct BeyGramThemePalette {
+    public let design: BeyGramResolvedDesign
     public let isDark: Bool
     public let background: UIColor
     public let cardBackground: UIColor
@@ -26,6 +28,10 @@ public struct BeyGramThemePalette {
     public let separator: UIColor
 
     public init(theme: PresentationTheme) {
+        self.design = BeyGramAppearance.shared.resolvedDesign(
+            reduceTransparency: UIAccessibility.isReduceTransparencyEnabled,
+            reduceMotion: UIAccessibility.isReduceMotionEnabled
+        )
         self.isDark = theme.overallDarkAppearance
         self.background = theme.list.blocksBackgroundColor
         self.cardBackground = theme.list.itemBlocksBackgroundColor
@@ -103,8 +109,41 @@ open class BeyGramCardView: UIView {
     }
 
     public func apply(palette: BeyGramThemePalette) {
-        self.backgroundColor = palette.cardBackground
-        self.layer.borderColor = palette.separator.withAlphaComponent(palette.isDark ? 0.35 : 0.25).cgColor
+        let design = palette.design
+        self.layer.cornerRadius = design.cardCornerRadius
+        switch design.treatment {
+        case .original, .flat:
+            self.backgroundColor = palette.cardBackground
+            self.layer.borderColor = palette.separator.withAlphaComponent(palette.isDark ? 0.35 : 0.25).cgColor
+            self.layer.borderWidth = 1.0 / UIScreen.main.scale
+            self.layer.shadowOpacity = 0.0
+        case .elevated:
+            self.backgroundColor = palette.cardBackground
+            self.layer.borderColor = palette.separator.withAlphaComponent(palette.isDark ? 0.45 : 0.35).cgColor
+            self.layer.borderWidth = 1.0 / UIScreen.main.scale
+            self.layer.shadowColor = UIColor.black.cgColor
+            self.layer.shadowOpacity = palette.isDark ? 0.32 : 0.14
+            self.layer.shadowRadius = design.cardElevation * 2.0
+            self.layer.shadowOffset = CGSize(width: 0, height: design.cardElevation)
+        case .tonal:
+            self.backgroundColor = palette.cardBackground
+            self.layer.borderColor = palette.accent.withAlphaComponent(palette.isDark ? 0.28 : 0.18).cgColor
+            self.layer.borderWidth = 1.0
+            self.layer.shadowOpacity = 0.0
+        case .glass:
+            self.backgroundColor = palette.cardBackground.withAlphaComponent(design.surfaceAlpha)
+            self.layer.borderColor = (palette.isDark ? UIColor.white : palette.separator).withAlphaComponent(palette.isDark ? 0.22 : 0.35).cgColor
+            self.layer.borderWidth = 1.0 / UIScreen.main.scale
+            self.layer.shadowColor = UIColor.black.cgColor
+            self.layer.shadowOpacity = palette.isDark ? 0.22 : 0.08
+            self.layer.shadowRadius = 8.0
+            self.layer.shadowOffset = CGSize(width: 0, height: 3.0)
+        case .layered:
+            self.backgroundColor = palette.cardBackground
+            self.layer.borderColor = palette.separator.withAlphaComponent(palette.isDark ? 0.50 : 0.40).cgColor
+            self.layer.borderWidth = 1.0 / UIScreen.main.scale
+            self.layer.shadowOpacity = 0.0
+        }
     }
 }
 
@@ -147,6 +186,7 @@ public final class BeyGramActionButton: UIButton {
     }
 
     private var buttonStyle: Style
+    private var motionSpeedScale: CGFloat = 1.0
     private let spinner = UIActivityIndicatorView(style: .medium)
     private var storedTitle: String = ""
 
@@ -178,6 +218,8 @@ public final class BeyGramActionButton: UIButton {
         if let style {
             self.buttonStyle = style
         }
+        self.motionSpeedScale = palette.design.motionSpeedScale
+        self.layer.cornerRadius = palette.design.buttonCornerRadius
         self.storedTitle = title
         self.isEnabled = isEnabled && !isLoading
         self.alpha = isEnabled ? 1.0 : 0.52
@@ -208,13 +250,23 @@ public final class BeyGramActionButton: UIButton {
     }
 
     @objc private func touchDown() {
-        UIView.animate(withDuration: 0.14, delay: 0, options: [.allowUserInteraction, .curveEaseOut]) {
+        let duration = 0.14 * Double(self.motionSpeedScale)
+        if duration <= 0.001 {
+            self.transform = CGAffineTransform(scaleX: 0.97, y: 0.97)
+            return
+        }
+        UIView.animate(withDuration: duration, delay: 0, options: [.allowUserInteraction, .curveEaseOut]) {
             self.transform = CGAffineTransform(scaleX: 0.97, y: 0.97)
         }
     }
 
     @objc private func touchUp() {
-        UIView.animate(withDuration: 0.24, delay: 0, usingSpringWithDamping: 0.7, initialSpringVelocity: 0.5, options: [.allowUserInteraction]) {
+        let duration = 0.24 * Double(self.motionSpeedScale)
+        if duration <= 0.001 {
+            self.transform = .identity
+            return
+        }
+        UIView.animate(withDuration: duration, delay: 0, usingSpringWithDamping: 0.7, initialSpringVelocity: 0.5, options: [.allowUserInteraction]) {
             self.transform = .identity
         }
     }
@@ -411,6 +463,8 @@ open class BeyGramScrollViewController: ViewController {
     public let stackView = UIStackView()
     private var presentationDisposable: Disposable?
     private var didSetInitialScrollOffset: Bool = false
+    private var stackLeadingConstraint: NSLayoutConstraint?
+    private var stackTrailingConstraint: NSLayoutConstraint?
     public private(set) var presentationData: PresentationData
 
     public init(context: AccountContext) {
@@ -446,6 +500,11 @@ open class BeyGramScrollViewController: ViewController {
         self.stackView.translatesAutoresizingMaskIntoConstraints = false
         self.scrollView.addSubview(self.stackView)
 
+        let leading = self.stackView.leadingAnchor.constraint(equalTo: self.scrollView.frameLayoutGuide.leadingAnchor, constant: 16)
+        let trailing = self.stackView.trailingAnchor.constraint(equalTo: self.scrollView.frameLayoutGuide.trailingAnchor, constant: -16)
+        self.stackLeadingConstraint = leading
+        self.stackTrailingConstraint = trailing
+
         NSLayoutConstraint.activate([
             self.scrollView.topAnchor.constraint(equalTo: self.displayNode.view.topAnchor),
             self.scrollView.bottomAnchor.constraint(equalTo: self.displayNode.view.bottomAnchor),
@@ -454,8 +513,8 @@ open class BeyGramScrollViewController: ViewController {
 
             self.stackView.topAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.topAnchor, constant: 16),
             self.stackView.bottomAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.bottomAnchor, constant: -24),
-            self.stackView.leadingAnchor.constraint(equalTo: self.scrollView.frameLayoutGuide.leadingAnchor, constant: 16),
-            self.stackView.trailingAnchor.constraint(equalTo: self.scrollView.frameLayoutGuide.trailingAnchor, constant: -16)
+            leading,
+            trailing
         ])
 
         self.presentationDisposable = (self.context.sharedContext.presentationData
@@ -497,5 +556,8 @@ open class BeyGramScrollViewController: ViewController {
     open func applyPresentationData(_ presentationData: PresentationData) {
         let palette = BeyGramThemePalette(theme: presentationData.theme)
         self.displayNode.backgroundColor = palette.background
+        self.stackView.spacing = palette.design.sectionGap
+        self.stackLeadingConstraint?.constant = palette.design.screenPadding
+        self.stackTrailingConstraint?.constant = -palette.design.screenPadding
     }
 }

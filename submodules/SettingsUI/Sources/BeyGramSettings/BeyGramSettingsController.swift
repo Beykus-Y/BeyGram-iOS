@@ -199,9 +199,7 @@ private final class BeyGramSettingsHubViewControllerImpl: BeyGramScrollViewContr
         self.interfaceHeader.textColor = palette.secondaryText
         self.interfaceCard.apply(palette: palette)
 
-        let styleValue = BeyGramAppearance.shared.isEnabled
-            ? l10n.string(.appearanceStyleBeyGram, languageCode: lang)
-            : l10n.string(.appearanceStyleTelegram, languageCode: lang)
+        let styleValue = beyGramStyleDisplayName(BeyGramAppearance.shared.style, languageCode: lang)
         self.appearanceRow.configure(
             iconName: "paintbrush.fill",
             iconTint: palette.accent,

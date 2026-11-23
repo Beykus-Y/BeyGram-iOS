@@ -15,6 +15,7 @@ swift_library(
         "//submodules/TelegramPresentationData:TelegramPresentationData",
         "//submodules/PresentationDataUtils:PresentationDataUtils",
         "//submodules/AccountContext:AccountContext",
+        "//submodules/BeyGramAppearance:BeyGramAppearance",
         "//submodules/BeyGramKit:BeyGramKit",
     ],
     visibility = [
