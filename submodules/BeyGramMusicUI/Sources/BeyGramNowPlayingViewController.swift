@@ -47,6 +47,7 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
     private let playPauseButton = UIButton(type: .system)
     private let nextButton = UIButton(type: .system)
     private let mixSettingsButton = UIButton(type: .system)
+    private let sleepTimerButton = UIButton(type: .system)
     private let errorLabel = BeyGramTypography.makeLabel(style: .footnote, weight: .medium, lines: 0)
 
     // Queue Panel
@@ -145,6 +146,8 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
 
         self.mixSettingsButton.setImage(UIImage(systemName: "slider.horizontal.3", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
         self.mixSettingsButton.addTarget(self, action: #selector(self.mixSettingsTapped), for: .touchUpInside)
+        self.sleepTimerButton.setImage(UIImage(systemName: "moon.zzz", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
+        self.sleepTimerButton.addTarget(self, action: #selector(self.sleepTimerTapped), for: .touchUpInside)
 
         NSLayoutConstraint.activate([
             self.playPauseButton.widthAnchor.constraint(equalToConstant: 64),
@@ -152,10 +155,12 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
             self.nextButton.widthAnchor.constraint(equalToConstant: 48),
             self.nextButton.heightAnchor.constraint(equalToConstant: 48),
             self.mixSettingsButton.widthAnchor.constraint(equalToConstant: 48),
-            self.mixSettingsButton.heightAnchor.constraint(equalToConstant: 48)
+            self.mixSettingsButton.heightAnchor.constraint(equalToConstant: 48),
+            self.sleepTimerButton.widthAnchor.constraint(equalToConstant: 48),
+            self.sleepTimerButton.heightAnchor.constraint(equalToConstant: 48)
         ])
 
-        let controlsRow = UIStackView(arrangedSubviews: [UIView(), self.mixSettingsButton, self.playPauseButton, self.nextButton, UIView()])
+        let controlsRow = UIStackView(arrangedSubviews: [UIView(), self.sleepTimerButton, self.mixSettingsButton, self.playPauseButton, self.nextButton, UIView()])
         controlsRow.axis = .horizontal
         controlsRow.alignment = .center
         controlsRow.spacing = 24
@@ -276,6 +281,7 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
         self.nextButton.tintColor = palette.primaryText
         self.nextButton.isEnabled = !self.currentState.queue.isEmpty
         self.mixSettingsButton.tintColor = palette.accent
+        self.sleepTimerButton.tintColor = palette.accent
 
         if let err = self.currentState.lastError, !err.isEmpty {
             self.errorLabel.isHidden = false
@@ -447,6 +453,34 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
 
     @objc private func mixSettingsTapped() {
         (self.navigationController as? NavigationController)?.pushViewController(beyGramMixSettingsController(context: self.context))
+    }
+
+    /// Sleep timer choice (issue #140): pauses after the chosen minutes, or cancels the running timer.
+    @objc private func sleepTimerTapped() {
+        let isRu = self.presentationData.strings.primaryComponent.languageCode.lowercased().hasPrefix("ru")
+        let sheet = ActionSheetController(presentationData: self.presentationData)
+        var items: [ActionSheetItem] = [
+            ActionSheetTextItem(title: isRu ? "Таймер сна" : "Sleep timer")
+        ]
+        for minutes in BeyGramSleepTimerState.minuteChoices {
+            items.append(ActionSheetButtonItem(title: isRu ? "\(minutes) мин" : "\(minutes) min", color: .accent, action: { [weak sheet] in
+                sheet?.dismissAnimated()
+                BeyGramMusicSession.shared.setSleepTimerMinutes(minutes)
+            }))
+        }
+        items.append(ActionSheetButtonItem(title: isRu ? "Выключить таймер" : "Turn off timer", color: .destructive, action: { [weak sheet] in
+            sheet?.dismissAnimated()
+            BeyGramMusicSession.shared.cancelSleepTimer()
+        }))
+        sheet.setItemGroups([
+            ActionSheetItemGroup(items: items),
+            ActionSheetItemGroup(items: [
+                ActionSheetButtonItem(title: self.presentationData.strings.Common_Cancel, color: .accent, font: .bold, action: { [weak sheet] in
+                    sheet?.dismissAnimated()
+                })
+            ])
+        ])
+        self.present(sheet, in: .window(.root))
     }
 
     @objc private func addFilesTapped() {
