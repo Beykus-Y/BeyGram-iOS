@@ -20,6 +20,7 @@ swift_library(
         "//submodules/Components/ComponentDisplayAdapters",
         "//submodules/TelegramUI/Components/GlassBackgroundComponent",
         "//submodules/TelegramUI/Components/LiquidLens",
+        "//submodules/BeyGramAppearance",
     ],
     visibility = [
         "//visibility:public",

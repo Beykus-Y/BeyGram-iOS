@@ -9,6 +9,7 @@ import AccountContext
 import GlassBackgroundComponent
 import ComponentFlow
 import ComponentDisplayAdapters
+import BeyGramAppearance
 
 private final class ItemNodeDeleteButtonNode: HighlightableButtonNode {
     private let pressed: () -> Void
@@ -703,8 +704,24 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
         transition.updateFrame(view: self.backgroundContainerView, frame: CGRect(origin: CGPoint(x: containerSideInset + 16.0, y: 0.0), size: backgroundSize))
         self.backgroundContainerView.update(size: backgroundSize, isDark: presentationData.theme.overallDarkAppearance, transition: ComponentTransition(transition))
         
+        let filterDesign = BeyGramAppearance.shared.resolvedDesign()
+        let filterContainerCornerRadius: CGFloat
+        if filterDesign.isBeyGramActive {
+            switch filterDesign.style {
+            case .material2:
+                filterContainerCornerRadius = 4.0
+            case .material3:
+                filterContainerCornerRadius = 16.0
+            case .signature, .beygramDefault:
+                filterContainerCornerRadius = 14.0
+            case .liquidGlass, .telegram:
+                filterContainerCornerRadius = backgroundSize.height * 0.5
+            }
+        } else {
+            filterContainerCornerRadius = backgroundSize.height * 0.5
+        }
         transition.updateFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: backgroundSize))
-        self.backgroundView.update(size: backgroundSize, cornerRadius: backgroundSize.height * 0.5, isDark: presentationData.theme.overallDarkAppearance, tintColor: .init(kind: .panel), isInteractive: true, transition: ComponentTransition(transition))
+        self.backgroundView.update(size: backgroundSize, cornerRadius: filterContainerCornerRadius, isDark: presentationData.theme.overallDarkAppearance, tintColor: .init(kind: .panel), isInteractive: true, transition: ComponentTransition(transition))
         
         var isEditing = isEditing
         if isReordering {
@@ -715,8 +732,12 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
         let previousScrollBounds = self.scrollNode.bounds
         let previousContentWidth = self.scrollNode.view.contentSize.width
         
-        if self.currentParams?.presentationData.theme !== presentationData.theme {
-            self.selectedBackgroundNode.image = generateStretchableFilledCircleImage(diameter: 36.0, color: presentationData.theme.chatList.itemHighlightedBackgroundColor)
+        if self.currentParams?.presentationData.theme !== presentationData.theme || filterDesign.isBeyGramActive {
+            if filterDesign.isBeyGramActive {
+                self.selectedBackgroundNode.image = generateFilledRoundedRectImage(size: CGSize(width: 36.0, height: 36.0), cornerRadius: filterDesign.chipCornerRadius, color: presentationData.theme.chatList.itemHighlightedBackgroundColor)?.stretchableImage(withLeftCapWidth: 18, topCapHeight: 18)
+            } else {
+                self.selectedBackgroundNode.image = generateStretchableFilledCircleImage(diameter: 36.0, color: presentationData.theme.chatList.itemHighlightedBackgroundColor)
+            }
         }
         
         if isReordering {

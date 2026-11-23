@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import Display
 import AppBundle
+import BeyGramAppearance
 
 public func generateItemListCheckIcon(color: UIColor) -> UIImage? {
     return generateImage(CGSize(width: 12.0, height: 10.0), rotatedContext: { size, context in
@@ -363,6 +364,7 @@ public struct PresentationResourcesItemList {
         if !top && !bottom {
             return nil
         }
+        let design = BeyGramAppearance.shared.resolvedDesign()
         let key: PresentationResourceKey
         if top && bottom {
             key = glass ? PresentationResourceKey.itemListCornersBothGlass : PresentationResourceKey.itemListCornersBoth
@@ -371,7 +373,8 @@ public struct PresentationResourcesItemList {
         } else {
             key = glass ? PresentationResourceKey.itemListCornersBottomGlass : PresentationResourceKey.itemListCornersBottom
         }
-        return theme.image(key.rawValue, { theme in
+        let cacheKey = design.isBeyGramActive ? (key.rawValue &+ UInt32(design.style.rawValue) &* 100003) : key.rawValue
+        return theme.image(cacheKey, { theme in
             return generateImage(CGSize(width: 56.0, height: 56.0), rotatedContext: { (size, context) in
                 let bounds = CGRect(origin: CGPoint(), size: size)
                 context.setFillColor(theme.list.blocksBackgroundColor.cgColor)
@@ -388,7 +391,7 @@ public struct PresentationResourcesItemList {
                     corners.insert(.bottomLeft)
                     corners.insert(.bottomRight)
                 }
-                let cornerRadius: CGFloat = glass ? 26.0 : 11.0
+                let cornerRadius: CGFloat = design.isBeyGramActive ? design.groupCardCornerRadius : (glass ? 26.0 : 11.0)
                 let path = UIBezierPath(roundedRect: bounds, byRoundingCorners: corners, cornerRadii: CGSize(width: cornerRadius, height: cornerRadius))
                 context.addPath(path.cgPath)
                 context.fillPath()

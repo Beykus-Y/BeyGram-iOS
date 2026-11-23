@@ -14,6 +14,7 @@ import AppBundle
 import SearchBarNode
 import TabSelectionRecognizer
 import TabBarLayout
+import BeyGramAppearance
 
 /// The items VoiceOver may reach: while search is active every item but the selected one is faded out.
 func tabBarAccessibleItemIds<Id: Hashable>(ids: [Id], selectedId: Id?, isSearchActive: Bool) -> [Id] {
@@ -169,7 +170,9 @@ public final class NavigationSearchView: UIView {
         transition.setFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: backgroundSize))
         let alphaTransition: ComponentTransition = transition.animation.isImmediate ? .immediate : .easeInOut(duration: 0.25)
 
-        self.backgroundView.update(size: backgroundSize, cornerRadius: backgroundSize.height * 0.5, isDark: params.theme.overallDarkAppearance, tintColor: .init(kind: .untinted), isInteractive: true, transition: transition)
+        let searchDesign = BeyGramAppearance.shared.resolvedDesign()
+        let searchCornerRadius = searchDesign.isBeyGramActive ? searchDesign.searchCornerRadius : backgroundSize.height * 0.5
+        self.backgroundView.update(size: backgroundSize, cornerRadius: searchCornerRadius, isDark: params.theme.overallDarkAppearance, tintColor: .init(kind: .untinted), isInteractive: true, transition: transition)
 
         if self.iconView.image == nil {
             self.iconView.image = UIImage(bundleImageName: "Navigation/Search")?.withRenderingMode(.alwaysTemplate)
@@ -1092,7 +1095,25 @@ public final class TabBarComponent: Component {
                 lensSelectionFrame = CGRect(x: 0.0, y: 0.0, width: 48.0, height: 48.0)
             }
             
-            self.liquidLensView.update(size: lensSize, cornerRadius: component.axis == .vertical ? lensSize.width * 0.5 : nil, selectionOrigin: lensSelectionFrame.origin, selectionSize: lensSelectionFrame.size, inset: 4.0, isDark: component.theme.overallDarkAppearance, isLifted: self.selectionGestureState != nil && component.isLiftedStateEnabled, isCollapsed: isLensCollapsed, transition: transition)
+            let tabDesign = BeyGramAppearance.shared.resolvedDesign()
+            let styleTabCornerRadius: CGFloat?
+            if tabDesign.isBeyGramActive {
+                switch tabDesign.style {
+                case .material2:
+                    styleTabCornerRadius = 4.0
+                case .material3:
+                    styleTabCornerRadius = 16.0
+                case .signature:
+                    styleTabCornerRadius = 14.0
+                case .beygramDefault:
+                    styleTabCornerRadius = 20.0
+                case .liquidGlass, .telegram:
+                    styleTabCornerRadius = nil
+                }
+            } else {
+                styleTabCornerRadius = nil
+            }
+            self.liquidLensView.update(size: lensSize, cornerRadius: component.axis == .vertical ? lensSize.width * 0.5 : styleTabCornerRadius, selectionOrigin: lensSelectionFrame.origin, selectionSize: lensSelectionFrame.size, inset: 4.0, isDark: component.theme.overallDarkAppearance, isLifted: self.selectionGestureState != nil && component.isLiftedStateEnabled, isCollapsed: isLensCollapsed, transition: transition)
 
             var size = tabsSize
 
