@@ -490,6 +490,8 @@ public final class TabBarComponent: Component {
     /// A horizontal regular bar takes iOS 27's portrait tab bar layout (`tabBarSystemItemsLayout`); without it, its
     /// items share the available width (`tabBarItemsLayout`), as where iOS would switch to its wide bar.
     public let usesSystemLayout: Bool
+    public let beyGramStyle: BeyGramStyle
+    public let beyGramFloatingNavigation: Bool
 
     public init(
         theme: PresentationTheme,
@@ -502,7 +504,9 @@ public final class TabBarComponent: Component {
         outerInsets: UIEdgeInsets,
         axis: Axis,
         isCompact: Bool,
-        usesSystemLayout: Bool = true
+        usesSystemLayout: Bool = true,
+        beyGramStyle: BeyGramStyle = BeyGramAppearance.shared.style,
+        beyGramFloatingNavigation: Bool = BeyGramAppearance.shared.resolvedDesign().floatingNavigation
     ) {
         self.theme = theme
         self.tintSelectedItem = tintSelectedItem
@@ -515,6 +519,8 @@ public final class TabBarComponent: Component {
         self.axis = axis
         self.isCompact = isCompact
         self.usesSystemLayout = usesSystemLayout
+        self.beyGramStyle = beyGramStyle
+        self.beyGramFloatingNavigation = beyGramFloatingNavigation
     }
     
     public static func ==(lhs: TabBarComponent, rhs: TabBarComponent) -> Bool {
@@ -549,6 +555,12 @@ public final class TabBarComponent: Component {
             return false
         }
         if lhs.usesSystemLayout != rhs.usesSystemLayout {
+            return false
+        }
+        if lhs.beyGramStyle != rhs.beyGramStyle {
+            return false
+        }
+        if lhs.beyGramFloatingNavigation != rhs.beyGramFloatingNavigation {
             return false
         }
         return true
@@ -944,13 +956,20 @@ public final class TabBarComponent: Component {
             } else {
                 itemsLayout = tabBarItemsLayout(axis: component.axis, isCompact: component.isCompact, unboundItemWidths: titleWidths.map { $0 + 10.0 * 2.0 }, availableLength: availableLength)
             }
-            let tabsSize = itemsLayout.size
+            let isPinnedBeyGram = component.axis == .horizontal && component.beyGramStyle != .telegram && !component.beyGramFloatingNavigation
+            let pinnedHorizontalOffset: CGFloat = isPinnedBeyGram ? max(0.0, floor((availableLength - itemsLayout.size.width) * 0.5)) : 0.0
+            let tabsSize: CGSize = isPinnedBeyGram
+                ? CGSize(width: availableLength, height: itemsLayout.size.height + component.outerInsets.bottom)
+                : itemsLayout.size
 
             var selectedItemFrame: CGRect?
             for index in 0 ..< component.items.count {
                 let item = component.items[index]
                 
                 var itemFrame = itemsLayout.itemFrames[index]
+                if pinnedHorizontalOffset > 0.0 {
+                    itemFrame.origin.x += pinnedHorizontalOffset
+                }
                 let itemSize = itemFrame.size
                 
                 let itemView: ComponentView<Empty>
@@ -1082,9 +1101,10 @@ public final class TabBarComponent: Component {
             transition.setFrame(view: self.liquidLensView, frame: CGRect(origin: CGPoint(), size: tabsSize))
             
             var lensSize: CGSize = tabsSize
+            let lensBarSize = isPinnedBeyGram ? CGSize(width: tabsSize.width, height: itemsLayout.size.height) : tabsSize
             var lensSelectionFrame = tabBarLensSelectionFrame(
                 axis: component.axis,
-                barSize: tabsSize,
+                barSize: lensBarSize,
                 selectedItemFrame: selectedItemFrame,
                 drag: self.selectionGestureState.map { (origin: $0.current, itemLength: $0.itemLength) }
             )
@@ -1095,10 +1115,11 @@ public final class TabBarComponent: Component {
                 lensSelectionFrame = CGRect(x: 0.0, y: 0.0, width: 48.0, height: 48.0)
             }
             
-            let tabDesign = BeyGramAppearance.shared.resolvedDesign()
             let styleTabCornerRadius: CGFloat?
-            if tabDesign.isBeyGramActive {
-                switch tabDesign.style {
+            if isPinnedBeyGram {
+                styleTabCornerRadius = 0.0
+            } else if component.beyGramStyle != .telegram {
+                switch component.beyGramStyle {
                 case .material2:
                     styleTabCornerRadius = 4.0
                 case .material3:

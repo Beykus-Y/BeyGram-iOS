@@ -21,6 +21,7 @@ swift_library(
         "//submodules/TelegramUI/Components/TabBarComponent",
         "//submodules/TelegramUI/Components/TabBarLayout",
         "//submodules/TelegramUI/Components/GlassControls",
+        "//submodules/BeyGramAppearance",
     ],
     visibility = [
         "//visibility:public",

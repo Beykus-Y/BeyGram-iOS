@@ -16,6 +16,8 @@ swift_library(
         "//submodules/UIKitRuntimeUtils",
         "//submodules/AppBundle",
         "//submodules/TelegramUI/Components/MeshTransform",
+        "//submodules/SSignalKit/SwiftSignalKit",
+        "//submodules/BeyGramAppearance",
     ],
     visibility = [
         "//visibility:public",

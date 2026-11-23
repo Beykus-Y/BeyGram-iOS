@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import AsyncDisplayKit
+import SwiftSignalKit
 import Display
 import TelegramPresentationData
 import ComponentFlow
@@ -8,6 +9,7 @@ import ComponentDisplayAdapters
 import TabBarComponent
 import TabBarLayout
 import GlassControls
+import BeyGramAppearance
 
 final class TabBarControllerNode: ASDisplayNode {
     private struct Params: Equatable {
@@ -17,19 +19,25 @@ final class TabBarControllerNode: ASDisplayNode {
         let currentControllerSearchState: ViewController.TabBarSearchState?
         /// The side placement depends on it, and with it the bottom inset the tab gets.
         let itemCount: Int
+        let beyGramStyle: BeyGramStyle
+        let beyGramFloatingNavigation: Bool
         
         init(
             layout: ContainerViewLayout,
             toolbar: Toolbar?,
             isTabBarHidden: Bool,
             currentControllerSearchState: ViewController.TabBarSearchState?,
-            itemCount: Int
+            itemCount: Int,
+            beyGramStyle: BeyGramStyle,
+            beyGramFloatingNavigation: Bool
         ) {
             self.layout = layout
             self.toolbar = toolbar
             self.isTabBarHidden = isTabBarHidden
             self.currentControllerSearchState = currentControllerSearchState
             self.itemCount = itemCount
+            self.beyGramStyle = beyGramStyle
+            self.beyGramFloatingNavigation = beyGramFloatingNavigation
         }
     }
     
@@ -79,6 +87,7 @@ final class TabBarControllerNode: ASDisplayNode {
     private var appliedPlacement: TabBarAppliedPlacement?
     private var isUpdateRequested: Bool = false
     private var isChangingSelectedIndex: Bool = false
+    private var beyGramStyleDisposable: Disposable?
     
     func setCurrentController(_ controller: ViewController?) -> () -> Void {
         guard controller !== self.currentController else {
@@ -140,15 +149,38 @@ final class TabBarControllerNode: ASDisplayNode {
             if self.isUpdateRequested {
                 self.isUpdateRequested = false
                 if let layoutResult = self.layoutResult {
-                    let _ = self.updateImpl(params: layoutResult.params, transition: .immediate)
+                    let design = BeyGramAppearance.shared.resolvedDesign(
+                        reduceTransparency: UIAccessibility.isReduceTransparencyEnabled,
+                        reduceMotion: UIAccessibility.isReduceMotionEnabled
+                    )
+                    let updatedParams = Params(
+                        layout: layoutResult.params.layout,
+                        toolbar: layoutResult.params.toolbar,
+                        isTabBarHidden: self.tabBarHidden,
+                        currentControllerSearchState: self.currentController?.tabBarSearchState,
+                        itemCount: self.tabBarItems.count,
+                        beyGramStyle: design.style,
+                        beyGramFloatingNavigation: design.floatingNavigation
+                    )
+                    let bottomInset = self.updateImpl(params: updatedParams, transition: .immediate)
+                    self.layoutResult = LayoutResult(params: updatedParams, bottomInset: bottomInset)
                 }
             }
         }
+        
+        self.beyGramStyleDisposable = (BeyGramAppearance.shared.designChangedSignal
+        |> deliverOnMainQueue).start(next: { [weak self] _ in
+            self?.requestUpdate()
+        })
         
         self.backgroundColor = theme.list.plainBackgroundColor
         
         //self.addSubnode(self.tabBarNode)
         //self.addSubnode(self.disabledOverlayNode)
+    }
+
+    deinit {
+        self.beyGramStyleDisposable?.dispose()
     }
     
     override func didLoad() {
@@ -191,7 +223,19 @@ final class TabBarControllerNode: ASDisplayNode {
     
     /// The bottom inset the current tab gets, or nil to leave the tab's own.
     func containerLayoutUpdated(_ layout: ContainerViewLayout, toolbar: Toolbar?, transition: ContainedViewLayoutTransition) -> CGFloat? {
-        let params = Params(layout: layout, toolbar: toolbar, isTabBarHidden: self.tabBarHidden, currentControllerSearchState: self.currentController?.tabBarSearchState, itemCount: self.tabBarItems.count)
+        let design = BeyGramAppearance.shared.resolvedDesign(
+            reduceTransparency: UIAccessibility.isReduceTransparencyEnabled,
+            reduceMotion: UIAccessibility.isReduceMotionEnabled
+        )
+        let params = Params(
+            layout: layout,
+            toolbar: toolbar,
+            isTabBarHidden: self.tabBarHidden,
+            currentControllerSearchState: self.currentController?.tabBarSearchState,
+            itemCount: self.tabBarItems.count,
+            beyGramStyle: design.style,
+            beyGramFloatingNavigation: design.floatingNavigation
+        )
         if let layoutResult = self.layoutResult, layoutResult.params == params {
             return layoutResult.bottomInset
         } else {
@@ -232,17 +276,31 @@ final class TabBarControllerNode: ASDisplayNode {
             sideInset = 20.0
         }
 
+        let isPinnedBeyGram = sidePlacement == nil && params.beyGramStyle != .telegram && !params.beyGramFloatingNavigation
+        let isFloatingBeyGram = sidePlacement == nil && params.beyGramStyle != .telegram && params.beyGramFloatingNavigation
+
         let tabBarBottomInset: CGFloat
         let tabBarSideInset: CGFloat
-        if isSystemLayout {
+        let tabBarOuterBottomInset: CGFloat
+        if isPinnedBeyGram {
+            tabBarBottomInset = keyboardBottomInset
+            tabBarSideInset = 0.0
+            tabBarOuterBottomInset = keyboardBottomInset > 0.0 ? 0.0 : params.layout.insets(options: []).bottom
+        } else if isFloatingBeyGram {
+            tabBarBottomInset = max(max(16.0, params.layout.insets(options: []).bottom - 13.0), keyboardBottomInset)
+            tabBarSideInset = 16.0
+            tabBarOuterBottomInset = tabBarBottomInset
+        } else if isSystemLayout {
             // iOS 27 floats the bar at least 21pt above the bottom edge and from the sides (`minimumPlatterInsets`),
             // and higher by as much as the safe area reaches past the home affordance's 21pt allowance in a 34pt
             // portrait inset.
             tabBarBottomInset = max(max(21.0, params.layout.insets(options: []).bottom - 13.0), keyboardBottomInset)
             tabBarSideInset = 21.0
+            tabBarOuterBottomInset = tabBarBottomInset
         } else {
             tabBarBottomInset = max(panelsBottomInset, keyboardBottomInset)
             tabBarSideInset = sideInset
+            tabBarOuterBottomInset = tabBarBottomInset
         }
 
         let previousAppliedPlacement = self.tabBarView.view == nil ? nil : self.appliedPlacement
@@ -334,10 +392,12 @@ final class TabBarControllerNode: ASDisplayNode {
                     )
                 },
                 selectedId: selectedId,
-                outerInsets: UIEdgeInsets(top: 0.0, left: tabBarSideInset, bottom: tabBarBottomInset, right: tabBarSideInset),
+                outerInsets: UIEdgeInsets(top: 0.0, left: tabBarSideInset, bottom: tabBarOuterBottomInset, right: tabBarSideInset),
                 axis: sidePlacement == nil ? .horizontal : .vertical,
                 isCompact: isCompact,
-                usesSystemLayout: !isWide
+                usesSystemLayout: !isWide,
+                beyGramStyle: params.beyGramStyle,
+                beyGramFloatingNavigation: params.beyGramFloatingNavigation
             )),
             environment: {},
             containerSize: sidePlacement?.frame.size ?? CGSize(width: params.layout.size.width - tabBarSideInset * 2.0, height: 100.0)
@@ -345,6 +405,8 @@ final class TabBarControllerNode: ASDisplayNode {
         let tabBarFrame: CGRect
         if let sidePlacement {
             tabBarFrame = self.tabBarHidden ? sidePlacement.hiddenFrame(containerWidth: params.layout.size.width) : sidePlacement.frame
+        } else if isPinnedBeyGram {
+            tabBarFrame = CGRect(origin: CGPoint(x: 0.0, y: params.layout.size.height - (self.tabBarHidden ? 0.0 : (tabBarSize.height + tabBarBottomInset))), size: CGSize(width: params.layout.size.width, height: tabBarSize.height))
         } else {
             let centeredX: CGFloat
             if isSystemLayout {
