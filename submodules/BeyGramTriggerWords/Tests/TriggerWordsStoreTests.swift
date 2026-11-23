@@ -112,7 +112,7 @@ final class TriggerWordsStoreTests: XCTestCase {
     }
 
     func testUnknownRuleModeIsDroppedWithoutLosingValidRules() throws {
-        let kv = InMemoryKV()
+        let kv = MemoryKeyValueStore()
         let json = """
         {
           "rules": [
