@@ -16,7 +16,7 @@ private final class BeyGramWaveViewControllerImpl: BeyGramScrollViewController, 
     private var isListening = false
     private var sessionStatusText: String?
     private var outboundLink: String?
-    private var pollTimer: Timer?
+    private var pollTimer: Foundation.Timer?
     private var lastFailure: BGWaveListenerFailure = .none
     private var shownLocalNetworkHint = false
 
@@ -169,7 +169,7 @@ private final class BeyGramWaveViewControllerImpl: BeyGramScrollViewController, 
 
     private func startPollingSession() {
         self.pollTimer?.invalidate()
-        self.pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+        self.pollTimer = Foundation.Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             guard let self, let session = self.listenerSession else { return }
             if let link = session.pollOutboundInvite(), !link.isEmpty {
                 self.outboundLink = link
