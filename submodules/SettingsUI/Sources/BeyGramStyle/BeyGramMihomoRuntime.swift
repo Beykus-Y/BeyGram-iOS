@@ -94,6 +94,22 @@ public final class BeyGramMihomoRuntime {
         }
     }
 
+    private let connectionDisposable = MetaDisposable()
+
+    /// Feeds the connection state of an account to the controller (issue #141). A later call replaces the earlier one.
+    public func observeTelegramConnection(_ state: Signal<AccountNetworkState, NoError>) {
+        self.connectionDisposable.set((state
+        |> map { state -> Bool in
+            if case .connecting = state {
+                return true
+            }
+            return false
+        }
+        |> distinctUntilChanged).start(next: { [weak self] isConnecting in
+            self?.controller.telegramConnectionChanged(isConnecting: isConnecting)
+        }))
+    }
+
     /// Turns the automatic node switch on or off.
     public func setAutoSelect(_ enabled: Bool) {
         self.controller.setAutoSelect(enabled)

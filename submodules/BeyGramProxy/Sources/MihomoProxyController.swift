@@ -46,6 +46,9 @@ public final class MihomoProxyController {
     private static let probeTimeoutMilliseconds = 5000
     /// After a change of the network, the core is checked once the network has stayed as it is for this long.
     private static let networkSettleSeconds = 2
+    /// How long Telegram must stay in `Connecting` before the nodes are probed (issue #141, Android `TelegramAutoSelector`).
+    private static let connectingSettleSeconds = 8
+    private var connectingGeneration = 0
     /// Bumped by every change of the network and every stop of the watch, so a recovery scheduled earlier does nothing.
     /// Used on `queue` only.
     private var networkGeneration = 0
@@ -438,6 +441,45 @@ public final class MihomoProxyController {
     // MARK: - Network changes
 
     /// Runs on `queue`. Watches the network while the core runs. Each run uses a new monitor, because a stopped one cannot start again.
+    /// Reports the connection state of Telegram (issue #141). Probes start after a stable `Connecting` of
+    /// `connectingSettleSeconds`; leaving `Connecting`, or a change of network, cancels the wait.
+    public func telegramConnectionChanged(isConnecting: Bool) {
+        queue.async {
+            self.connectingGeneration += 1
+            guard isConnecting else {
+                return
+            }
+            let generation = self.connectingGeneration
+            self.queue.asyncAfter(deadline: .now() + .seconds(MihomoProxyController.connectingSettleSeconds)) {
+                guard generation == self.connectingGeneration, self.currentState.isRunning, self.currentState.autoSelectEnabled else {
+                    return
+                }
+                self.probeNowAfterStableConnecting()
+            }
+        }
+    }
+
+    /// Runs on `queue`. One probe pass, like a watchdog tick but without scheduling the next one.
+    private func probeNowAfterStableConnecting() {
+        let generation = watchdogGeneration
+        let group: MihomoGroupState
+        do {
+            group = try client.proxies(group: MihomoProxyController.groupName)
+        } catch {
+            restartCore()
+            return
+        }
+        checkQueue.async {
+            let inUseDelay = (try? self.client.testDelay(proxy: group.now, timeoutMilliseconds: MihomoProxyController.probeTimeoutMilliseconds)) ?? -1
+            let fastest: String? = inUseDelay <= 0 ? self.fastestNode(among: MihomoProxyController.serverNames(in: group)) : nil
+            self.queue.async {
+                if let fastest = fastest {
+                    self.selectIfStillWatching(fastest, generation: generation)
+                }
+            }
+        }
+    }
+
     private func startNetworkWatch() {
         stopNetworkWatch()
         let monitor = MihomoNetworkMonitor { [weak self] in
@@ -466,6 +508,7 @@ public final class MihomoProxyController {
             return
         }
         networkGeneration += 1
+        connectingGeneration += 1
         let generation = networkGeneration
         queue.asyncAfter(deadline: .now() + .seconds(MihomoProxyController.networkSettleSeconds)) {
             self.recoverAfterNetworkChange(generation: generation)
