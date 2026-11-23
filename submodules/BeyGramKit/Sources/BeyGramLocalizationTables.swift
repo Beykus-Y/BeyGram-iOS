@@ -92,6 +92,11 @@ public enum BeyGramLocalizationTables {
         .stealthRefusedTitle: "Stealth send unavailable",
         .stealthRefusedBody: "This message cannot be scheduled in Stealth Mode (secret chats and paid messages do not support scheduled sending). Sending it now will publish immediately and may reveal your activity.",
         .stealthSendNowAction: "Send without Stealth",
+        .chatStealthRowTitle: "Stealth mode",
+        .chatStealthSheetTitle: "Stealth in this chat",
+        .chatStealthInherit: "As in settings",
+        .chatStealthAllow: "Allow",
+        .chatStealthBlock: "Block",
         .stealthSendNowConfirm: "Send now",
 
         // Mihomo
@@ -388,6 +393,11 @@ public enum BeyGramLocalizationTables {
         .stealthRefusedTitle: "Отложенная отправка недоступна",
         .stealthRefusedBody: "Это сообщение нельзя запланировать в режиме невидимки (секретные чаты и платные сообщения не поддерживают отложенную отправку). Обычная отправка опубликует его сразу и может показать вашу активность.",
         .stealthSendNowAction: "Отправить без невидимки",
+        .chatStealthRowTitle: "Режим невидимки",
+        .chatStealthSheetTitle: "Невидимка в этом чате",
+        .chatStealthInherit: "Как в настройках",
+        .chatStealthAllow: "Разрешить",
+        .chatStealthBlock: "Блокировать",
         .stealthSendNowConfirm: "Отправить сейчас",
 
         // Mihomo

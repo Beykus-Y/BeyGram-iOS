@@ -88,6 +88,13 @@ public enum BeyGramStringKey: String, CaseIterable {
     case stealthSendNowAction = "stealth.sendNow.action"
     case stealthSendNowConfirm = "stealth.sendNow.confirm"
 
+    // Per-chat stealth mode (issue #135)
+    case chatStealthRowTitle = "chat.stealth.row.title"
+    case chatStealthSheetTitle = "chat.stealth.sheet.title"
+    case chatStealthInherit = "chat.stealth.inherit"
+    case chatStealthAllow = "chat.stealth.allow"
+    case chatStealthBlock = "chat.stealth.block"
+
     // Mihomo
     case mihomoTitle = "mihomo.title"
     case mihomoStatusConnected = "mihomo.status.connected"
