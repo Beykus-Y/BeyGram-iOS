@@ -119,7 +119,10 @@ public final class BeyGramAppearance {
     /// Corner radius of the composer's glass field. BeyGram uses 24pt, which the glass clamps to half the height
     /// of a one-line field, so the radius only shows once the field grows into several lines.
     public func composerCornerRadius(defaultRadius: CGFloat) -> CGFloat {
-        return self.isEnabled ? 24.0 : defaultRadius
+        guard let spec = self.surfaceSpec else {
+            return defaultRadius
+        }
+        return spec.composerRadius
     }
 
     /// The spec of the bottom bar, or nil when the Telegram style is on (its bar is never changed).
