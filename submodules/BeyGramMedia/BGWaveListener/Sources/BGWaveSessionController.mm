@@ -2,6 +2,8 @@
 
 #import "BGWaveListener/BGWaveListenerOutput.h"
 
+#import <Network/Network.h>
+
 #include "BGWaveRuntime.hpp"
 
 #include "../../BGWaveCore/BGWaveController.hpp"
@@ -311,7 +313,10 @@ NSString * _Nullable BGWaveSessionErrorLocalizationKey(BGWaveSessionError error)
 // True while the host tap is handed out. The release of the session detaches it first.
 @property (nonatomic, assign) BOOL hostTapAttached;
 @property (nonatomic, assign) NSUInteger tickCount;
+// Watches the network path (issue #143). When it becomes usable again, a failed or reconnecting session asks again.
+@property (nonatomic, strong, nullable) nw_path_monitor_t pathMonitor;
 
+- (void)networkPathSatisfied;
 - (BGWaveSnapshotModel *)makeSnapshot;
 - (void)deliverChange;
 - (void)willCloseNativeSession;
@@ -329,6 +334,18 @@ NSString * _Nullable BGWaveSessionErrorLocalizationKey(BGWaveSessionError error)
 
 @implementation BGWaveSessionController
 
+- (void)dealloc {
+    if (_pathMonitor != nil) {
+        nw_path_monitor_cancel(_pathMonitor);
+    }
+}
+
+- (void)networkPathSatisfied {
+    // Runs on `queue`. The controller only retries from Failed or Reconnecting, so other phases are left alone.
+    const bool started = _controller->retry(NowUnixSeconds());
+    (void)started;
+}
+
 - (instancetype)init {
     self = [super init];
     if (self != nil) {
@@ -339,6 +356,22 @@ NSString * _Nullable BGWaveSessionErrorLocalizationKey(BGWaveSessionError error)
             return std::unique_ptr<beygram::wave::BGWaveNativeSession>(new RuntimeNativeSession(isHost, slot));
         };
         _controller = std::make_unique<beygram::wave::BGWaveController>(std::move(factory));
+
+        // Network path changes (issue #143). The handler holds the facade weakly and hops to `queue` before touching the controller.
+        __weak BGWaveSessionController *weakSelf = self;
+        nw_path_monitor_t monitor = nw_path_monitor_create();
+        nw_path_monitor_set_queue(monitor, _queue);
+        nw_path_monitor_set_update_handler(monitor, ^(nw_path_t path) {
+            if (nw_path_get_status(path) != nw_path_status_satisfied) {
+                return;
+            }
+            BGWaveSessionController *strongSelf = weakSelf;
+            if (strongSelf != nil) {
+                [strongSelf networkPathSatisfied];
+            }
+        });
+        nw_path_monitor_start(monitor);
+        _pathMonitor = monitor;
 
         // These run on `queue`, inside controller calls. They hold the facade unretained, so invalidate must clear them
         // before the facade is released.

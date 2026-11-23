@@ -94,7 +94,10 @@ objc_library(
         "-fobjc-arc",
         "-std=c++20",
     ],
-    sdk_frameworks = ["Foundation"],
+    sdk_frameworks = [
+        "Foundation",
+        "Network",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":BGWaveListenerOutput",
