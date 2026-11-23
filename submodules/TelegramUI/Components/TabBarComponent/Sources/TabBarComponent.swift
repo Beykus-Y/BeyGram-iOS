@@ -1086,6 +1086,15 @@ public final class TabBarComponent: Component {
                 selectedItemFrame: selectedItemFrame,
                 drag: self.selectionGestureState.map { (origin: $0.current, itemLength: $0.itemLength) }
             )
+            // A BeyGram style sets the selection pill (#145): none for Material 2 and Signature's ink, else its own size.
+            if let pillSpec = BeyGramAppearance.shared.navigationSpec, component.axis == .horizontal, !(component.search?.isActive ?? false) {
+                if !pillSpec.showSelectionPill {
+                    lensSelectionFrame = CGRect(origin: CGPoint(x: lensSelectionFrame.midX, y: lensSelectionFrame.midY), size: CGSize())
+                } else {
+                    let pillSize = CGSize(width: min(pillSpec.pillWidth + 8.0, lensSelectionFrame.width), height: min(pillSpec.pillHeight + 8.0, lensSelectionFrame.height))
+                    lensSelectionFrame = CGRect(origin: CGPoint(x: lensSelectionFrame.midX - pillSize.width * 0.5, y: lensSelectionFrame.midY - pillSize.height * 0.5), size: pillSize)
+                }
+            }
             var isLensCollapsed = false
             if let search, search.isActive {
                 isLensCollapsed = true
