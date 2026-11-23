@@ -20,7 +20,7 @@ private func generateStatusCheckImage(theme: PresentationTheme, single: Bool) ->
     })
 }
 
-private func generateBadgeBackgroundImage(theme: PresentationTheme, diameter: CGFloat, active: Bool, reaction: Bool, provisional: Bool, icon: UIImage? = nil) -> UIImage? {
+private func generateBadgeBackgroundImage(theme: PresentationTheme, diameter: CGFloat, active: Bool, reaction: Bool, provisional: Bool, icon: UIImage? = nil, cornerRadius: CGFloat? = nil) -> UIImage? {
     return generateImage(CGSize(width: diameter, height: diameter), contextGenerator: { size, context in
         context.clear(CGRect(origin: CGPoint(), size: size))
         if active {
@@ -38,7 +38,12 @@ private func generateBadgeBackgroundImage(theme: PresentationTheme, diameter: CG
                 context.setFillColor(theme.chatList.unreadBadgeInactiveBackgroundColor.cgColor)
             }
         }
-        context.fillEllipse(in: CGRect(origin: CGPoint(), size: size))
+        if let cornerRadius {
+            context.addPath(UIBezierPath(roundedRect: CGRect(origin: CGPoint(), size: size), cornerRadius: min(cornerRadius, size.width * 0.5)).cgPath)
+            context.fillPath()
+        } else {
+            context.fillEllipse(in: CGRect(origin: CGPoint(), size: size))
+        }
         if let icon = icon, let cgImage = icon.cgImage {
             context.draw(cgImage, in: CGRect(origin: CGPoint(x: floor((size.width - icon.size.width) / 2.0), y: floor((size.height - icon.size.height) / 2.0)), size: icon.size))
         }
@@ -182,6 +187,10 @@ public struct PresentationResourcesChatList {
     }
     
     public static func badgeBackgroundActive(_ theme: PresentationTheme, diameter: CGFloat) -> UIImage? {
+        // BeyGram styles round the unread badge differently (#146); the cached circle is kept for Telegram Original.
+        if let radius = BeyGramAppearance.shared.chatListSpec?.unreadBadgeRadius, radius < diameter * 0.5 {
+            return generateBadgeBackgroundImage(theme: theme, diameter: diameter, active: true, reaction: false, provisional: false, cornerRadius: radius)
+        }
         return theme.image(PresentationResourceParameterKey.chatListBadgeBackgroundActive(diameter), { theme in
             return generateBadgeBackgroundImage(theme: theme, diameter: diameter, active: true, reaction: false, provisional: false)
         })
@@ -194,6 +203,10 @@ public struct PresentationResourcesChatList {
     }
     
     public static func badgeBackgroundInactive(_ theme: PresentationTheme, diameter: CGFloat) -> UIImage? {
+        // BeyGram styles round the unread badge differently (#146); the cached circle is kept for Telegram Original.
+        if let radius = BeyGramAppearance.shared.chatListSpec?.unreadBadgeRadius, radius < diameter * 0.5 {
+            return generateBadgeBackgroundImage(theme: theme, diameter: diameter, active: false, reaction: false, provisional: false, cornerRadius: radius)
+        }
         return theme.image(PresentationResourceParameterKey.chatListBadgeBackgroundInactive(diameter), { theme in
             return generateBadgeBackgroundImage(theme: theme, diameter: diameter, active: false, reaction: false, provisional: false)
         })

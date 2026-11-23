@@ -2456,7 +2456,20 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
         let currentCustomTextEntities = self.cachedCustomTextEntities
         
         return { [weak self] item, params, first, last, firstWithHeader, nextIsPinned, nextHasActiveRevealControls in
-            let titleFont = Font.semibold(floor(item.presentationData.fontSize.itemListBaseFontSize * 16.0 / 17.0))
+            var titleFont = Font.semibold(floor(item.presentationData.fontSize.itemListBaseFontSize * 16.0 / 17.0))
+            if let beyGramChatListSpec = BeyGramAppearance.shared.chatListSpec {
+                let titleFontSize = floor(item.presentationData.fontSize.itemListBaseFontSize * 16.0 / 17.0)
+                switch beyGramChatListSpec.chatTitleWeight {
+                case .normal:
+                    titleFont = Font.regular(titleFontSize)
+                case .medium:
+                    titleFont = Font.medium(titleFontSize)
+                case .semiBold:
+                    titleFont = Font.semibold(titleFontSize)
+                case .bold:
+                    titleFont = Font.bold(titleFontSize)
+                }
+            }
             let textFont = Font.regular(floor(item.presentationData.fontSize.itemListBaseFontSize * 15.0 / 17.0))
             let italicTextFont = Font.italic(floor(item.presentationData.fontSize.itemListBaseFontSize * 15.0 / 17.0))
             let dateFont = Font.regular(floor(item.presentationData.fontSize.itemListBaseFontSize * 14.0 / 17.0))
