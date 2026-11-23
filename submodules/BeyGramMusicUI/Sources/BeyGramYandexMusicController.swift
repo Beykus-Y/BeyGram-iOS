@@ -530,10 +530,59 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
         BeyGramMusicSession.shared.playYandexTrack(track, replaceQueue: true) { [weak self] result in
             guard let self else { return }
             if case let .failure(err) = result {
-                let alert = UIAlertController(title: "Yandex Music", message: String(describing: err), preferredStyle: .alert)
+                let lang = self.presentationData.strings.primaryComponent.languageCode
+                let alert = UIAlertController(
+                    title: lang.lowercased().hasPrefix("ru") ? "Яндекс Музыка" : "Yandex Music",
+                    message: Self.localizedPlaybackError(err, languageCode: lang),
+                    preferredStyle: .alert
+                )
                 alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_OK, style: .default))
                 self.present(alert, animated: true, completion: nil)
             }
+        }
+    }
+
+    private static func localizedPlaybackError(_ error: BGYandexPlaybackError, languageCode: String) -> String {
+        let isRu = languageCode.lowercased().hasPrefix("ru")
+        switch error {
+        case .notSignedIn:
+            return isRu ? "Войдите в аккаунт Яндекс Музыки." : "Sign in to your Yandex Music account."
+        case .subscriptionRequired:
+            return isRu ? "Для прослушивания нужна активная подписка Яндекс Плюс." : "An active Yandex Plus subscription is required."
+        case .unavailable:
+            return isRu ? "Трек недоступен." : "This track is unavailable."
+        case .rateLimited:
+            return isRu ? "Слишком много запросов. Попробуйте позже." : "Too many requests. Please try again later."
+        case .network:
+            return isRu ? "Ошибка сети. Проверьте подключение." : "Network error. Check your connection."
+        case .invalidFile:
+            return isRu ? "Не удалось воспроизвести аудиофайл." : "Unable to play the audio file."
+        }
+    }
+
+    private static func localizedServiceError(_ error: BGYandexError, languageCode: String) -> String {
+        let isRu = languageCode.lowercased().hasPrefix("ru")
+        switch error {
+        case .network:
+            return isRu ? "Ошибка сети. Проверьте подключение." : "Network error. Check your connection."
+        case .sessionExpired:
+            return isRu ? "Сессия истекла. Войдите снова." : "Session expired. Please sign in again."
+        case .notSignedIn:
+            return isRu ? "Войдите в аккаунт Яндекс Музыки." : "Sign in to your Yandex Music account."
+        case .subscriptionRequired:
+            return isRu ? "Требуется подписка Яндекс Плюс." : "Yandex Plus subscription required."
+        case .unavailable:
+            return isRu ? "Сервис временно недоступен." : "Service is temporarily unavailable."
+        case .notFound:
+            return isRu ? "Ничего не найдено." : "Nothing was found."
+        case .rateLimited:
+            return isRu ? "Слишком много запросов. Попробуйте позже." : "Too many requests. Please try again later."
+        case .serviceChanged:
+            return isRu ? "Формат ответа сервиса изменился. Обновите приложение." : "Service response changed. Please update the app."
+        case .invalidFile:
+            return isRu ? "Получен повреждённый аудиофайл." : "Received a corrupted audio file."
+        case .unknown:
+            return isRu ? "Неизвестная ошибка Яндекс Музыки." : "Unknown Yandex Music error."
         }
     }
 
@@ -663,7 +712,8 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
                 case let .success(tracks):
                     self.searchResults = tracks
                 case let .failure(err):
-                    self.searchError = String(describing: err)
+                    let lang = self.presentationData.strings.primaryComponent.languageCode
+                    self.searchError = Self.localizedServiceError(err, languageCode: lang)
                 }
                 self.render()
             }

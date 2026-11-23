@@ -2,6 +2,7 @@ import Foundation
 import SwiftSignalKit
 import BeyGramMedia
 import BeyGramYandexMusic
+import BGWaveSessionController
 
 /// Track preparation/playback state mapped from `BGMixTrackState`.
 public enum BeyGramMusicTrackStatus: Equatable {
@@ -127,6 +128,7 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
     public static let shared = BeyGramMusicSession()
 
     private let player: BGMixPlayer
+    public let waveSessionController = BGWaveSessionController()
     private let stateValue: Atomic<BeyGramMusicState>
     private let statePromise: ValuePromise<BeyGramMusicState>
     private let waveStateValue: Atomic<BGYandexWaveState>
@@ -138,6 +140,9 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
 
     private override init() {
         self.player = BGMixPlayer.shared()
+        self.waveSessionController.hostTapHandler = { [weak self] tap in
+            self?.player.setPcmTap(tap)
+        }
         let initial = BeyGramMusicState()
         self.stateValue = Atomic(value: initial)
         self.statePromise = ValuePromise(initial, ignoreRepeated: true)

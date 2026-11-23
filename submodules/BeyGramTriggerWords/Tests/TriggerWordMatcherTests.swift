@@ -77,4 +77,19 @@ final class TriggerWordMatcherTests: XCTestCase {
     func testValidationAcceptsNormalRule() {
         XCTAssertNil(TriggerWordMatcher.validate(rule("ok"), existingCount: 0))
     }
+
+    func testRegexModeMatchesValidPatternAndRejectsBadOrEmptyPatterns() {
+        let valid = TriggerWordRule(pattern: "order\\s+#\\d+", mode: .regex, ignoreCase: true)
+        XCTAssertNil(TriggerWordMatcher.validate(valid, existingCount: 0))
+        XCTAssertTrue(TriggerWordMatcher.matches(valid, text: "Order #42 ready"))
+        XCTAssertFalse(TriggerWordMatcher.matches(valid, text: "Order ready"))
+
+        let bad = TriggerWordRule(pattern: "(unclosed", mode: .regex)
+        XCTAssertEqual(TriggerWordMatcher.validate(bad, existingCount: 0), .badRegex)
+        XCTAssertFalse(TriggerWordMatcher.matches(bad, text: "(unclosed"))
+
+        let emptyMatch = TriggerWordRule(pattern: "a*", mode: .regex)
+        XCTAssertEqual(TriggerWordMatcher.validate(emptyMatch, existingCount: 0), .regexMatchesEmpty)
+        XCTAssertFalse(TriggerWordMatcher.matches(emptyMatch, text: "aaa"))
+    }
 }
