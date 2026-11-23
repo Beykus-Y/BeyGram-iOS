@@ -65,6 +65,36 @@ public enum BeyGramStyle: Int32, CaseIterable {
     }
 }
 
+/// Where the colours of a BeyGram style come from (#149). It is independent of the style itself.
+public enum BeyGramPalette: Int32 {
+    /// The active Telegram theme, as before.
+    case telegramTheme = 0
+    case warm = 1
+    case graphite = 2
+
+    public var displayName: String {
+        switch self {
+        case .telegramTheme:
+            return "Telegram Theme"
+        case .warm:
+            return "Warm"
+        case .graphite:
+            return "Graphite"
+        }
+    }
+
+    public var preset: BeyGramThemePreset? {
+        switch self {
+        case .telegramTheme:
+            return nil
+        case .warm:
+            return .warm
+        case .graphite:
+            return .graphite
+        }
+    }
+}
+
 /// Holds the chosen BeyGram style. Reads are thread-safe, so layout code on any queue can ask for the style.
 /// The choice is stored in UserDefaults: it is app-wide and does not depend on the account.
 public final class BeyGramAppearance {
@@ -74,6 +104,61 @@ public final class BeyGramAppearance {
 
     private let styleValue: Atomic<BeyGramStyle>
     private let stylePromise: ValuePromise<BeyGramStyle>
+
+    private static let paletteKey = "BeyGram.Appearance.Palette"
+    private static let amoledKey = "BeyGram.Appearance.Amoled"
+    private let revisionPromise = ValuePromise<Int>(0, ignoreRepeated: false)
+    private let revisionValue = Atomic<Int>(value: 0)
+
+    /// The chosen palette. Telegram Original ignores it.
+    public var palette: BeyGramPalette {
+        return BeyGramPalette(rawValue: Int32(UserDefaults.standard.integer(forKey: BeyGramAppearance.paletteKey))) ?? .telegramTheme
+    }
+
+    public var amoled: Bool {
+        return UserDefaults.standard.bool(forKey: BeyGramAppearance.amoledKey)
+    }
+
+    public func setPalette(_ palette: BeyGramPalette) {
+        UserDefaults.standard.set(Int(palette.rawValue), forKey: BeyGramAppearance.paletteKey)
+        self.bumpRevision()
+    }
+
+    public func setAmoled(_ amoled: Bool) {
+        UserDefaults.standard.set(amoled, forKey: BeyGramAppearance.amoledKey)
+        self.bumpRevision()
+    }
+
+    private func bumpRevision() {
+        let value = self.revisionValue.modify { $0 + 1 }
+        self.revisionPromise.set(value)
+    }
+
+    /// Emits at once and after every change of the style, palette or AMOLED flag. Presentation data is rebuilt from it.
+    public var revisionSignal: Signal<Int, NoError> {
+        return self.revisionPromise.get()
+    }
+
+    /// The colour tokens to apply to the theme, nil when the style is Telegram Original or the palette is the Telegram theme.
+    public func paletteTokens(isDark: Bool) -> BeyGramPresetTokens? {
+        guard self.isEnabled, let preset = self.palette.preset else {
+            return nil
+        }
+        let tokens = BeyGramPresetCatalog.tokens(for: preset, brightness: isDark ? .dark : .light)
+        return (isDark && self.amoled) ? tokens.amoled : tokens
+    }
+
+    /// Material 2 is flat (0), Signature a quiet ladder (0.45), the others full (1).
+    public var tonalStep: CGFloat {
+        switch self.style {
+        case .material2:
+            return 0.0
+        case .signature:
+            return 0.45
+        default:
+            return 1.0
+        }
+    }
 
     private init() {
         let storedRawValue = Int32(UserDefaults.standard.integer(forKey: BeyGramAppearance.userDefaultsKey))
@@ -105,6 +190,7 @@ public final class BeyGramAppearance {
         }
         UserDefaults.standard.set(Int(style.rawValue), forKey: BeyGramAppearance.userDefaultsKey)
         self.stylePromise.set(style)
+        self.bumpRevision()
     }
 
     /// Main and auxiliary bubble radii. BeyGram uses 20/8 (the Liquid Glass bubble). A user who changed the bubble
