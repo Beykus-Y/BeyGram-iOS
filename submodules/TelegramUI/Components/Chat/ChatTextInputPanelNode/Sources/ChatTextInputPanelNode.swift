@@ -3347,7 +3347,21 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         
         let textInputContainerBackgroundTransition = ComponentTransition(transition)
         let isTextInputGlassInteractive = !(isAgentLayout && self.isAgentMenuActive)
+        let beyGramDesign = BeyGramAppearance.shared.resolvedDesign(
+            reduceTransparency: UIAccessibility.isReduceTransparencyEnabled,
+            reduceMotion: UIAccessibility.isReduceMotionEnabled
+        )
         self.textInputContainerBackgroundView.update(size: textInputContainerBackgroundFrame.size, cornerRadius: isAgentLayout ? 20.0 : BeyGramAppearance.shared.composerCornerRadius(defaultRadius: floor(minimalInputHeight * 0.5)), isDark: interfaceState.theme.overallDarkAppearance, tintColor: defaultGlassTintColor, isInteractive: isTextInputGlassInteractive, transition: textInputContainerBackgroundTransition)
+        if beyGramDesign.style == .material2 {
+            self.textInputContainerBackgroundView.layer.borderWidth = 1.0
+            self.textInputContainerBackgroundView.layer.borderColor = interfaceState.theme.chat.inputPanel.inputStrokeColor.cgColor
+            self.sendActionButtons.sendButton.layer.cornerRadius = beyGramDesign.buttonCornerRadius
+            self.sendActionButtons.sendButton.clipsToBounds = true
+        } else {
+            self.textInputContainerBackgroundView.layer.borderWidth = 0.0
+            self.sendActionButtons.sendButton.layer.cornerRadius = 0.0
+            self.sendActionButtons.sendButton.clipsToBounds = false
+        }
         if isTextInputGlassInteractive != self.isTextInputGlassInteractive {
             self.isTextInputGlassInteractive = isTextInputGlassInteractive
             // UIKit's stretch (`_UIFlexInteraction`) follows neither change of the effect on an effect view: it stays

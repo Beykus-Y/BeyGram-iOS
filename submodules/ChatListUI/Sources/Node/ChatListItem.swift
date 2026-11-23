@@ -5646,6 +5646,9 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         // The side list ends without a closing separator.
                         strongSelf.separatorNode.isHidden = true
                     }
+                    if !BeyGramAppearance.shared.resolvedDesign().showListDividers {
+                        strongSelf.separatorNode.isHidden = true
+                    }
                     strongSelf.separatorBaseIsHidden = strongSelf.separatorNode.isHidden
                     strongSelf.updateSideListSeparatorVisibility()
                     
