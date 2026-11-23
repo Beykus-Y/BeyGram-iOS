@@ -37,7 +37,7 @@ private enum BeyGramStyleEntry: ItemListNodeEntry {
         case let .style(_, style, _, _):
             return 1 + style.rawValue
         case .info:
-            return 3
+            return 100
         }
     }
 
@@ -86,10 +86,12 @@ private enum BeyGramStyleEntry: ItemListNodeEntry {
 private func beyGramStyleEntries(presentationData: PresentationData, selected: BeyGramStyle) -> [BeyGramStyleEntry] {
     let lang = presentationData.strings.primaryComponent.languageCode
     let l10n = BeyGramL10n.shared
+    let selected = selected == .legacyBeyGram ? BeyGramStyle.liquidGlass : selected
     var entries: [BeyGramStyleEntry] = []
     entries.append(.header(presentationData.theme, l10n.string(.appearanceSectionStyle, languageCode: lang)))
-    entries.append(.style(presentationData.theme, .telegram, l10n.string(.appearanceStyleTelegram, languageCode: lang), selected == .telegram))
-    entries.append(.style(presentationData.theme, .beygram, l10n.string(.appearanceStyleBeyGram, languageCode: lang), selected == .beygram))
+    for style in BeyGramStyle.selectable {
+        entries.append(.style(presentationData.theme, style, style.displayName, selected == style))
+    }
     entries.append(.info(presentationData.theme, l10n.string(.appearanceDescription, languageCode: lang)))
     return entries
 }

@@ -3,11 +3,66 @@ import SwiftSignalKit
 
 /// The BeyGram visual style axis. It is independent of the Telegram colour theme: colours always come from the
 /// active PresentationTheme, and this module only supplies the geometry and the glass choice on top of it.
-public enum BeyGramStyle: Int32 {
-    /// The upstream Telegram look, unchanged.
+public enum BeyGramStyle: Int32, CaseIterable {
+    /// The upstream Telegram look, unchanged. Always stored as 0.
     case telegram = 0
-    /// BeyGram geometry on the Liquid Glass chrome (the Liquid Glass column of BeyGram's design-system-v2).
-    case beygram = 1
+    /// The pre-#144 BeyGram choice (value 1). It is only read from old storage and migrated to `.liquidGlass`,
+    /// which matches the old iOS geometry; nothing writes it any more.
+    case legacyBeyGram = 1
+    case beygramDefault = 2
+    case material2 = 3
+    case material3 = 4
+    case liquidGlass = 5
+    case signature = 6
+
+    /// The styles offered in the picker, in order.
+    public static var selectable: [BeyGramStyle] {
+        return [.telegram, .beygramDefault, .material2, .material3, .liquidGlass, .signature]
+    }
+
+    /// Name shown in the picker. Style names are proper names and are not translated.
+    public var displayName: String {
+        switch self {
+        case .telegram:
+            return "Telegram Original"
+        case .legacyBeyGram, .liquidGlass:
+            return "Liquid Glass"
+        case .beygramDefault:
+            return "BeyGram Default"
+        case .material2:
+            return "Material 2"
+        case .material3:
+            return "Material 3"
+        case .signature:
+            return "BeyGram Signature"
+        }
+    }
+
+    /// Stored value after migration: the old value 1 becomes Liquid Glass.
+    public static func migrated(rawValue: Int32) -> BeyGramStyle {
+        guard let style = BeyGramStyle(rawValue: rawValue) else {
+            return .telegram
+        }
+        return style == .legacyBeyGram ? .liquidGlass : style
+    }
+
+    /// The bottom-bar variant of the style (Android `navigationSpecFor`).
+    public var navigationVariant: BeyGramNavigationVariant? {
+        switch self {
+        case .telegram, .legacyBeyGram:
+            return self == .legacyBeyGram ? .floatingGlass : nil
+        case .beygramDefault:
+            return .pillTabs
+        case .material2:
+            return .classicTabs
+        case .material3:
+            return .navigationBar
+        case .liquidGlass:
+            return .floatingGlass
+        case .signature:
+            return .signatureMark
+        }
+    }
 }
 
 /// Holds the chosen BeyGram style. Reads are thread-safe, so layout code on any queue can ask for the style.
@@ -22,7 +77,7 @@ public final class BeyGramAppearance {
 
     private init() {
         let storedRawValue = Int32(UserDefaults.standard.integer(forKey: BeyGramAppearance.userDefaultsKey))
-        let stored = BeyGramStyle(rawValue: storedRawValue) ?? .telegram
+        let stored = BeyGramStyle.migrated(rawValue: storedRawValue)
         self.styleValue = Atomic(value: stored)
         self.stylePromise = ValuePromise(stored, ignoreRepeated: true)
     }
@@ -34,7 +89,7 @@ public final class BeyGramAppearance {
 
     /// Whether the BeyGram geometry applies.
     public var isEnabled: Bool {
-        return self.style == .beygram
+        return self.style != .telegram
     }
 
     /// Emits the current style at once and then every change. Presentation data is rebuilt from it.
@@ -67,25 +122,12 @@ public final class BeyGramAppearance {
         return self.isEnabled ? 24.0 : defaultRadius
     }
 
-    private static let navigationVariantKey = "BeyGram.Appearance.NavigationVariant"
-
-    /// Which of the five bottom-bar styles (Android `NavigationSpec`) the BeyGram style uses. Read at layout time.
-    public var navigationVariant: BeyGramNavigationVariant {
-        get {
-            let raw = UserDefaults.standard.string(forKey: BeyGramAppearance.navigationVariantKey) ?? ""
-            return BeyGramNavigationVariant(rawValue: raw) ?? .floatingGlass
-        }
-        set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: BeyGramAppearance.navigationVariantKey)
-        }
-    }
-
     /// The spec of the bottom bar, or nil when the Telegram style is on (its bar is never changed).
     public var navigationSpec: BeyGramNavigationSpec? {
-        guard self.isEnabled else {
+        guard let variant = self.style.navigationVariant else {
             return nil
         }
-        return BeyGramNavigationCatalog.spec(for: self.navigationVariant)
+        return BeyGramNavigationCatalog.spec(for: variant)
     }
 
     /// The largest avatar diameter in the chat list. BeyGram uses 54pt, Telegram keeps 60pt.
