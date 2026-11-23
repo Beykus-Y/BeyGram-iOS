@@ -85,9 +85,10 @@ final class BGYandexAudioCheckTests: XCTestCase {
 
         let file = try AVAudioFile(forReading: url)
         var decodedFrames: AVAudioFramePosition = 0
-        while true {
-            let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096)!
-            try file.read(into: buffer, frameCount: buffer.frameCapacity)
+        while file.framePosition < file.length {
+            let remaining = AVAudioFrameCount(min(4096, file.length - file.framePosition))
+            let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: remaining)!
+            try file.read(into: buffer, frameCount: remaining)
             if buffer.frameLength == 0 {
                 break
             }
