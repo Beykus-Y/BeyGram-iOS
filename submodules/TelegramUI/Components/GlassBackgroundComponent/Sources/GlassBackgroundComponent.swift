@@ -6,6 +6,8 @@ import ComponentDisplayAdapters
 import UIKitRuntimeUtils
 import CoreImage
 import AppBundle
+import SwiftSignalKit
+import BeyGramAppearance
 
 private final class ContentContainer: UIView {
     private let maskContentView: UIView
@@ -493,13 +495,25 @@ public class GlassBackgroundView: UIView {
         public let tintColor: TintColor
         public let isInteractive: Bool
         public let isVisible: Bool
+        public let beyGramStyle: BeyGramStyle
+        public let beyGramGlassQuality: BeyGramGlassQuality
         
-        init(shape: Shape, isDark: Bool, tintColor: TintColor, isInteractive: Bool, isVisible: Bool) {
+        init(
+            shape: Shape,
+            isDark: Bool,
+            tintColor: TintColor,
+            isInteractive: Bool,
+            isVisible: Bool,
+            beyGramStyle: BeyGramStyle = BeyGramAppearance.shared.style,
+            beyGramGlassQuality: BeyGramGlassQuality = BeyGramAppearance.shared.glassQuality
+        ) {
             self.shape = shape
             self.isDark = isDark
             self.tintColor = tintColor
             self.isInteractive = isInteractive
             self.isVisible = isVisible
+            self.beyGramStyle = beyGramStyle
+            self.beyGramGlassQuality = beyGramGlassQuality
         }
     }
     
@@ -511,6 +525,9 @@ public class GlassBackgroundView: UIView {
     private var nativeView: UIVisualEffectView?
     private var nativeViewClippingContext: ClippingShapeContext?
     private let nativeParamsView: EffectSettingsContainerView?
+    private let beyGramSurfaceView: UIView
+    private var beyGramStyleDisposable: Disposable?
+    private var lastUpdateSize: CGSize?
 
     public var nativeBlurRadius: CGFloat? {
         didSet {
@@ -653,9 +670,14 @@ public class GlassBackgroundView: UIView {
         self.maskContainerView.addSubview(self.maskContentView)
         
         self.contentContainer = ContentContainer(maskContentView: self.maskContentView)
+        self.beyGramSurfaceView = UIView()
+        self.beyGramSurfaceView.isUserInteractionEnabled = false
+        self.beyGramSurfaceView.isHidden = true
+        self.beyGramSurfaceView.layer.cornerCurve = .continuous
         
         super.init(frame: frame)
         
+        self.addSubview(self.beyGramSurfaceView)
         if let shadowView = self.shadowView {
             self.addSubview(shadowView)
         }
@@ -678,6 +700,22 @@ public class GlassBackgroundView: UIView {
         if let legacyHighlightContainerView = self.legacyHighlightContainerView {
             self.addSubview(legacyHighlightContainerView)
         }
+        
+        self.beyGramStyleDisposable = (BeyGramAppearance.shared.designChangedSignal
+        |> deliverOnMainQueue).start(next: { [weak self] _ in
+            guard let self, let size = self.lastUpdateSize, let params = self.params else {
+                return
+            }
+            self.update(
+                size: size,
+                shape: params.shape,
+                isDark: params.isDark,
+                tintColor: params.tintColor,
+                isInteractive: params.isInteractive,
+                isVisible: params.isVisible,
+                transition: .immediate
+            )
+        })
     }
     
     required public init?(coder: NSCoder) {
@@ -719,7 +757,94 @@ public class GlassBackgroundView: UIView {
         self.update(size: size, shape: shape, isDark: isDark, tintColor: tintColor, isInteractive: isInteractive, isVisible: isVisible, transition: transition)
     }
 
+    deinit {
+        self.beyGramStyleDisposable?.dispose()
+    }
+
+    private func updateBeyGramSurface(size: CGSize, shape: Shape, isDark: Bool, tintColor: TintColor, isVisible: Bool, design: BeyGramResolvedDesign, allowsNativeGlass: Bool) {
+        self.beyGramSurfaceView.frame = CGRect(origin: .zero, size: size)
+        if allowsNativeGlass || !isVisible {
+            self.beyGramSurfaceView.isHidden = true
+            self.beyGramSurfaceView.layer.shadowOpacity = 0.0
+            return
+        }
+        self.beyGramSurfaceView.isHidden = false
+
+        let rawRadius: CGFloat
+        switch shape {
+        case let .roundedRect(cornerRadius):
+            rawRadius = cornerRadius
+        case let .customRoundedRect(cornerRadii):
+            rawRadius = max(max(cornerRadii.topLeft, cornerRadii.topRight), max(cornerRadii.bottomLeft, cornerRadii.bottomRight))
+        }
+        let maxHalf = min(size.width, size.height) * 0.5
+        let clampedRadius: CGFloat
+        switch design.style {
+        case .material2:
+            clampedRadius = min(rawRadius, min(4.0, maxHalf))
+        case .material3:
+            clampedRadius = min(rawRadius, min(16.0, maxHalf))
+        case .signature:
+            clampedRadius = min(rawRadius, min(14.0, maxHalf))
+        case .beygramDefault:
+            clampedRadius = min(rawRadius, min(20.0, maxHalf))
+        case .liquidGlass, .telegram:
+            clampedRadius = min(rawRadius, maxHalf)
+        }
+        self.beyGramSurfaceView.layer.cornerRadius = clampedRadius
+
+        let customFill: UIColor?
+        switch tintColor.kind {
+        case let .custom(_, color):
+            customFill = color.alpha > 0.05 ? color.withAlphaComponent(max(0.92, color.alpha)) : nil
+        case .panel, .untinted, .clear:
+            customFill = nil
+        }
+
+        let hairline = 1.0 / UIScreen.main.scale
+        switch design.treatment {
+        case .flat, .original:
+            self.beyGramSurfaceView.backgroundColor = customFill ?? (isDark ? UIColor(white: 0.13, alpha: 1.0) : UIColor(white: 0.97, alpha: 1.0))
+            self.beyGramSurfaceView.layer.borderWidth = hairline
+            self.beyGramSurfaceView.layer.borderColor = (isDark ? UIColor(white: 1.0, alpha: 0.10) : UIColor(white: 0.0, alpha: 0.08)).cgColor
+            self.beyGramSurfaceView.layer.shadowOpacity = 0.0
+        case .elevated:
+            self.beyGramSurfaceView.backgroundColor = customFill ?? (isDark ? UIColor(white: 0.16, alpha: 1.0) : UIColor.white)
+            self.beyGramSurfaceView.layer.borderWidth = hairline
+            self.beyGramSurfaceView.layer.borderColor = (isDark ? UIColor(white: 1.0, alpha: 0.14) : UIColor(white: 0.0, alpha: 0.12)).cgColor
+            self.beyGramSurfaceView.layer.shadowColor = UIColor.black.cgColor
+            self.beyGramSurfaceView.layer.shadowOpacity = isDark ? 0.36 : 0.18
+            self.beyGramSurfaceView.layer.shadowRadius = 4.0
+            self.beyGramSurfaceView.layer.shadowOffset = CGSize(width: 0.0, height: 2.0)
+        case .tonal:
+            self.beyGramSurfaceView.backgroundColor = customFill ?? (isDark ? UIColor(red: 0.15, green: 0.16, blue: 0.21, alpha: 1.0) : UIColor(red: 0.93, green: 0.95, blue: 0.99, alpha: 1.0))
+            self.beyGramSurfaceView.layer.borderWidth = hairline
+            self.beyGramSurfaceView.layer.borderColor = (isDark ? UIColor(red: 0.45, green: 0.55, blue: 0.85, alpha: 0.22) : UIColor(red: 0.20, green: 0.40, blue: 0.78, alpha: 0.16)).cgColor
+            self.beyGramSurfaceView.layer.shadowOpacity = 0.0
+        case .layered:
+            self.beyGramSurfaceView.backgroundColor = customFill ?? (isDark ? UIColor(white: 0.09, alpha: 1.0) : UIColor(white: 0.985, alpha: 1.0))
+            self.beyGramSurfaceView.layer.borderWidth = hairline
+            self.beyGramSurfaceView.layer.borderColor = (isDark ? UIColor(white: 1.0, alpha: 0.22) : UIColor(white: 0.0, alpha: 0.18)).cgColor
+            self.beyGramSurfaceView.layer.shadowOpacity = 0.0
+        case .glass:
+            self.beyGramSurfaceView.backgroundColor = customFill ?? (isDark ? UIColor(white: 0.14, alpha: design.surfaceAlpha) : UIColor(white: 0.96, alpha: design.surfaceAlpha))
+            self.beyGramSurfaceView.layer.borderWidth = hairline
+            self.beyGramSurfaceView.layer.borderColor = (isDark ? UIColor(white: 1.0, alpha: 0.24) : UIColor(white: 1.0, alpha: 0.72)).cgColor
+            self.beyGramSurfaceView.layer.shadowColor = UIColor.black.cgColor
+            self.beyGramSurfaceView.layer.shadowOpacity = isDark ? 0.24 : 0.10
+            self.beyGramSurfaceView.layer.shadowRadius = 6.0
+            self.beyGramSurfaceView.layer.shadowOffset = CGSize(width: 0.0, height: 2.0)
+        }
+    }
+
     func update(size: CGSize, shape: Shape, isDark: Bool, tintColor: TintColor, isInteractive: Bool = false, isVisible: Bool = true, transition: ComponentTransition) {
+        self.lastUpdateSize = size
+        let beyGramDesign = BeyGramAppearance.shared.resolvedDesign(
+            reduceTransparency: UIAccessibility.isReduceTransparencyEnabled,
+            reduceMotion: UIAccessibility.isReduceMotionEnabled
+        )
+        let allowsNativeGlass = (beyGramDesign.style == .telegram) || (beyGramDesign.style == .liquidGlass && beyGramDesign.glassBlurEnabled)
+        self.updateBeyGramSurface(size: size, shape: shape, isDark: isDark, tintColor: tintColor, isVisible: isVisible, design: beyGramDesign, allowsNativeGlass: allowsNativeGlass)
         
         if let glassHighlightRecognizer = self.glassHighlightRecognizer {
             glassHighlightRecognizer.isEnabled = isInteractive
@@ -813,7 +938,15 @@ public class GlassBackgroundView: UIView {
             innerBackgroundView.removeFromSuperview()
         }
         
-        let params = Params(shape: shape, isDark: isDark, tintColor: tintColor, isInteractive: isInteractive, isVisible: isVisible)
+        let params = Params(
+            shape: shape,
+            isDark: isDark,
+            tintColor: tintColor,
+            isInteractive: isInteractive,
+            isVisible: isVisible,
+            beyGramStyle: beyGramDesign.style,
+            beyGramGlassQuality: beyGramDesign.effectiveGlassQuality
+        )
         if self.params != params {
             self.params = params
             
@@ -865,7 +998,7 @@ public class GlassBackgroundView: UIView {
                     if #available(iOS 26.0, *) {
                         var glassEffect: UIGlassEffect?
                         
-                        if isVisible {
+                        if isVisible && allowsNativeGlass {
                             let nativeTint = tintColor.nativeEffect(isDark: isDark)
                             let glassEffectValue = UIGlassEffect(style: nativeTint.isClear ? .clear : .regular)
                             glassEffectValue.tintColor = nativeTint.color
@@ -958,6 +1091,7 @@ public final class GlassBackgroundContainerView: UIView {
     private let legacyView: ContentView?
     private let nativeParamsView: EffectSettingsContainerView?
     private let nativeView: UIVisualEffectView?
+    private var beyGramStyleDisposable: Disposable?
     
     public var contentView: UIView {
         if let nativeView = self.nativeView {
@@ -1005,6 +1139,38 @@ public final class GlassBackgroundContainerView: UIView {
             self.addSubview(nativeParamsView)
         } else if let legacyView = self.legacyView {
             self.addSubview(legacyView)
+        }
+        
+        self.applyBeyGramContainerGlassState()
+        self.beyGramStyleDisposable = (BeyGramAppearance.shared.designChangedSignal
+        |> deliverOnMainQueue).start(next: { [weak self] _ in
+            self?.applyBeyGramContainerGlassState()
+        })
+    }
+    
+    deinit {
+        self.beyGramStyleDisposable?.dispose()
+    }
+    
+    private func applyBeyGramContainerGlassState() {
+        guard let nativeView = self.nativeView else {
+            return
+        }
+        if #available(iOS 26.0, *) {
+            let design = BeyGramAppearance.shared.resolvedDesign(
+                reduceTransparency: UIAccessibility.isReduceTransparencyEnabled,
+                reduceMotion: UIAccessibility.isReduceMotionEnabled
+            )
+            let allowsNativeGlass = (design.style == .telegram) || (design.style == .liquidGlass && design.glassBlurEnabled)
+            if allowsNativeGlass {
+                if !(nativeView.effect is UIGlassContainerEffect) {
+                    let effect = UIGlassContainerEffect()
+                    effect.spacing = self.spacing
+                    nativeView.effect = effect
+                }
+            } else {
+                nativeView.effect = nil
+            }
         }
     }
     

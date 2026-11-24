@@ -1,10 +1,8 @@
 import Foundation
 import UIKit
 import SwiftSignalKit
-import BeyGramAppearance
 import AsyncDisplayKit
 import Display
-import BeyGramAppearance
 import TelegramCore
 import TelegramPresentationData
 import ActivityIndicator
@@ -848,15 +846,6 @@ public enum SearchBarStyle {
     }
     
     var cornerDiameter: CGFloat {
-        // A BeyGram style sets its own corner radius for the plain field (#146); the glass field keeps its shape.
-        if let spec = BeyGramAppearance.shared.chatListSpec, spec.searchKind != .glass {
-            switch self {
-            case .modern, .legacy:
-                return spec.searchRadius * 2.0
-            default:
-                break
-            }
-        }
         switch self {
         case .modern, .inlineNavigation:
             return 21.0

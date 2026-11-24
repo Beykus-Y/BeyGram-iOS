@@ -2,7 +2,6 @@ import Foundation
 import UIKit
 import AsyncDisplayKit
 import Display
-import BeyGramAppearance
 import TelegramCore
 import TelegramPresentationData
 import TextNodeWithEntities
@@ -10,6 +9,7 @@ import AccountContext
 import GlassBackgroundComponent
 import ComponentFlow
 import ComponentDisplayAdapters
+import BeyGramAppearance
 
 private final class ItemNodeDeleteButtonNode: HighlightableButtonNode {
     private let pressed: () -> Void
@@ -704,8 +704,24 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
         transition.updateFrame(view: self.backgroundContainerView, frame: CGRect(origin: CGPoint(x: containerSideInset + 16.0, y: 0.0), size: backgroundSize))
         self.backgroundContainerView.update(size: backgroundSize, isDark: presentationData.theme.overallDarkAppearance, transition: ComponentTransition(transition))
         
+        let filterDesign = BeyGramAppearance.shared.resolvedDesign()
+        let filterContainerCornerRadius: CGFloat
+        if filterDesign.isBeyGramActive {
+            switch filterDesign.style {
+            case .material2:
+                filterContainerCornerRadius = 4.0
+            case .material3:
+                filterContainerCornerRadius = 16.0
+            case .signature, .beygramDefault:
+                filterContainerCornerRadius = 14.0
+            case .liquidGlass, .telegram:
+                filterContainerCornerRadius = backgroundSize.height * 0.5
+            }
+        } else {
+            filterContainerCornerRadius = backgroundSize.height * 0.5
+        }
         transition.updateFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: backgroundSize))
-        self.backgroundView.update(size: backgroundSize, cornerRadius: backgroundSize.height * 0.5, isDark: presentationData.theme.overallDarkAppearance, tintColor: .init(kind: .panel), isInteractive: true, transition: ComponentTransition(transition))
+        self.backgroundView.update(size: backgroundSize, cornerRadius: filterContainerCornerRadius, isDark: presentationData.theme.overallDarkAppearance, tintColor: .init(kind: .panel), isInteractive: true, transition: ComponentTransition(transition))
         
         var isEditing = isEditing
         if isReordering {
@@ -716,9 +732,9 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
         let previousScrollBounds = self.scrollNode.bounds
         let previousContentWidth = self.scrollNode.view.contentSize.width
         
-        if self.currentParams?.presentationData.theme !== presentationData.theme {
-            if let beyGramSpec = BeyGramAppearance.shared.chatListSpec {
-                self.selectedBackgroundNode.image = beyGramFolderChipImage(spec: beyGramSpec, theme: presentationData.theme)
+        if self.currentParams?.presentationData.theme !== presentationData.theme || filterDesign.isBeyGramActive {
+            if filterDesign.isBeyGramActive {
+                self.selectedBackgroundNode.image = generateFilledRoundedRectImage(size: CGSize(width: 36.0, height: 36.0), cornerRadius: filterDesign.chipCornerRadius, color: presentationData.theme.chatList.itemHighlightedBackgroundColor)?.stretchableImage(withLeftCapWidth: 18, topCapHeight: 18)
             } else {
                 self.selectedBackgroundNode.image = generateStretchableFilledCircleImage(diameter: 36.0, color: presentationData.theme.chatList.itemHighlightedBackgroundColor)
             }
@@ -1130,42 +1146,4 @@ private final class ReorderingGestureRecognizer: UIGestureRecognizer, UIGestureR
             }
         }
     }
-}
-
-/// The selected folder's background in a BeyGram style (issue #146): radius and fill follow the style's chip kind.
-private func beyGramFolderChipImage(spec: BeyGramChatListSpec, theme: PresentationTheme) -> UIImage? {
-    let height: CGFloat = 36.0
-    let radius = min(spec.chipRadius, height * 0.5)
-    let accent = theme.rootController.tabBar.selectedIconColor
-    let size = CGSize(width: radius * 2.0 + 2.0, height: height)
-    let image = generateImage(size, rotatedContext: { size, context in
-        context.clear(CGRect(origin: CGPoint(), size: size))
-        let rect = CGRect(origin: CGPoint(), size: size)
-        switch spec.chipKind {
-        case .accentFilled:
-            context.setFillColor(accent.withAlphaComponent(0.18).cgColor)
-            context.addPath(UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath)
-            context.fillPath()
-        case .underlined:
-            context.setFillColor(accent.cgColor)
-            context.fill(CGRect(x: 0.0, y: size.height - 2.0, width: size.width, height: 2.0))
-        case .tonalOutlined:
-            context.setFillColor(theme.chatList.itemHighlightedBackgroundColor.cgColor)
-            context.addPath(UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath)
-            context.fillPath()
-            context.setStrokeColor(theme.chatList.itemSeparatorColor.cgColor)
-            context.setLineWidth(1.0)
-            context.addPath(UIBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), cornerRadius: radius).cgPath)
-            context.strokePath()
-        case .tonal:
-            context.setFillColor(theme.chatList.itemHighlightedBackgroundColor.cgColor)
-            context.addPath(UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath)
-            context.fillPath()
-        case .ink:
-            context.setFillColor(theme.chatList.titleColor.cgColor)
-            context.addPath(UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath)
-            context.fillPath()
-        }
-    })
-    return image?.stretchableImage(withLeftCapWidth: Int(radius + 1.0), topCapHeight: Int(height * 0.5))
 }

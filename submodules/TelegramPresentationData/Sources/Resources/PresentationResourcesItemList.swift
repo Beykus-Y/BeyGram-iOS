@@ -1,8 +1,8 @@
 import Foundation
 import UIKit
 import Display
-import BeyGramAppearance
 import AppBundle
+import BeyGramAppearance
 
 public func generateItemListCheckIcon(color: UIColor) -> UIImage? {
     return generateImage(CGSize(width: 12.0, height: 10.0), rotatedContext: { size, context in
@@ -364,34 +364,7 @@ public struct PresentationResourcesItemList {
         if !top && !bottom {
             return nil
         }
-        // A BeyGram style sets the group card radius (#148). The result is cached by theme, radius and corners.
-        if let spec = BeyGramAppearance.shared.surfaceSpec {
-            let radius = min(spec.groupCardRadius, 27.0)
-            let cacheKey = "\(ObjectIdentifier(theme).hashValue)|\(radius)|\(top)|\(bottom)" as NSString
-            if let cached = beyGramCornersCache.object(forKey: cacheKey) {
-                return cached
-            }
-            let image = generateImage(CGSize(width: 56.0, height: 56.0), rotatedContext: { (size, context) in
-                let bounds = CGRect(origin: CGPoint(), size: size)
-                context.setFillColor(theme.list.blocksBackgroundColor.cgColor)
-                context.fill(bounds)
-                context.setBlendMode(.clear)
-                var corners: UIRectCorner = []
-                if top {
-                    corners.insert([.topLeft, .topRight])
-                }
-                if bottom {
-                    corners.insert([.bottomLeft, .bottomRight])
-                }
-                let path = UIBezierPath(roundedRect: bounds, byRoundingCorners: corners, cornerRadii: CGSize(width: radius, height: radius))
-                context.addPath(path.cgPath)
-                context.fillPath()
-            })?.stretchableImage(withLeftCapWidth: 28, topCapHeight: 28)
-            if let image {
-                beyGramCornersCache.setObject(image, forKey: cacheKey)
-            }
-            return image
-        }
+        let design = BeyGramAppearance.shared.resolvedDesign()
         let key: PresentationResourceKey
         if top && bottom {
             key = glass ? PresentationResourceKey.itemListCornersBothGlass : PresentationResourceKey.itemListCornersBoth
@@ -400,7 +373,8 @@ public struct PresentationResourcesItemList {
         } else {
             key = glass ? PresentationResourceKey.itemListCornersBottomGlass : PresentationResourceKey.itemListCornersBottom
         }
-        return theme.image(key.rawValue, { theme in
+        let cacheKey = design.isBeyGramActive ? (key.rawValue &+ design.style.rawValue &* 100003) : key.rawValue
+        return theme.image(cacheKey, { theme in
             return generateImage(CGSize(width: 56.0, height: 56.0), rotatedContext: { (size, context) in
                 let bounds = CGRect(origin: CGPoint(), size: size)
                 context.setFillColor(theme.list.blocksBackgroundColor.cgColor)
@@ -417,7 +391,7 @@ public struct PresentationResourcesItemList {
                     corners.insert(.bottomLeft)
                     corners.insert(.bottomRight)
                 }
-                let cornerRadius: CGFloat = glass ? 26.0 : 11.0
+                let cornerRadius: CGFloat = design.isBeyGramActive ? design.groupCardCornerRadius : (glass ? 26.0 : 11.0)
                 let path = UIBezierPath(roundedRect: bounds, byRoundingCorners: corners, cornerRadii: CGSize(width: cornerRadius, height: cornerRadius))
                 context.addPath(path.cgPath)
                 context.fillPath()
@@ -531,5 +505,3 @@ public struct PresentationResourcesItemList {
         })
     }
 }
-
-private let beyGramCornersCache = NSCache<NSString, UIImage>()

@@ -1,7 +1,7 @@
-load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library", "swift_test")
 
-# The BeyGram visual style axis (Telegram / BeyGram). It holds the style choice and the geometry tokens only;
-# colours always come from the active PresentationTheme, so every Telegram theme works with both styles.
+# The BeyGram visual style axis (Telegram Original + 5 BeyGram Android styles).
+# Independent of PresentationTheme colours; supplies geometry, surface treatment, and motion tokens.
 swift_library(
     name = "BeyGramAppearance",
     module_name = "BeyGramAppearance",
@@ -13,5 +13,15 @@ swift_library(
     ],
     visibility = [
         "//visibility:public",
+    ],
+)
+
+swift_test(
+    name = "BeyGramAppearanceTests",
+    srcs = glob([
+        "Tests/**/*.swift",
+    ]),
+    deps = [
+        ":BeyGramAppearance",
     ],
 )

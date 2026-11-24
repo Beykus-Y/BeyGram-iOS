@@ -2,7 +2,6 @@ import Foundation
 import UIKit
 import AsyncDisplayKit
 import Display
-import BeyGramAppearance
 import TelegramCore
 import SwiftSignalKit
 import TelegramPresentationData
@@ -967,9 +966,6 @@ public class ChatMessageReplyInfoNode: ASDisplayNode {
                 // Without bubbles a reply sits on the page, where its block is rounder.
                 if arguments.bubbleStyle.isBubbleless, case .bubble = arguments.type {
                     node.backgroundView.clipCornerRadius = chatMessageBubblelessInlineBlockCornerRadius
-                } else if let replyRadius = BeyGramAppearance.shared.surfaceSpec?.replyRadius {
-                    // A BeyGram style sets the radius of the reply block (#147).
-                    node.backgroundView.clipCornerRadius = replyRadius
                 } else {
                     node.backgroundView.clipCornerRadius = nil
                 }

@@ -16,7 +16,6 @@ import ChatSendMessageActionUI
 import ComponentFlow
 import AnimatedCountLabelNode
 import GlassBackgroundComponent
-import BeyGramAppearance
 import ComponentDisplayAdapters
 import StarsParticleEffect
 
@@ -351,7 +350,7 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
         guard let params = self.sendButtonGlassParams, let glassView = self.sendButtonGlassView else {
             return
         }
-        glassView.update(size: params.size, cornerRadius: BeyGramAppearance.shared.surfaceSpec?.squareSendButton == true ? 8.0 : min(params.size.width, params.size.height) * 0.5, isDark: params.isDark, tintColor: params.tintColor, isInteractive: false, isVisible: params.isEnabled && self.sendButtonGlassIsVisible, transition: transition)
+        glassView.update(size: params.size, cornerRadius: min(params.size.width, params.size.height) * 0.5, isDark: params.isDark, tintColor: params.tintColor, isInteractive: false, isVisible: params.isEnabled && self.sendButtonGlassIsVisible, transition: transition)
     }
     
     /// The send glyph drawn white on the blue glass (a theme's glyph is dark when its accent is white).

@@ -10,7 +10,6 @@ swift_library(
         "-warnings-as-errors",
     ],
     deps = [
-        "//submodules/BeyGramAppearance:BeyGramAppearance",
         "//submodules/AsyncDisplayKit",
         "//submodules/Display",
     	"//submodules/SSignalKit/SwiftSignalKit",
@@ -22,6 +21,7 @@ swift_library(
         "//submodules/TelegramUI/Components/TabBarComponent",
         "//submodules/TelegramUI/Components/TabBarLayout",
         "//submodules/TelegramUI/Components/GlassControls",
+        "//submodules/BeyGramAppearance",
     ],
     visibility = [
         "//visibility:public",

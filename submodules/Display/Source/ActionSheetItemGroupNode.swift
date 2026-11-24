@@ -1,5 +1,4 @@
 import UIKit
-import BeyGramAppearance
 import AsyncDisplayKit
 
 final class ActionSheetItemGroupNode: ASDisplayNode, ASScrollViewDelegate {
@@ -42,8 +41,7 @@ final class ActionSheetItemGroupNode: ASDisplayNode, ASScrollViewDelegate {
         
         self.clippingNode = ASDisplayNode()
         self.clippingNode.clipsToBounds = true
-        // A BeyGram style sets the radius of the sheet's groups (#148).
-        self.clippingNode.cornerRadius = BeyGramAppearance.shared.surfaceSpec?.sheetRadius ?? 16.0
+        self.clippingNode.cornerRadius = 16.0
         
         self.backgroundEffectView = UIVisualEffectView(effect: UIBlurEffect(style: self.theme.backgroundType == .light ? .light : .dark))
         

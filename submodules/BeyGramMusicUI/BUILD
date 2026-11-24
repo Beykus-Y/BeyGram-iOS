@@ -18,6 +18,8 @@ swift_library(
         "//submodules/BeyGramDesign:BeyGramDesign",
         "//submodules/BeyGramKit:BeyGramKit",
         "//submodules/BeyGramMedia:BeyGramMedia",
+        "//submodules/BeyGramMedia/BGWaveListener:BGWaveListenerSession",
+        "//submodules/BeyGramMedia/BGWaveListener:BGWaveSessionController",
         "//submodules/BeyGramMusicFormat:BeyGramMusicFormat",
         "//submodules/BeyGramMusicLibrary:BeyGramMusicLibrary",
         "//submodules/BeyGramYandexMusic:BeyGramYandexMusic",

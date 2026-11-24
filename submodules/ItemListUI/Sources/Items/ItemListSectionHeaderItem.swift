@@ -1,7 +1,6 @@
 import Foundation
 import UIKit
 import Display
-import BeyGramAppearance
 import AsyncDisplayKit
 import SwiftSignalKit
 import TelegramPresentationData
@@ -207,7 +206,7 @@ public class ItemListSectionHeaderItemNode: ListViewItemNode, ItemListItemNode {
                 textRightInset += actionLayoutAndApplyValue.0.size.width + 2.0
             }
             
-            let (titleLayout, titleApply) = makeTitleLayout(TextNodeLayoutArguments(attributedString: beyGramSectionTitle(item.text, font: titleFont, textColor: item.presentationData.theme.list.sectionHeaderTextColor), backgroundColor: nil, maximumNumberOfLines: item.multiline ? 0 : 1, truncationType: .end, constrainedSize: CGSize(width: params.width - params.leftInset - params.rightInset - textRightInset, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
+            let (titleLayout, titleApply) = makeTitleLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: item.text, font: titleFont, textColor: item.presentationData.theme.list.sectionHeaderTextColor), backgroundColor: nil, maximumNumberOfLines: item.multiline ? 0 : 1, truncationType: .end, constrainedSize: CGSize(width: params.width - params.leftInset - params.rightInset - textRightInset, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
             var accessoryTextString: NSAttributedString?
             var accessoryIcon: UIImage?
             if let accessoryText = item.accessoryText {
@@ -403,17 +402,4 @@ public class ItemListSectionHeaderItemNode: ListViewItemNode, ItemListItemNode {
     override public func animateRemoved(_ currentTimestamp: Double, duration: Double) {
         self.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.15, removeOnCompletion: false)
     }
-}
-
-/// The section header text of a BeyGram style (#148): Material 2 and Signature set it in capitals with tracking.
-private func beyGramSectionTitle(_ text: String, font: UIFont, textColor: UIColor) -> NSAttributedString {
-    guard let spec = BeyGramAppearance.shared.surfaceSpec else {
-        return NSAttributedString(string: text, font: font, textColor: textColor)
-    }
-    let string = spec.sectionLabelUppercase ? text.uppercased() : text
-    var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
-    if spec.sectionLabelTracking != 0.0 {
-        attributes[.kern] = spec.sectionLabelTracking
-    }
-    return NSAttributedString(string: string, attributes: attributes)
 }

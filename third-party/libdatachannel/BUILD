@@ -180,7 +180,7 @@ cc_library(
         "include/**/*.hpp",
         "src/**/*.h",
         "src/**/*.hpp",
-    ]),
+    ], allow_empty = True),
     includes = [
         "include",
         "include/rtc",

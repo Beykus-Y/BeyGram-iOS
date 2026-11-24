@@ -2,6 +2,8 @@ import Foundation
 import UIKit
 import Display
 import ComponentFlow
+import SwiftSignalKit
+import BeyGramAppearance
 import GlassBackgroundComponent
 
 /// The lens's resting selection, as UIKit's `_UITabSelectionView` draws it on iOS 27 (its `updateBackground` when the
@@ -143,8 +145,10 @@ public final class LiquidLensView: UIView {
         var isDark: Bool
         var isLifted: Bool
         var isCollapsed: Bool
+        var beyGramStyle: BeyGramStyle
+        var beyGramGlassQuality: BeyGramGlassQuality
 
-        init(size: CGSize, cornerRadius: CGFloat?, selectionOrigin: CGPoint, selectionSize: CGSize, inset: CGFloat, liftedInset: CGFloat, isDark: Bool, isLifted: Bool, isCollapsed: Bool) {
+        init(size: CGSize, cornerRadius: CGFloat?, selectionOrigin: CGPoint, selectionSize: CGSize, inset: CGFloat, liftedInset: CGFloat, isDark: Bool, isLifted: Bool, isCollapsed: Bool, beyGramStyle: BeyGramStyle = BeyGramAppearance.shared.style, beyGramGlassQuality: BeyGramGlassQuality = BeyGramAppearance.shared.glassQuality) {
             self.size = size
             self.cornerRadius = cornerRadius
             self.selectionOrigin = selectionOrigin
@@ -154,6 +158,8 @@ public final class LiquidLensView: UIView {
             self.isLifted = isLifted
             self.isDark = isDark
             self.isCollapsed = isCollapsed
+            self.beyGramStyle = beyGramStyle
+            self.beyGramGlassQuality = beyGramGlassQuality
         }
     }
 
@@ -193,6 +199,8 @@ public final class LiquidLensView: UIView {
     private var legacyContentMaskView: UIView?
     private var legacyContentMaskBlobView: UIImageView?
     private var legacyLiftedContentBlobMaskView: UIImageView?
+    private let beyGramSelectionView: UIView
+    private var beyGramStyleDisposable: Disposable?
 
     public var selectedContentView: UIView {
         return self.liftedContainerView
@@ -274,6 +282,10 @@ public final class LiquidLensView: UIView {
         self.punchoutView = UIView()
         self.uikitPunchoutTargetView = UIView()
         self.uikitPunchoutSinkView = UIView()
+        self.beyGramSelectionView = UIView()
+        self.beyGramSelectionView.isUserInteractionEnabled = false
+        self.beyGramSelectionView.isHidden = true
+        self.beyGramSelectionView.layer.cornerCurve = .continuous
 
         super.init(frame: CGRect())
         
@@ -324,6 +336,7 @@ public final class LiquidLensView: UIView {
             
             self.containerView.addSubview(self.liftedContainerView)
             self.containerView.addSubview(lensView)
+            self.containerView.addSubview(self.beyGramSelectionView)
             self.containerView.addSubview(self.contentView)
             self.containerView.addSubview(self.punchoutView)
             self.containerView.addSubview(self.uikitPunchoutSinkView)
@@ -390,6 +403,7 @@ public final class LiquidLensView: UIView {
             self.legacyContentMaskBlobView = legacyContentMaskBlobView
             legacyContentMaskView.addSubview(legacyContentMaskBlobView)
             
+            self.containerView.addSubview(self.beyGramSelectionView)
             self.containerView.addSubview(self.contentView)
             
             let legacyLiftedContentBlobMaskView = UIImageView()
@@ -398,6 +412,21 @@ public final class LiquidLensView: UIView {
             
             self.containerView.addSubview(self.liftedContainerView)
         }
+
+        self.beyGramStyleDisposable = (BeyGramAppearance.shared.designChangedSignal
+        |> deliverOnMainQueue).start(next: { [weak self] _ in
+            guard let self, let current = self.params else {
+                return
+            }
+            let design = BeyGramAppearance.shared.resolvedDesign(
+                reduceTransparency: UIAccessibility.isReduceTransparencyEnabled,
+                reduceMotion: UIAccessibility.isReduceMotionEnabled
+            )
+            var updated = current
+            updated.beyGramStyle = design.style
+            updated.beyGramGlassQuality = design.effectiveGlassQuality
+            self.update(params: updated, transition: .immediate)
+        })
     }
 
     required init?(coder: NSCoder) {
@@ -406,6 +435,7 @@ public final class LiquidLensView: UIView {
 
     deinit {
         self.unliftTimer?.invalidate()
+        self.beyGramStyleDisposable?.dispose()
     }
 
     public func setLiftedContainer(view: UIView) {
@@ -416,7 +446,23 @@ public final class LiquidLensView: UIView {
     }
 
     public func update(size: CGSize, cornerRadius: CGFloat? = nil, selectionOrigin: CGPoint, selectionSize: CGSize, inset: CGFloat, liftedInset: CGFloat = 4.0, isDark: Bool, isLifted: Bool, isCollapsed: Bool = false, transition: ComponentTransition) {
-        let params = Params(size: size, cornerRadius: cornerRadius, selectionOrigin: selectionOrigin, selectionSize: selectionSize, inset: inset, liftedInset: liftedInset, isDark: isDark, isLifted: isLifted, isCollapsed: isCollapsed)
+        let beyGramDesign = BeyGramAppearance.shared.resolvedDesign(
+            reduceTransparency: UIAccessibility.isReduceTransparencyEnabled,
+            reduceMotion: UIAccessibility.isReduceMotionEnabled
+        )
+        let params = Params(
+            size: size,
+            cornerRadius: cornerRadius,
+            selectionOrigin: selectionOrigin,
+            selectionSize: selectionSize,
+            inset: inset,
+            liftedInset: liftedInset,
+            isDark: isDark,
+            isLifted: isLifted,
+            isCollapsed: isCollapsed,
+            beyGramStyle: beyGramDesign.style,
+            beyGramGlassQuality: beyGramDesign.effectiveGlassQuality
+        )
         if self.params == params {
             return
         }
@@ -798,6 +844,72 @@ public final class LiquidLensView: UIView {
         transition.setFrame(view: self.restingBackgroundView, frame: CGRect(origin: CGPoint(), size: params.size))
         self.restingBackgroundView.update(isDark: params.isDark)
         self.updateRestingBackgroundAlpha(transition: transition)
+
+        let beyGramDesign = BeyGramAppearance.shared.resolvedDesign(
+            reduceTransparency: UIAccessibility.isReduceTransparencyEnabled,
+            reduceMotion: UIAccessibility.isReduceMotionEnabled
+        )
+        let allowsNativeGlass = (beyGramDesign.style == .telegram) || (beyGramDesign.style == .liquidGlass && beyGramDesign.glassBlurEnabled)
+        if allowsNativeGlass {
+            self.lensView?.isHidden = false
+            self.restingBackgroundView.isHidden = false
+            self.punchoutView.isHidden = false
+            self.beyGramSelectionView.isHidden = true
+        } else {
+            self.lensView?.isHidden = true
+            self.restingBackgroundView.isHidden = true
+            self.punchoutView.isHidden = true
+            self.beyGramSelectionView.isHidden = params.isCollapsed
+            let indicatorFrame: CGRect
+            let indicatorRadius: CGFloat
+            let indicatorColor: UIColor
+            switch beyGramDesign.style {
+            case .signature:
+                let markWidth: CGFloat = min(28.0, max(18.0, baseLensFrame.width * 0.35))
+                indicatorFrame = CGRect(
+                    x: baseLensFrame.midX - markWidth * 0.5,
+                    y: max(2.0, baseLensFrame.minY + 3.0),
+                    width: markWidth,
+                    height: 2.5
+                )
+                indicatorRadius = 1.25
+                indicatorColor = params.isDark ? UIColor(white: 0.94, alpha: 0.95) : UIColor(white: 0.10, alpha: 0.92)
+            case .material2:
+                let barWidth: CGFloat = min(baseLensFrame.width - 12.0, max(28.0, baseLensFrame.width * 0.6))
+                indicatorFrame = CGRect(
+                    x: baseLensFrame.midX - barWidth * 0.5,
+                    y: max(0.0, baseLensFrame.maxY - 5.0),
+                    width: barWidth,
+                    height: 3.0
+                )
+                indicatorRadius = 1.5
+                indicatorColor = params.isDark ? UIColor(white: 0.90, alpha: 0.85) : UIColor(white: 0.15, alpha: 0.78)
+            case .material3:
+                let pillWidth = min(64.0, max(36.0, baseLensFrame.width - 12.0))
+                let pillHeight = min(32.0, max(24.0, baseLensFrame.height - 14.0))
+                indicatorFrame = CGRect(
+                    x: baseLensFrame.midX - pillWidth * 0.5,
+                    y: baseLensFrame.midY - pillHeight * 0.5,
+                    width: pillWidth,
+                    height: pillHeight
+                )
+                indicatorRadius = pillHeight * 0.5
+                indicatorColor = params.isDark
+                    ? UIColor(red: 0.32, green: 0.44, blue: 0.68, alpha: 0.38)
+                    : UIColor(red: 0.18, green: 0.44, blue: 0.86, alpha: 0.16)
+            case .beygramDefault:
+                indicatorFrame = baseLensFrame.insetBy(dx: params.inset, dy: params.inset)
+                indicatorRadius = 16.0
+                indicatorColor = params.isDark ? UIColor(white: 1.0, alpha: 0.12) : UIColor(white: 0.0, alpha: 0.08)
+            case .liquidGlass, .telegram:
+                indicatorFrame = baseLensFrame.insetBy(dx: params.inset, dy: params.inset)
+                indicatorRadius = min(indicatorFrame.width, indicatorFrame.height) * 0.5
+                indicatorColor = params.isDark ? UIColor(white: 1.0, alpha: 0.15) : UIColor(white: 0.0, alpha: 0.09)
+            }
+            transition.setFrame(view: self.beyGramSelectionView, frame: indicatorFrame)
+            self.beyGramSelectionView.layer.cornerRadius = indicatorRadius
+            self.beyGramSelectionView.backgroundColor = indicatorColor
+        }
     }
 
     /// The resting selection shows while the lens rests: hidden while it is lifted, which on iOS 26 and later lasts

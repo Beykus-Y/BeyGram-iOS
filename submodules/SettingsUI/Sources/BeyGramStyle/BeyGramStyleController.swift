@@ -9,89 +9,134 @@ import AccountContext
 import BeyGramAppearance
 import BeyGramKit
 
-private final class BeyGramStyleArguments {
-    let select: (BeyGramStyle) -> Void
-    let selectPalette: (BeyGramPalette) -> Void
-    let setAmoled: (Bool) -> Void
+public func beyGramStyleDisplayName(_ style: BeyGramStyle, languageCode: String) -> String {
+    let l10n = BeyGramL10n.shared
+    switch style {
+    case .telegram:
+        return l10n.string(.appearanceStyleTelegram, languageCode: languageCode)
+    case .beygramDefault:
+        return l10n.string(.appearanceStyleDefault, languageCode: languageCode)
+    case .material2:
+        return l10n.string(.appearanceStyleMaterial2, languageCode: languageCode)
+    case .material3:
+        return l10n.string(.appearanceStyleMaterial3, languageCode: languageCode)
+    case .liquidGlass:
+        return l10n.string(.appearanceStyleLiquidGlass, languageCode: languageCode)
+    case .signature:
+        return l10n.string(.appearanceStyleSignature, languageCode: languageCode)
+    }
+}
 
-    init(select: @escaping (BeyGramStyle) -> Void, selectPalette: @escaping (BeyGramPalette) -> Void, setAmoled: @escaping (Bool) -> Void) {
-        self.select = select
-        self.selectPalette = selectPalette
-        self.setAmoled = setAmoled
+private func glassQualityDisplayName(_ quality: BeyGramGlassQuality, languageCode: String) -> String {
+    let l10n = BeyGramL10n.shared
+    switch quality {
+    case .auto:
+        return l10n.string(.appearanceGlassAuto, languageCode: languageCode)
+    case .high:
+        return l10n.string(.appearanceGlassHigh, languageCode: languageCode)
+    case .balanced:
+        return l10n.string(.appearanceGlassBalanced, languageCode: languageCode)
+    case .lite:
+        return l10n.string(.appearanceGlassLite, languageCode: languageCode)
+    }
+}
+
+private func navPlacementDisplayName(_ placement: BeyGramNavigationPlacement, languageCode: String) -> String {
+    let l10n = BeyGramL10n.shared
+    switch placement {
+    case .auto:
+        return l10n.string(.appearanceNavAuto, languageCode: languageCode)
+    case .pinned:
+        return l10n.string(.appearanceNavPinned, languageCode: languageCode)
+    case .floating:
+        return l10n.string(.appearanceNavFloating, languageCode: languageCode)
+    }
+}
+
+private final class BeyGramStyleArguments {
+    let selectStyle: (BeyGramStyle) -> Void
+    let selectGlass: (BeyGramGlassQuality) -> Void
+    let selectNav: (BeyGramNavigationPlacement) -> Void
+
+    init(
+        selectStyle: @escaping (BeyGramStyle) -> Void,
+        selectGlass: @escaping (BeyGramGlassQuality) -> Void,
+        selectNav: @escaping (BeyGramNavigationPlacement) -> Void
+    ) {
+        self.selectStyle = selectStyle
+        self.selectGlass = selectGlass
+        self.selectNav = selectNav
     }
 }
 
 private enum BeyGramStyleSection: Int32 {
-    case styles
+    case styles = 0
+    case glass = 1
+    case navigation = 2
 }
 
 private enum BeyGramStyleEntry: ItemListNodeEntry {
-    case header(PresentationTheme, String)
+    case styleHeader(PresentationTheme, String)
     case style(PresentationTheme, BeyGramStyle, String, Bool)
-    case info(PresentationTheme, String)
-    case paletteHeader(PresentationTheme, String)
-    case palette(PresentationTheme, BeyGramPalette, String, Bool)
-    case amoled(PresentationTheme, String, Bool)
+    case styleInfo(PresentationTheme, String)
+    case glassHeader(PresentationTheme, String)
+    case glass(PresentationTheme, BeyGramGlassQuality, String, Bool)
+    case navHeader(PresentationTheme, String)
+    case nav(PresentationTheme, BeyGramNavigationPlacement, String, Bool)
 
     var section: ItemListSectionId {
-        return BeyGramStyleSection.styles.rawValue
+        switch self {
+        case .styleHeader, .style, .styleInfo:
+            return BeyGramStyleSection.styles.rawValue
+        case .glassHeader, .glass:
+            return BeyGramStyleSection.glass.rawValue
+        case .navHeader, .nav:
+            return BeyGramStyleSection.navigation.rawValue
+        }
     }
 
     var stableId: Int32 {
         switch self {
-        case .header:
+        case .styleHeader:
             return 0
         case let .style(_, style, _, _):
             return 1 + style.rawValue
-        case .info:
-            return 100
-        case .paletteHeader:
-            return 200
-        case let .palette(_, palette, _, _):
-            return 201 + palette.rawValue
-        case .amoled:
-            return 210
+        case .styleInfo:
+            return 20
+        case .glassHeader:
+            return 30
+        case let .glass(_, quality, _, _):
+            return 31 + quality.rawValue
+        case .navHeader:
+            return 50
+        case let .nav(_, placement, _, _):
+            return 51 + placement.rawValue
         }
     }
 
     static func ==(lhs: BeyGramStyleEntry, rhs: BeyGramStyleEntry) -> Bool {
         switch lhs {
-        case let .header(lhsTheme, lhsText):
-            if case let .header(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
-                return true
-            } else {
-                return false
-            }
+        case let .styleHeader(lhsTheme, lhsText):
+            if case let .styleHeader(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText { return true }
+            return false
         case let .style(lhsTheme, lhsStyle, lhsText, lhsChecked):
-            if case let .style(rhsTheme, rhsStyle, rhsText, rhsChecked) = rhs, lhsTheme === rhsTheme, lhsStyle == rhsStyle, lhsText == rhsText, lhsChecked == rhsChecked {
-                return true
-            } else {
-                return false
-            }
-        case let .info(lhsTheme, lhsText):
-            if case let .info(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
-                return true
-            } else {
-                return false
-            }
-        case let .paletteHeader(lhsTheme, lhsText):
-            if case let .paletteHeader(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
-                return true
-            } else {
-                return false
-            }
-        case let .palette(lhsTheme, lhsPalette, lhsText, lhsChecked):
-            if case let .palette(rhsTheme, rhsPalette, rhsText, rhsChecked) = rhs, lhsTheme === rhsTheme, lhsPalette == rhsPalette, lhsText == rhsText, lhsChecked == rhsChecked {
-                return true
-            } else {
-                return false
-            }
-        case let .amoled(lhsTheme, lhsText, lhsValue):
-            if case let .amoled(rhsTheme, rhsText, rhsValue) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsValue == rhsValue {
-                return true
-            } else {
-                return false
-            }
+            if case let .style(rhsTheme, rhsStyle, rhsText, rhsChecked) = rhs, lhsTheme === rhsTheme, lhsStyle == rhsStyle, lhsText == rhsText, lhsChecked == rhsChecked { return true }
+            return false
+        case let .styleInfo(lhsTheme, lhsText):
+            if case let .styleInfo(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText { return true }
+            return false
+        case let .glassHeader(lhsTheme, lhsText):
+            if case let .glassHeader(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText { return true }
+            return false
+        case let .glass(lhsTheme, lhsQuality, lhsText, lhsChecked):
+            if case let .glass(rhsTheme, rhsQuality, rhsText, rhsChecked) = rhs, lhsTheme === rhsTheme, lhsQuality == rhsQuality, lhsText == rhsText, lhsChecked == rhsChecked { return true }
+            return false
+        case let .navHeader(lhsTheme, lhsText):
+            if case let .navHeader(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText { return true }
+            return false
+        case let .nav(lhsTheme, lhsNav, lhsText, lhsChecked):
+            if case let .nav(rhsTheme, rhsNav, rhsText, rhsChecked) = rhs, lhsTheme === rhsTheme, lhsNav == rhsNav, lhsText == rhsText, lhsChecked == rhsChecked { return true }
+            return false
         }
     }
 
@@ -102,65 +147,99 @@ private enum BeyGramStyleEntry: ItemListNodeEntry {
     func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
         let arguments = arguments as! BeyGramStyleArguments
         switch self {
-        case let .header(_, text):
+        case let .styleHeader(_, text), let .glassHeader(_, text), let .navHeader(_, text):
             return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
         case let .style(_, style, text, checked):
             return ItemListCheckboxItem(presentationData: presentationData, systemStyle: .glass, title: text, style: .left, checked: checked, zeroSeparatorInsets: false, sectionId: self.section, action: {
-                arguments.select(style)
+                arguments.selectStyle(style)
             })
-        case let .info(_, text):
+        case let .styleInfo(_, text):
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case let .paletteHeader(_, text):
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .palette(_, palette, text, checked):
+        case let .glass(_, quality, text, checked):
             return ItemListCheckboxItem(presentationData: presentationData, systemStyle: .glass, title: text, style: .left, checked: checked, zeroSeparatorInsets: false, sectionId: self.section, action: {
-                arguments.selectPalette(palette)
+                arguments.selectGlass(quality)
             })
-        case let .amoled(_, text, value):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: text, value: value, sectionId: self.section, style: .blocks, updated: { updatedValue in
-                arguments.setAmoled(updatedValue)
+        case let .nav(_, placement, text, checked):
+            return ItemListCheckboxItem(presentationData: presentationData, systemStyle: .glass, title: text, style: .left, checked: checked, zeroSeparatorInsets: false, sectionId: self.section, action: {
+                arguments.selectNav(placement)
             })
         }
     }
 }
 
-private func beyGramStyleEntries(presentationData: PresentationData, selected: BeyGramStyle) -> [BeyGramStyleEntry] {
+private func beyGramStyleEntries(
+    presentationData: PresentationData,
+    selectedStyle: BeyGramStyle,
+    selectedGlass: BeyGramGlassQuality,
+    selectedNav: BeyGramNavigationPlacement
+) -> [BeyGramStyleEntry] {
     let lang = presentationData.strings.primaryComponent.languageCode
     let l10n = BeyGramL10n.shared
-    let selected = selected == .legacyBeyGram ? BeyGramStyle.liquidGlass : selected
     var entries: [BeyGramStyleEntry] = []
-    entries.append(.header(presentationData.theme, l10n.string(.appearanceSectionStyle, languageCode: lang)))
-    for style in BeyGramStyle.selectable {
-        entries.append(.style(presentationData.theme, style, style.displayName, selected == style))
+
+    entries.append(.styleHeader(presentationData.theme, l10n.string(.appearanceSectionStyle, languageCode: lang)))
+    for style in BeyGramStyle.allCases {
+        entries.append(.style(presentationData.theme, style, beyGramStyleDisplayName(style, languageCode: lang), selectedStyle == style))
     }
-    entries.append(.info(presentationData.theme, l10n.string(.appearanceDescription, languageCode: lang)))
-    if selected != .telegram {
-        let currentPalette = BeyGramAppearance.shared.palette
-        entries.append(.paletteHeader(presentationData.theme, "PALETTE"))
-        for palette in [BeyGramPalette.telegramTheme, .warm, .graphite] {
-            entries.append(.palette(presentationData.theme, palette, palette.displayName, currentPalette == palette))
+    entries.append(.styleInfo(presentationData.theme, l10n.string(.appearanceDescription, languageCode: lang)))
+
+    if selectedStyle == .liquidGlass {
+        entries.append(.glassHeader(presentationData.theme, l10n.string(.appearanceSectionGlass, languageCode: lang)))
+        for quality in BeyGramGlassQuality.allCases {
+            entries.append(.glass(presentationData.theme, quality, glassQualityDisplayName(quality, languageCode: lang), selectedGlass == quality))
         }
-        entries.append(.amoled(presentationData.theme, "AMOLED", BeyGramAppearance.shared.amoled))
     }
+
+    if selectedStyle != .telegram {
+        entries.append(.navHeader(presentationData.theme, l10n.string(.appearanceSectionNavigation, languageCode: lang)))
+        for placement in BeyGramNavigationPlacement.allCases {
+            entries.append(.nav(presentationData.theme, placement, navPlacementDisplayName(placement, languageCode: lang), selectedNav == placement))
+        }
+    }
+
     return entries
 }
 
-/// The screen that chooses between the Telegram and BeyGram visual styles.
+/// The screen that chooses between Telegram Original and the 5 BeyGram Android design styles.
 public func beyGramStyleController(context: AccountContext) -> ViewController {
-    let arguments = BeyGramStyleArguments(select: { style in
-        BeyGramAppearance.shared.setStyle(style)
-    }, selectPalette: { palette in
-        BeyGramAppearance.shared.setPalette(palette)
-    }, setAmoled: { value in
-        BeyGramAppearance.shared.setAmoled(value)
-    })
+    let arguments = BeyGramStyleArguments(
+        selectStyle: { style in
+            BeyGramAppearance.shared.setStyle(style)
+        },
+        selectGlass: { quality in
+            BeyGramAppearance.shared.setGlassQuality(quality)
+        },
+        selectNav: { placement in
+            BeyGramAppearance.shared.setNavigationPlacement(placement)
+        }
+    )
 
-    let signal = combineLatest(context.sharedContext.presentationData, BeyGramAppearance.shared.styleSignal, BeyGramAppearance.shared.revisionSignal)
+    let signal = combineLatest(
+        context.sharedContext.presentationData,
+        BeyGramAppearance.shared.styleSignal,
+        BeyGramAppearance.shared.glassQualitySignal,
+        BeyGramAppearance.shared.navigationPlacementSignal
+    )
     |> deliverOnMainQueue
-    |> map { presentationData, selected, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
+    |> map { presentationData, selectedStyle, selectedGlass, selectedNav -> (ItemListControllerState, (ItemListNodeState, Any)) in
         let lang = presentationData.strings.primaryComponent.languageCode
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(BeyGramL10n.shared.string(.appearanceTitle, languageCode: lang)), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
-        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: beyGramStyleEntries(presentationData: presentationData, selected: selected), style: .blocks)
+        let controllerState = ItemListControllerState(
+            presentationData: ItemListPresentationData(presentationData),
+            title: .text(BeyGramL10n.shared.string(.appearanceTitle, languageCode: lang)),
+            leftNavigationButton: nil,
+            rightNavigationButton: nil,
+            backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back)
+        )
+        let listState = ItemListNodeState(
+            presentationData: ItemListPresentationData(presentationData),
+            entries: beyGramStyleEntries(
+                presentationData: presentationData,
+                selectedStyle: selectedStyle,
+                selectedGlass: selectedGlass,
+                selectedNav: selectedNav
+            ),
+            style: .blocks
+        )
         return (controllerState, (listState, arguments))
     }
 

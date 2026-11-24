@@ -2456,20 +2456,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
         let currentCustomTextEntities = self.cachedCustomTextEntities
         
         return { [weak self] item, params, first, last, firstWithHeader, nextIsPinned, nextHasActiveRevealControls in
-            var titleFont = Font.semibold(floor(item.presentationData.fontSize.itemListBaseFontSize * 16.0 / 17.0))
-            if let beyGramChatListSpec = BeyGramAppearance.shared.chatListSpec {
-                let titleFontSize = floor(item.presentationData.fontSize.itemListBaseFontSize * 16.0 / 17.0)
-                switch beyGramChatListSpec.chatTitleWeight {
-                case .normal:
-                    titleFont = Font.regular(titleFontSize)
-                case .medium:
-                    titleFont = Font.medium(titleFontSize)
-                case .semiBold:
-                    titleFont = Font.semibold(titleFontSize)
-                case .bold:
-                    titleFont = Font.bold(titleFontSize)
-                }
-            }
+            let titleFont = Font.semibold(floor(item.presentationData.fontSize.itemListBaseFontSize * 16.0 / 17.0))
             let textFont = Font.regular(floor(item.presentationData.fontSize.itemListBaseFontSize * 15.0 / 17.0))
             let italicTextFont = Font.italic(floor(item.presentationData.fontSize.itemListBaseFontSize * 15.0 / 17.0))
             let dateFont = Font.regular(floor(item.presentationData.fontSize.itemListBaseFontSize * 14.0 / 17.0))
@@ -3562,14 +3549,8 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             }
             
             attributedText = renderInstantPagePreviewIcons(attributedText, font: textFont, textColor: theme.messageTextColor)
-            if unreadCount.unread, !unreadCount.muted, BeyGramAppearance.shared.chatListSpec?.unreadPreviewEmphasis == true, attributedText.length != 0 {
-                // Signature (#146): the preview of an unread, unmuted chat reads in the title colour.
-                let emphasised = NSMutableAttributedString(attributedString: attributedText)
-                emphasised.addAttribute(.foregroundColor, value: theme.titleColor, range: NSRange(location: 0, length: emphasised.length))
-                attributedText = emphasised
-            }
             textAttributedString = attributedText
-
+            
             let dateText: String
             var topIndex: EngineMessage.Index?
             switch item.content {
@@ -5665,6 +5646,9 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         // The side list ends without a closing separator.
                         strongSelf.separatorNode.isHidden = true
                     }
+                    if !BeyGramAppearance.shared.resolvedDesign().showListDividers {
+                        strongSelf.separatorNode.isHidden = true
+                    }
                     strongSelf.separatorBaseIsHidden = strongSelf.separatorNode.isHidden
                     strongSelf.updateSideListSeparatorVisibility()
                     
@@ -5696,36 +5680,6 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         transition.updateBackgroundColor(node: strongSelf.backgroundNode, color: backgroundColor)
                     } else {
                         strongSelf.backgroundNode.backgroundColor = backgroundColor
-                    }
-                    
-                    // A BeyGram style draws the archive row as a card and Signature's rows as inset tiles (#146).
-                    if let beyGramSpec = BeyGramAppearance.shared.chatListSpec {
-                        var cardInset: CGFloat = 0.0
-                        var cardRadius: CGFloat = 0.0
-                        var cardColor: UIColor?
-                        if case .groupReference = item.content {
-                            if beyGramSpec.archiveKind != .flat {
-                                cardInset = 8.0
-                                cardRadius = beyGramSpec.archiveRadius
-                                cardColor = theme.itemHighlightedBackgroundColor.withAlphaComponent(0.6)
-                            }
-                        } else if beyGramSpec.rowRadius > 0.0 {
-                            cardInset = beyGramSpec.rowInset
-                            cardRadius = beyGramSpec.rowRadius
-                        }
-                        if cardRadius > 0.0 {
-                            let cardFrame = CGRect(origin: CGPoint(x: cardInset, y: 1.0), size: CGSize(width: layout.contentSize.width - cardInset * 2.0, height: itemHeight - 2.0))
-                            strongSelf.backgroundNode.frame = cardFrame
-                            strongSelf.backgroundNode.layer.cornerRadius = cardRadius
-                            strongSelf.backgroundNode.layer.masksToBounds = true
-                            if let cardColor {
-                                strongSelf.backgroundNode.backgroundColor = cardColor
-                            }
-                        } else {
-                            strongSelf.backgroundNode.layer.cornerRadius = 0.0
-                        }
-                    } else {
-                        strongSelf.backgroundNode.layer.cornerRadius = 0.0
                     }
                     
                     if let inlineNavigationLocation = item.interaction.inlineNavigationLocation {

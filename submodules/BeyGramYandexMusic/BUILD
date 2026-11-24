@@ -23,7 +23,10 @@ swift_test(
         "Tests/BGYandexTrackInfoTests.swift",
         "Tests/BGYandexWaveQueueTests.swift",
         "Tests/BGYandexWavePlaybackCoordinatorTests.swift",
+        "Tests/BGMixPlaybackRecoveryTests.swift",
     ],
+    data = ["Tests/Fixtures/synthetic-tone.mp3"],
+    linkopts = ["-framework", "AVFoundation"],
     deps = [
         ":BeyGramYandexMusic",
     ],

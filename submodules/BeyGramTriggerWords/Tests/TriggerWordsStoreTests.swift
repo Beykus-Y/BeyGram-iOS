@@ -110,4 +110,24 @@ final class TriggerWordsStoreTests: XCTestCase {
                                                      scope: .onlyMutedChats, account: account, now: now)
         XCTAssertEqual(decision?.postAlert, false)
     }
+
+    func testUnknownRuleModeIsDroppedWithoutLosingValidRules() throws {
+        let kv = MemoryKeyValueStore()
+        let json = """
+        {
+          "rules": [
+            {"id":"11111111-1111-1111-1111-111111111111","pattern":"hello","mode":"wholeWord","ignoreCase":true,"ignoreDiacritics":false,"isEnabled":true},
+            {"id":"22222222-2222-2222-2222-222222222222","pattern":"future","mode":"unknownFutureMode","ignoreCase":true,"ignoreDiacritics":false,"isEnabled":true},
+            {"id":"33333333-3333-3333-3333-333333333333","pattern":"\\\\btest\\\\b","mode":"regex","ignoreCase":true,"ignoreDiacritics":false,"isEnabled":true}
+          ],
+          "scope": "allChats",
+          "mentions": []
+        }
+        """
+        kv.set(Data(json.utf8), forKey: "trigger_words")
+        let store = TriggerWordsStore(storage: kv)
+        XCTAssertEqual(store.state.scope, .allChats)
+        XCTAssertEqual(store.state.rules.count, 2)
+        XCTAssertEqual(store.state.rules.map(\.mode), [.wholeWord, .regex])
+    }
 }

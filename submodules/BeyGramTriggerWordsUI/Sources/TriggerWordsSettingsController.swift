@@ -25,7 +25,7 @@ private final class TriggerWordsViewControllerImpl: BeyGramScrollViewController,
     private let addHeader = BeyGramTypography.makeLabel(style: .footnote, weight: .semibold, lines: 1)
     private let addCard = BeyGramCardView(spacing: 10)
     private let patternField = UITextField()
-    private let modeControl = UISegmentedControl(items: ["Whole Word", "Substring"])
+    private let modeControl = UISegmentedControl(items: ["Whole Word", "Substring", "Regex"])
     private let addButton = BeyGramActionButton(style: .primary)
     private let statusLabel = BeyGramTypography.makeLabel(style: .footnote, weight: .medium, lines: 0)
 
@@ -130,7 +130,15 @@ private final class TriggerWordsViewControllerImpl: BeyGramScrollViewController,
         self.patternField.textColor = palette.primaryText
         self.modeControl.setTitle(l10n.string(.triggerModeWholeWord, languageCode: lang), forSegmentAt: 0)
         self.modeControl.setTitle(l10n.string(.triggerModeAnywhere, languageCode: lang), forSegmentAt: 1)
-        self.modeControl.selectedSegmentIndex = self.draftMode == .wholeWord ? 0 : 1
+        self.modeControl.setTitle(l10n.string(.triggerModeRegex, languageCode: lang), forSegmentAt: 2)
+        switch self.draftMode {
+        case .wholeWord:
+            self.modeControl.selectedSegmentIndex = 0
+        case .anywhere:
+            self.modeControl.selectedSegmentIndex = 1
+        case .regex:
+            self.modeControl.selectedSegmentIndex = 2
+        }
 
         let canAdd = !self.draftPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.addButton.configure(title: l10n.string(.triggerAddAction, languageCode: lang), style: .primary, palette: palette, isEnabled: canAdd)
@@ -158,7 +166,15 @@ private final class TriggerWordsViewControllerImpl: BeyGramScrollViewController,
         } else {
             for (idx, rule) in rules.enumerated() {
                 let row = BeyGramRowView()
-                let modeTitle = rule.mode == .wholeWord ? l10n.string(.triggerModeWholeWord, languageCode: lang) : l10n.string(.triggerModeAnywhere, languageCode: lang)
+                let modeTitle: String
+                switch rule.mode {
+                case .wholeWord:
+                    modeTitle = l10n.string(.triggerModeWholeWord, languageCode: lang)
+                case .anywhere:
+                    modeTitle = l10n.string(.triggerModeAnywhere, languageCode: lang)
+                case .regex:
+                    modeTitle = l10n.string(.triggerModeRegex, languageCode: lang)
+                }
                 row.configure(
                     iconName: "tag",
                     iconTint: rule.isEnabled ? palette.accent : palette.secondaryText,
@@ -251,7 +267,14 @@ private final class TriggerWordsViewControllerImpl: BeyGramScrollViewController,
     }
 
     @objc private func modeChanged() {
-        self.draftMode = self.modeControl.selectedSegmentIndex == 0 ? .wholeWord : .anywhere
+        switch self.modeControl.selectedSegmentIndex {
+        case 0:
+            self.draftMode = .wholeWord
+        case 1:
+            self.draftMode = .anywhere
+        default:
+            self.draftMode = .regex
+        }
         self.render()
     }
 
@@ -264,8 +287,14 @@ private final class TriggerWordsViewControllerImpl: BeyGramScrollViewController,
             switch err {
             case .emptyPattern:
                 self.statusMessage = l10n.string(.triggerEmptyPatternStatus, languageCode: lang)
-            case .patternTooLong, .tooManyRules:
-                self.statusMessage = l10n.string(.commonError, languageCode: lang)
+            case .patternTooLong:
+                self.statusMessage = l10n.string(.triggerTooLongStatus, languageCode: lang)
+            case .tooManyRules:
+                self.statusMessage = l10n.string(.triggerTooManyStatus, languageCode: lang)
+            case .badRegex:
+                self.statusMessage = l10n.string(.triggerBadRegexStatus, languageCode: lang)
+            case .regexMatchesEmpty:
+                self.statusMessage = l10n.string(.triggerRegexMatchesEmptyStatus, languageCode: lang)
             }
         } else {
             self.draftPattern = ""

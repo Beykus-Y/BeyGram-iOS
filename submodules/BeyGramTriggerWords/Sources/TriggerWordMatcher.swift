@@ -5,12 +5,11 @@ import Foundation
 /// This file is pure logic: no TDLib, no UI, no storage. The app layer feeds it the
 /// text of incoming messages and the stored rules.
 ///
-/// Supported modes: whole word (default) and anywhere in text. Regular expressions are
-/// intentionally not implemented yet: the Android spec requires RE2 (linear time), and
-/// `NSRegularExpression` is backtracking, so it cannot give that guarantee.
+/// Supported modes: whole word (default), anywhere in text, and RE2 regular expressions.
 public enum TriggerWordMode: String, Codable, Equatable {
     case wholeWord
     case anywhere
+    case regex
 }
 
 public struct TriggerWordRule: Codable, Equatable, Identifiable {
@@ -45,6 +44,8 @@ public enum TriggerWordValidationError: Error, Equatable {
     case emptyPattern
     case patternTooLong
     case tooManyRules
+    case badRegex
+    case regexMatchesEmpty
 }
 
 public enum TriggerWordMatcher {
@@ -54,6 +55,21 @@ public enum TriggerWordMatcher {
         if existingCount >= TriggerWordRule.maxRules {
             return .tooManyRules
         }
+        if rule.mode == .regex {
+            if let problem = TriggerRegexValidator.validate(rule.pattern, ignoreCase: rule.ignoreCase) {
+                switch problem {
+                case .empty:
+                    return .emptyPattern
+                case .tooLong:
+                    return .patternTooLong
+                case .badRegex:
+                    return .badRegex
+                case .regexMatchesEmpty:
+                    return .regexMatchesEmpty
+                }
+            }
+            return nil
+        }
         if rule.pattern.count > TriggerWordRule.maxPatternLength {
             return .patternTooLong
         }
@@ -61,6 +77,30 @@ public enum TriggerWordMatcher {
             return .emptyPattern
         }
         return nil
+    }
+
+    private static let regexCacheLock = NSLock()
+    private static var regexCache: [String: TriggerRegex] = [:]
+
+    private static func cachedRegex(pattern: String, ignoreCase: Bool) -> TriggerRegex? {
+        let trimmed = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = "\(ignoreCase ? "i" : "s"):\(trimmed)"
+        regexCacheLock.lock()
+        if let existing = regexCache[key] {
+            regexCacheLock.unlock()
+            return existing
+        }
+        regexCacheLock.unlock()
+        guard let compiled = TriggerRegex(pattern: trimmed, ignoreCase: ignoreCase) else {
+            return nil
+        }
+        regexCacheLock.lock()
+        if regexCache.count >= 128 {
+            regexCache.removeAll(keepingCapacity: true)
+        }
+        regexCache[key] = compiled
+        regexCacheLock.unlock()
+        return compiled
     }
 
     /// Returns the enabled rules that match `text`. The text must be an incoming message's
@@ -72,6 +112,13 @@ public enum TriggerWordMatcher {
     }
 
     public static func matches(_ rule: TriggerWordRule, text: String) -> Bool {
+        if rule.mode == .regex {
+            guard TriggerRegexValidator.validate(rule.pattern, ignoreCase: rule.ignoreCase) == nil,
+                  let regex = cachedRegex(pattern: rule.pattern, ignoreCase: rule.ignoreCase) else {
+                return false
+            }
+            return regex.matches(text)
+        }
         let haystack = normalize(text, ignoreCase: rule.ignoreCase, ignoreDiacritics: rule.ignoreDiacritics)
         let needle = normalize(rule.pattern, ignoreCase: rule.ignoreCase, ignoreDiacritics: rule.ignoreDiacritics)
         guard !needle.isEmpty, needle.count <= haystack.count else {
@@ -82,6 +129,8 @@ public enum TriggerWordMatcher {
             return firstOccurrence(of: needle, in: haystack, from: 0, wholeWord: false) != nil
         case .wholeWord:
             return firstOccurrence(of: needle, in: haystack, from: 0, wholeWord: true) != nil
+        case .regex:
+            return false
         }
     }
 

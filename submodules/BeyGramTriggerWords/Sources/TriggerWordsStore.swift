@@ -41,10 +41,34 @@ public struct TriggerWordMention: Codable, Equatable, Identifiable {
     }
 }
 
+private struct FailableRule: Decodable {
+    let value: TriggerWordRule?
+    init(from decoder: Decoder) {
+        self.value = try? TriggerWordRule(from: decoder)
+    }
+}
+
 public struct TriggerWordState: Codable, Equatable {
     public var rules: [TriggerWordRule] = []
     public var scope: TriggerWordScope = .onlyMutedChats
     public var mentions: [TriggerWordMention] = []
+
+    public init(rules: [TriggerWordRule] = [], scope: TriggerWordScope = .onlyMutedChats, mentions: [TriggerWordMention] = []) {
+        self.rules = rules
+        self.scope = scope
+        self.mentions = mentions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let failable = try container.decodeIfPresent([FailableRule].self, forKey: .rules) {
+            self.rules = failable.compactMap(\.value)
+        } else {
+            self.rules = []
+        }
+        self.scope = try container.decodeIfPresent(TriggerWordScope.self, forKey: .scope) ?? .onlyMutedChats
+        self.mentions = try container.decodeIfPresent([TriggerWordMention].self, forKey: .mentions) ?? []
+    }
 }
 
 public final class TriggerWordsStore {

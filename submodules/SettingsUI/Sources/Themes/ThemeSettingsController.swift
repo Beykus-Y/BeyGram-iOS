@@ -525,7 +525,7 @@ private func themeSettingsControllerEntries(
     entries.append(.beyGramStyle(
         presentationData.theme,
         BeyGramL10n.shared.string(.settingsAppearanceTitle, languageCode: beyGramLang),
-        BeyGramAppearance.shared.style.displayName
+        beyGramStyleDisplayName(BeyGramAppearance.shared.style, languageCode: beyGramLang)
     ))
     entries.append(.powerSaving)
     entries.append(.stickersAndEmoji)

@@ -140,6 +140,42 @@ final class BGYandexTests: XCTestCase {
         XCTAssertEqual(BGYandexTrackResolver.fileName(trackId: "../12/3"), "ym-123.mp3")
     }
 
+    func testDiscardUnplayableFileRemovesCacheByYandexRowKey() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("bgyandex-cache-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let service = BGYandexService(
+            credentials: BGYandexCredentials(clientId: "id", clientSecret: "secret"),
+            cacheDirectory: directory
+        )
+        let cached = directory.appendingPathComponent(BGYandexTrackResolver.fileName(trackId: "123"))
+        try Data([0x49, 0x44, 0x33]).write(to: cached)
+        XCTAssertNotNil(service.resolver.cachedFile(trackId: "123"))
+
+        service.discardUnplayableFile(rowKey: "ym:123:456")
+
+        XCTAssertNil(service.resolver.cachedFile(trackId: "123"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cached.path))
+    }
+
+    func testDiscardUnplayableFileIgnoresNonYandexRowKey() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("bgyandex-cache-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let service = BGYandexService(
+            credentials: BGYandexCredentials(clientId: "id", clientSecret: "secret"),
+            cacheDirectory: directory
+        )
+        let cached = directory.appendingPathComponent(BGYandexTrackResolver.fileName(trackId: "123"))
+        try Data([0x49, 0x44, 0x33]).write(to: cached)
+
+        service.discardUnplayableFile(rowKey: "local:123")
+
+        XCTAssertNotNil(service.resolver.cachedFile(trackId: "123"))
+    }
+
     func testErrorMappingForStatuses() {
         XCTAssertEqual(BGYandexClient.error(for: nil), .network)
         XCTAssertEqual(BGYandexClient.error(for: BGYandexHTTPResponse(statusCode: 401, body: Data(), retryAfterHeader: nil)), .sessionExpired)

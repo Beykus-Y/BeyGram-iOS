@@ -1,7 +1,6 @@
 import Foundation
 import UIKit
 import Display
-import BeyGramAppearance
 import TelegramPresentationData
 import ComponentFlow
 import ComponentDisplayAdapters
@@ -15,6 +14,7 @@ import AppBundle
 import SearchBarNode
 import TabSelectionRecognizer
 import TabBarLayout
+import BeyGramAppearance
 
 /// The items VoiceOver may reach: while search is active every item but the selected one is faded out.
 func tabBarAccessibleItemIds<Id: Hashable>(ids: [Id], selectedId: Id?, isSearchActive: Bool) -> [Id] {
@@ -170,7 +170,9 @@ public final class NavigationSearchView: UIView {
         transition.setFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: backgroundSize))
         let alphaTransition: ComponentTransition = transition.animation.isImmediate ? .immediate : .easeInOut(duration: 0.25)
 
-        self.backgroundView.update(size: backgroundSize, cornerRadius: backgroundSize.height * 0.5, isDark: params.theme.overallDarkAppearance, tintColor: .init(kind: .untinted), isInteractive: true, transition: transition)
+        let searchDesign = BeyGramAppearance.shared.resolvedDesign()
+        let searchCornerRadius = searchDesign.isBeyGramActive ? searchDesign.searchCornerRadius : backgroundSize.height * 0.5
+        self.backgroundView.update(size: backgroundSize, cornerRadius: searchCornerRadius, isDark: params.theme.overallDarkAppearance, tintColor: .init(kind: .untinted), isInteractive: true, transition: transition)
 
         if self.iconView.image == nil {
             self.iconView.image = UIImage(bundleImageName: "Navigation/Search")?.withRenderingMode(.alwaysTemplate)
@@ -488,6 +490,8 @@ public final class TabBarComponent: Component {
     /// A horizontal regular bar takes iOS 27's portrait tab bar layout (`tabBarSystemItemsLayout`); without it, its
     /// items share the available width (`tabBarItemsLayout`), as where iOS would switch to its wide bar.
     public let usesSystemLayout: Bool
+    public let beyGramStyle: BeyGramStyle
+    public let beyGramFloatingNavigation: Bool
 
     public init(
         theme: PresentationTheme,
@@ -500,7 +504,9 @@ public final class TabBarComponent: Component {
         outerInsets: UIEdgeInsets,
         axis: Axis,
         isCompact: Bool,
-        usesSystemLayout: Bool = true
+        usesSystemLayout: Bool = true,
+        beyGramStyle: BeyGramStyle = BeyGramAppearance.shared.style,
+        beyGramFloatingNavigation: Bool = BeyGramAppearance.shared.resolvedDesign().floatingNavigation
     ) {
         self.theme = theme
         self.tintSelectedItem = tintSelectedItem
@@ -513,6 +519,8 @@ public final class TabBarComponent: Component {
         self.axis = axis
         self.isCompact = isCompact
         self.usesSystemLayout = usesSystemLayout
+        self.beyGramStyle = beyGramStyle
+        self.beyGramFloatingNavigation = beyGramFloatingNavigation
     }
     
     public static func ==(lhs: TabBarComponent, rhs: TabBarComponent) -> Bool {
@@ -547,6 +555,12 @@ public final class TabBarComponent: Component {
             return false
         }
         if lhs.usesSystemLayout != rhs.usesSystemLayout {
+            return false
+        }
+        if lhs.beyGramStyle != rhs.beyGramStyle {
+            return false
+        }
+        if lhs.beyGramFloatingNavigation != rhs.beyGramFloatingNavigation {
             return false
         }
         return true
@@ -942,13 +956,20 @@ public final class TabBarComponent: Component {
             } else {
                 itemsLayout = tabBarItemsLayout(axis: component.axis, isCompact: component.isCompact, unboundItemWidths: titleWidths.map { $0 + 10.0 * 2.0 }, availableLength: availableLength)
             }
-            let tabsSize = itemsLayout.size
+            let isPinnedBeyGram = component.axis == .horizontal && component.beyGramStyle != .telegram && !component.beyGramFloatingNavigation
+            let pinnedHorizontalOffset: CGFloat = isPinnedBeyGram ? max(0.0, floor((availableLength - itemsLayout.size.width) * 0.5)) : 0.0
+            let tabsSize: CGSize = isPinnedBeyGram
+                ? CGSize(width: availableLength, height: itemsLayout.size.height + component.outerInsets.bottom)
+                : itemsLayout.size
 
             var selectedItemFrame: CGRect?
             for index in 0 ..< component.items.count {
                 let item = component.items[index]
                 
                 var itemFrame = itemsLayout.itemFrames[index]
+                if pinnedHorizontalOffset > 0.0 {
+                    itemFrame.origin.x += pinnedHorizontalOffset
+                }
                 let itemSize = itemFrame.size
                 
                 let itemView: ComponentView<Empty>
@@ -1080,21 +1101,13 @@ public final class TabBarComponent: Component {
             transition.setFrame(view: self.liquidLensView, frame: CGRect(origin: CGPoint(), size: tabsSize))
             
             var lensSize: CGSize = tabsSize
+            let lensBarSize = isPinnedBeyGram ? CGSize(width: tabsSize.width, height: itemsLayout.size.height) : tabsSize
             var lensSelectionFrame = tabBarLensSelectionFrame(
                 axis: component.axis,
-                barSize: tabsSize,
+                barSize: lensBarSize,
                 selectedItemFrame: selectedItemFrame,
                 drag: self.selectionGestureState.map { (origin: $0.current, itemLength: $0.itemLength) }
             )
-            // A BeyGram style sets the selection pill (#145): none for Material 2 and Signature's ink, else its own size.
-            if let pillSpec = BeyGramAppearance.shared.navigationSpec, component.axis == .horizontal, !(component.search?.isActive ?? false) {
-                if !pillSpec.showSelectionPill {
-                    lensSelectionFrame = CGRect(origin: CGPoint(x: lensSelectionFrame.midX, y: lensSelectionFrame.midY), size: CGSize())
-                } else {
-                    let pillSize = CGSize(width: min(pillSpec.pillWidth + 8.0, lensSelectionFrame.width), height: min(pillSpec.pillHeight + 8.0, lensSelectionFrame.height))
-                    lensSelectionFrame = CGRect(origin: CGPoint(x: lensSelectionFrame.midX - pillSize.width * 0.5, y: lensSelectionFrame.midY - pillSize.height * 0.5), size: pillSize)
-                }
-            }
             var isLensCollapsed = false
             if let search, search.isActive {
                 isLensCollapsed = true
@@ -1102,7 +1115,26 @@ public final class TabBarComponent: Component {
                 lensSelectionFrame = CGRect(x: 0.0, y: 0.0, width: 48.0, height: 48.0)
             }
             
-            self.liquidLensView.update(size: lensSize, cornerRadius: component.axis == .vertical ? lensSize.width * 0.5 : nil, selectionOrigin: lensSelectionFrame.origin, selectionSize: lensSelectionFrame.size, inset: 4.0, isDark: component.theme.overallDarkAppearance, isLifted: self.selectionGestureState != nil && component.isLiftedStateEnabled, isCollapsed: isLensCollapsed, transition: transition)
+            let styleTabCornerRadius: CGFloat?
+            if isPinnedBeyGram {
+                styleTabCornerRadius = 0.0
+            } else if component.beyGramStyle != .telegram {
+                switch component.beyGramStyle {
+                case .material2:
+                    styleTabCornerRadius = 4.0
+                case .material3:
+                    styleTabCornerRadius = 16.0
+                case .signature:
+                    styleTabCornerRadius = 14.0
+                case .beygramDefault:
+                    styleTabCornerRadius = 20.0
+                case .liquidGlass, .telegram:
+                    styleTabCornerRadius = nil
+                }
+            } else {
+                styleTabCornerRadius = nil
+            }
+            self.liquidLensView.update(size: lensSize, cornerRadius: component.axis == .vertical ? lensSize.width * 0.5 : styleTabCornerRadius, selectionOrigin: lensSelectionFrame.origin, selectionSize: lensSelectionFrame.size, inset: 4.0, isDark: component.theme.overallDarkAppearance, isLifted: self.selectionGestureState != nil && component.isLiftedStateEnabled, isCollapsed: isLensCollapsed, transition: transition)
 
             var size = tabsSize
 
@@ -1332,11 +1364,7 @@ private final class ItemComponent: Component {
             self.state = state
 
             let unselectedColor = tabBarUnselectedItemColor(theme: component.theme)
-            var iconSelectedColor = component.theme.rootController.tabBar.selectedTextColor
-            if let spec = BeyGramAppearance.shared.navigationSpec, spec.selectedInk {
-                iconSelectedColor = component.theme.list.itemPrimaryTextColor
-            }
-            let iconTintColor = (component.isSelected && component.tintSelectedItem && !component.isSearchActive) ? iconSelectedColor : unselectedColor
+            let iconTintColor = (component.isSelected && component.tintSelectedItem && !component.isSearchActive) ? component.theme.rootController.tabBar.selectedTextColor : unselectedColor
 
             let title: String
             let badgeValue: String?
@@ -1541,33 +1569,11 @@ private final class ItemComponent: Component {
             }
 
             // `_UITabBarItemData`'s stacked title: 10pt medium, semibold when selected (its state 2).
-            // BeyGram's bottom bar takes the label size and weights of the chosen NavigationSpec (#145).
-            let beyGramSpec = BeyGramAppearance.shared.navigationSpec
-            func beyGramWeightedFont(_ weight: BeyGramNavigationLabelWeight, size: CGFloat) -> UIFont {
-                switch weight {
-                case .normal:
-                    return Font.regular(size)
-                case .medium:
-                    return Font.medium(size)
-                case .semiBold:
-                    return Font.semibold(size)
-                case .bold:
-                    return Font.bold(size)
-                }
-            }
-            var titleFont = component.isSelected ? Font.semibold(10.0) : Font.medium(10.0)
-            if let beyGramSpec {
-                titleFont = beyGramWeightedFont(component.isSelected ? beyGramSpec.selectedLabelWeight : beyGramSpec.labelWeight, size: beyGramSpec.labelSize)
-            }
-            var titleSelectedColor = component.theme.rootController.tabBar.selectedTextColor
-            if let beyGramSpec, beyGramSpec.selectedInk || beyGramSpec.selectedLabelOnSurface {
-                // Signature draws the active tab in ink, Material 3 keeps the label in the primary text colour.
-                titleSelectedColor = component.theme.list.itemPrimaryTextColor
-            }
+            let titleFont = component.isSelected ? Font.semibold(10.0) : Font.medium(10.0)
             let titleSize = self.title.update(
                 transition: .immediate,
                 component: AnyComponent(MultilineTextComponent(
-                    text: .plain(NSAttributedString(string: title, font: titleFont, textColor: (component.isSelected && component.tintSelectedItem) ? titleSelectedColor : unselectedColor))
+                    text: .plain(NSAttributedString(string: title, font: titleFont, textColor: (component.isSelected && component.tintSelectedItem) ? component.theme.rootController.tabBar.selectedTextColor : unselectedColor))
                 )),
                 environment: {},
                 containerSize: CGSize(width: availableSize.width, height: 100.0)

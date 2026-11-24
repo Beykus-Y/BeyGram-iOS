@@ -14,6 +14,8 @@ swift_library(
     deps = [
         "//submodules/Display",
         "//submodules/ComponentFlow",
+        "//submodules/SSignalKit/SwiftSignalKit",
+        "//submodules/BeyGramAppearance",
         "//submodules/TelegramUI/Components/GlassBackgroundComponent",
     ],
     visibility = [
