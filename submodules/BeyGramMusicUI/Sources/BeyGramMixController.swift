@@ -130,7 +130,7 @@ private final class BeyGramMixSettingsViewControllerImpl: BeyGramScrollViewContr
         self.equalizerRow.configure(
             iconName: "slider.vertical.3",
             iconTint: palette.accent,
-            title: l10n.string(.equalizerTitle, languageCode: lang),
+            title: BeyGramAndroidStrings.shared.string("equalizer_title", languageCode: lang),
             value: BeyGramMusicSession.shared.currentEqualizer.enabled ? l10n.string(.commonOn, languageCode: lang) : l10n.string(.commonOff, languageCode: lang),
             showsChevron: true,
             showSeparator: false,

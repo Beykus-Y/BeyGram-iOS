@@ -14,6 +14,6 @@ generated from them, never edited by hand.
   `python3 tools/l10n/android_strings.py --android-res <BeyGram>/app/src/main/res`.
 - Server-sent text (names, messages, URLs, file names, diagnostics) is never looked up here.
 
-Not done yet: moving the screens' hardcoded `isRu ? ... : ...` strings and the
+
 older `BeyGramL10n` keys onto these tables, a CI search for hardcoded strings, `CFBundleLocalizations`, the manual screen matrix.
 The older `BeyGramL10n` (en/ru) stays until its keys are moved.

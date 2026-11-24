@@ -98,19 +98,19 @@ private final class BeyGramEqualizerViewControllerImpl: BeyGramScrollViewControl
     }
 
     private func presetTitle(_ preset: BeyGramEqualizerPreset, lang: String) -> String {
-        let key: BeyGramStringKey
+        let key: String
         switch preset {
-        case .flat: key = .equalizerPresetFlat
-        case .bass: key = .equalizerPresetBass
-        case .vocal: key = .equalizerPresetVocal
-        case .pop: key = .equalizerPresetPop
-        case .rock: key = .equalizerPresetRock
-        case .electronic: key = .equalizerPresetElectronic
-        case .classical: key = .equalizerPresetClassical
-        case .jazz: key = .equalizerPresetJazz
-        case .custom: key = .equalizerPresetCustom
+        case .flat: key = "equalizer_preset_flat"
+        case .bass: key = "equalizer_preset_bass"
+        case .vocal: key = "equalizer_preset_vocal"
+        case .pop: key = "equalizer_preset_pop"
+        case .rock: key = "equalizer_preset_rock"
+        case .electronic: key = "equalizer_preset_electronic"
+        case .classical: key = "equalizer_preset_classical"
+        case .jazz: key = "equalizer_preset_jazz"
+        case .custom: key = "equalizer_preset_custom"
         }
-        return BeyGramL10n.shared.string(key, languageCode: lang)
+        return BeyGramAndroidStrings.shared.string(key, languageCode: lang)
     }
 
     private func render() {
@@ -118,16 +118,15 @@ private final class BeyGramEqualizerViewControllerImpl: BeyGramScrollViewControl
             return
         }
         let lang = self.presentationData.strings.primaryComponent.languageCode
-        let l10n = BeyGramL10n.shared
         let palette = BeyGramThemePalette(theme: self.presentationData.theme)
 
-        self.title = l10n.string(.equalizerTitle, languageCode: lang)
+        self.title = BeyGramAndroidStrings.shared.string("equalizer_title", languageCode: lang)
 
         self.enableCard.apply(palette: palette)
         self.enableRow.configure(
             iconName: "slider.vertical.3",
             iconTint: palette.accent,
-            title: l10n.string(.equalizerEnable, languageCode: lang),
+            title: BeyGramAndroidStrings.shared.string("equalizer_enabled_title", languageCode: lang),
             subtitle: nil,
             switchValue: self.settings.enabled,
             showSeparator: false,
@@ -157,7 +156,7 @@ private final class BeyGramEqualizerViewControllerImpl: BeyGramScrollViewControl
             }
             row.value.text = String(format: "%+.1f dB", Float(levels[index]) / 100.0)
         }
-        self.resetButton.configure(title: l10n.string(.equalizerReset, languageCode: lang), style: .secondary, palette: palette, isEnabled: self.settings.selectedPreset != .flat)
+        self.resetButton.configure(title: BeyGramAndroidStrings.shared.string("equalizer_reset", languageCode: lang), style: .secondary, palette: palette, isEnabled: self.settings.selectedPreset != .flat)
     }
 
     @objc private func presetTapped(_ sender: UIButton) {

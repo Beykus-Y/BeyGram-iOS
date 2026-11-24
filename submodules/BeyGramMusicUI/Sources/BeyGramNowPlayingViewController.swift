@@ -217,8 +217,8 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
 
         self.title = l10n.string(.musicTitle, languageCode: lang)
 
-        self.tabControl.setTitle(isRu ? "Плеер" : "Player", forSegmentAt: 0)
-        self.tabControl.setTitle(isRu ? "Очередь (\(self.currentState.queue.count))" : "Queue (\(self.currentState.queue.count))", forSegmentAt: 1)
+        self.tabControl.setTitle(BeyGramAndroidStrings.shared.string("player_pane_title", languageCode: lang), forSegmentAt: 0)
+        self.tabControl.setTitle("\(BeyGramAndroidStrings.shared.string("player_queue", languageCode: lang)) (\(self.currentState.queue.count))", forSegmentAt: 1)
         self.tabControl.setTitle(isRu ? "Текст" : "Lyrics", forSegmentAt: 2)
 
         self.playerContainer.isHidden = self.activeTab != .player
@@ -294,7 +294,7 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
         self.nextButton.isEnabled = !self.currentState.queue.isEmpty
         self.mixSettingsButton.tintColor = palette.accent
         self.sleepTimerButton.tintColor = self.sleepTimerState == .off ? palette.primaryText : palette.accent
-        self.sleepTimerButton.accessibilityLabel = BeyGramL10n.shared.string(.sleepTimerTitle, languageCode: self.presentationData.strings.primaryComponent.languageCode)
+        self.sleepTimerButton.accessibilityLabel = BeyGramAndroidStrings.shared.string("player_sleep_timer", languageCode: self.presentationData.strings.primaryComponent.languageCode)
 
         if let err = self.currentState.lastError, !err.isEmpty {
             self.errorLabel.isHidden = false
@@ -466,26 +466,26 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
 
     @objc private func sleepTimerTapped() {
         let languageCode = self.presentationData.strings.primaryComponent.languageCode
-        let l10n = BeyGramL10n.shared
+        let l10n = BeyGramAndroidStrings.shared
         let session = BeyGramMusicSession.shared
         let sheet = ActionSheetController(presentationData: self.presentationData)
-        var items: [ActionSheetItem] = [ActionSheetTextItem(title: l10n.string(.sleepTimerTitle, languageCode: languageCode))]
+        var items: [ActionSheetItem] = [ActionSheetTextItem(title: l10n.string("player_sleep_timer", languageCode: languageCode))]
         for minutes in BeyGramSleepTimer.presetMinutes {
-            items.append(ActionSheetButtonItem(title: l10n.format(.sleepTimerMinutes, languageCode: languageCode, minutes), action: { [weak sheet] in
+            items.append(ActionSheetButtonItem(title: l10n.string("player_sleep_in_minutes", languageCode: languageCode, minutes), action: { [weak sheet] in
                 sheet?.dismissAnimated()
                 session.setSleepTimer(minutes: minutes)
             }))
         }
-        items.append(ActionSheetButtonItem(title: l10n.string(.sleepTimerUntilTrackEnd, languageCode: languageCode), action: { [weak sheet] in
+        items.append(ActionSheetButtonItem(title: l10n.string("player_sleep_until_track_end", languageCode: languageCode), action: { [weak sheet] in
             sheet?.dismissAnimated()
             session.setSleepTimerUntilTrackEnd()
         }))
         if self.sleepTimerState != .off {
-            items.append(ActionSheetButtonItem(title: l10n.string(.sleepTimerExtend, languageCode: languageCode), action: { [weak sheet] in
+            items.append(ActionSheetButtonItem(title: l10n.string("player_sleep_extend", languageCode: languageCode, BeyGramSleepTimer.extensionMinutes), action: { [weak sheet] in
                 sheet?.dismissAnimated()
                 session.extendSleepTimer()
             }))
-            items.append(ActionSheetButtonItem(title: l10n.string(.sleepTimerCancel, languageCode: languageCode), color: .destructive, action: { [weak sheet] in
+            items.append(ActionSheetButtonItem(title: l10n.string("player_sleep_cancel_plain", languageCode: languageCode), color: .destructive, action: { [weak sheet] in
                 sheet?.dismissAnimated()
                 session.cancelSleepTimer()
             }))

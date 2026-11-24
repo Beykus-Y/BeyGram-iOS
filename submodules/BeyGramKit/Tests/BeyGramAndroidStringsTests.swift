@@ -46,6 +46,15 @@ final class BeyGramAndroidStringsTests: XCTestCase {
         XCTAssertEqual(l10n.quantityString("bgmusic_tracks_count", count: 1, languageCode: "en"), "1 track")
     }
 
+    func testPlayerAndEqualizerKeysExist() {
+        for key in ["player_sleep_timer", "player_sleep_in_minutes", "player_sleep_until_track_end", "player_sleep_extend",
+                    "player_sleep_cancel_plain", "player_pane_title", "player_queue", "equalizer_title", "equalizer_enabled_title",
+                    "equalizer_reset", "equalizer_preset_flat", "equalizer_preset_custom"] {
+            XCTAssertNotNil(l10n.template(key, languageCode: "en"), key)
+        }
+        XCTAssertEqual(l10n.string("player_sleep_in_minutes", languageCode: "en", 15), "Stop in 15 min")
+    }
+
     func testSwitchingLanguageNeedsNoRestart() {
         l10n.setLanguageCode("en")
         let english = l10n.string("bgmusic_author_line", "X")

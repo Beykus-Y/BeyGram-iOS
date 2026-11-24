@@ -6,7 +6,7 @@
 
 Keys are the Android resource names. Languages: ru (Android `values/`, the default), en, de, es, fr.
 Placeholders are converted for Swift's String(format:): %1$s -> %1$@, %1$d -> %1$lld, %s -> %@, %d -> %lld.
-Only the files in FILES are taken: the strings of features that exist on iOS. Add a file to FILES when its screen lands.
+Only the files in FILES (and the PREFIXED keys of shared files) are taken: the strings of features that exist on iOS. Add a file to FILES when its screen lands.
 Checks (exit 1 on failure): every key exists in every language, no empty values, placeholders match the Russian string.
 """
 import argparse
@@ -22,6 +22,8 @@ FILES = [
     "strings_stealth", "strings_stealth_actions", "strings_stealth_risky", "strings_stealth_schedule",
     "strings_privacy", "strings_delayed_send", "strings_triggers", "strings_equalizer",
 ]
+# Keys of a shared file that are taken by prefix (the file also holds Android-only strings).
+PREFIXED = {"strings": ["player_", "lyrics_"]}
 CATEGORIES = ["zero", "one", "two", "few", "many", "other"]
 PLACEHOLDER = re.compile(r"%(?:(\d+)\$)?([-#+ 0,(]*\d*(?:\.\d+)?)([sdf%])")
 DEFAULT_OUT = Path(__file__).resolve().parents[2] / "submodules/BeyGramKit/Sources/Generated/BeyGramAndroidStrings.swift"
@@ -101,12 +103,28 @@ def swift_literal(text: str) -> str:
     return '"' + text + '"'
 
 
+def parse_prefixed(folder: Path, prefixes):
+    """Prefixed keys from every file of the folder: Android splits one language's strings over files differently
+    (the ru `strings.xml` keys sit in `strings_misc.xml` for the other languages)."""
+    keep = lambda k: any(k.startswith(p) for p in prefixes)
+    strings, plurals = {}, {}
+    for path in sorted(folder.glob("*.xml")):
+        s, p = parse(path)
+        strings.update({k: v for k, v in s.items() if keep(k)})
+        plurals.update({k: v for k, v in p.items() if keep(k)})
+    return strings, plurals
+
+
 def load(res: Path):
     data = {}
     for lang, folder in LANGUAGES:
         strings, plurals = {}, {}
         for f in FILES:
             s, p = parse(res / folder / f"{f}.xml")
+            strings.update(s)
+            plurals.update(p)
+        for prefixes in PREFIXED.values():
+            s, p = parse_prefixed(res / folder, prefixes)
             strings.update(s)
             plurals.update(p)
         data[lang] = (strings, plurals)
