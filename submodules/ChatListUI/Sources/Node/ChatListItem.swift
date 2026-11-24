@@ -5692,6 +5692,36 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         strongSelf.backgroundNode.backgroundColor = backgroundColor
                     }
                     
+                    // A BeyGram style draws the archive row as a card and Signature's rows as inset tiles (#146).
+                    if let beyGramSpec = BeyGramAppearance.shared.chatListSpec {
+                        var cardInset: CGFloat = 0.0
+                        var cardRadius: CGFloat = 0.0
+                        var cardColor: UIColor?
+                        if case .groupReference = item.content {
+                            if beyGramSpec.archiveKind != .flat {
+                                cardInset = 8.0
+                                cardRadius = beyGramSpec.archiveRadius
+                                cardColor = theme.itemHighlightedBackgroundColor.withAlphaComponent(0.6)
+                            }
+                        } else if beyGramSpec.rowRadius > 0.0 {
+                            cardInset = beyGramSpec.rowInset
+                            cardRadius = beyGramSpec.rowRadius
+                        }
+                        if cardRadius > 0.0 {
+                            let cardFrame = CGRect(origin: CGPoint(x: cardInset, y: 1.0), size: CGSize(width: layout.contentSize.width - cardInset * 2.0, height: itemHeight - 2.0))
+                            strongSelf.backgroundNode.frame = cardFrame
+                            strongSelf.backgroundNode.layer.cornerRadius = cardRadius
+                            strongSelf.backgroundNode.layer.masksToBounds = true
+                            if let cardColor {
+                                strongSelf.backgroundNode.backgroundColor = cardColor
+                            }
+                        } else {
+                            strongSelf.backgroundNode.layer.cornerRadius = 0.0
+                        }
+                    } else {
+                        strongSelf.backgroundNode.layer.cornerRadius = 0.0
+                    }
+                    
                     if let inlineNavigationLocation = item.interaction.inlineNavigationLocation {
                         transition.updateAlpha(node: strongSelf.backgroundNode, alpha: 1.0 - inlineNavigationLocation.progress)
                     } else {
