@@ -254,10 +254,10 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
         self.signOutButton.setTitle(l10n.string(.yandexSignOut, languageCode: lang), for: .normal)
         self.signOutButton.tintColor = palette.destructive
 
-        self.tabControl.setTitle(isRu ? "Моя волна" : "My Wave", forSegmentAt: 0)
+        self.tabControl.setTitle(BeyGramAndroidStrings.shared.string("yandex_wave_title", languageCode: lang), forSegmentAt: 0)
         self.tabControl.setTitle(isRu ? "Поиск" : "Search", forSegmentAt: 1)
-        self.tabControl.setTitle(isRu ? "Лайки" : "Likes", forSegmentAt: 2)
-        self.tabControl.setTitle(isRu ? "Плейлисты" : "Playlists", forSegmentAt: 3)
+        self.tabControl.setTitle(BeyGramAndroidStrings.shared.string("yandex_library_liked", languageCode: lang), forSegmentAt: 2)
+        self.tabControl.setTitle(BeyGramAndroidStrings.shared.string("yandex_library_playlists", languageCode: lang), forSegmentAt: 3)
 
         switch self.activeTab {
         case .myWave:
@@ -317,7 +317,7 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
                 palette: palette
             )
             self.authSecondaryButton.isHidden = false
-            self.authSecondaryButton.configure(title: isRu ? "Открыть ссылку" : "Open Verification Page", style: .secondary, palette: palette)
+            self.authSecondaryButton.configure(title: BeyGramAndroidStrings.shared.string("yandex_signin_open", languageCode: lang), style: .secondary, palette: palette)
         } else {
             self.authTitleLabel.text = l10n.string(.yandexTitle, languageCode: lang)
             self.authBodyLabel.text = isRu ? "Войдите в аккаунт Яндекс, чтобы слушать Мою волну, лайки и плейлисты." : "Sign in to your Yandex account for My Wave, likes, and playlists."
@@ -331,7 +331,7 @@ private final class BeyGramYandexMusicViewControllerImpl: BeyGramScrollViewContr
     private func renderMyWave(palette: BeyGramThemePalette, isRu: Bool) {
         self.waveCard.apply(palette: palette)
         let track = self.waveState.currentTrack
-        self.waveTrackTitle.text = track?.title ?? (isRu ? "Моя волна" : "My Wave")
+        self.waveTrackTitle.text = track?.title ?? BeyGramAndroidStrings.shared.string("yandex_wave_title", languageCode: lang)
         self.waveTrackTitle.textColor = palette.primaryText
         let artistJoined = track?.artists.joined(separator: ", ") ?? ""
         self.waveTrackArtist.text = artistJoined.isEmpty ? (isRu ? "Персональный поток музыки" : "Your personal continuous radio") : artistJoined

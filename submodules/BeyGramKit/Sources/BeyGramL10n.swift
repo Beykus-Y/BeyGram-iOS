@@ -353,6 +353,8 @@ public final class BeyGramL10n {
 
     /// Updates the active Telegram language code (called automatically by `PresentationData`).
     public func setLanguageCode(_ languageCode: String?) {
+        // The Android-shared tables follow the same Telegram language (the native language screen), with their own fallback.
+        BeyGramAndroidStrings.shared.setLanguageCode(languageCode)
         let normalized = BeyGramL10n.normalizeLanguageCode(languageCode)
         self.lock.lock()
         self.activeLanguageCode = normalized
