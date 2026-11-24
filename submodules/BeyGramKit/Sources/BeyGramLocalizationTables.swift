@@ -21,6 +21,12 @@ public enum BeyGramLocalizationTables {
         .bgWaveLocalNetworkMessage: "BG Wave may be blocked because BeyGram cannot reach your local network. In Settings, open BeyGram and turn on Local Network, then try again.",
         .bgWaveLocalNetworkSettings: "Open Settings",
         .bgWaveLocalNetworkNotNow: "Not now",
+        // Music player sleep timer
+        .sleepTimerTitle: "Sleep timer",
+        .sleepTimerMinutes: "%d min",
+        .sleepTimerUntilTrackEnd: "Until the end of the track",
+        .sleepTimerExtend: "Add 15 minutes",
+        .sleepTimerCancel: "Turn off timer",
         // Common
         .commonBack: "Back",
         .commonCancel: "Cancel",
@@ -336,6 +342,12 @@ public enum BeyGramLocalizationTables {
         .bgWaveLocalNetworkMessage: "BG Wave может быть заблокирован: BeyGram не может обращаться к локальной сети. В Настройках откройте BeyGram и включите «Локальная сеть», затем попробуйте снова.",
         .bgWaveLocalNetworkSettings: "Открыть настройки",
         .bgWaveLocalNetworkNotNow: "Не сейчас",
+        // Таймер сна плеера
+        .sleepTimerTitle: "Таймер сна",
+        .sleepTimerMinutes: "%d мин",
+        .sleepTimerUntilTrackEnd: "До конца трека",
+        .sleepTimerExtend: "Добавить 15 минут",
+        .sleepTimerCancel: "Выключить таймер",
         // Common
         .commonBack: "Назад",
         .commonCancel: "Отмена",

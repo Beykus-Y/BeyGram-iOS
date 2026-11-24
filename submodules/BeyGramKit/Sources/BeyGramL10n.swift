@@ -15,6 +15,12 @@ public enum BeyGramStringKey: String, CaseIterable {
     case bgWaveLocalNetworkMessage = "bgwave.localNetwork.message"
     case bgWaveLocalNetworkSettings = "bgwave.localNetwork.settings"
     case bgWaveLocalNetworkNotNow = "bgwave.localNetwork.notNow"
+    // Music player sleep timer
+    case sleepTimerTitle = "music.sleepTimer.title"
+    case sleepTimerMinutes = "music.sleepTimer.minutes"
+    case sleepTimerUntilTrackEnd = "music.sleepTimer.untilTrackEnd"
+    case sleepTimerExtend = "music.sleepTimer.extend"
+    case sleepTimerCancel = "music.sleepTimer.cancel"
     // Common
     case commonBack = "common.back"
     case commonCancel = "common.cancel"

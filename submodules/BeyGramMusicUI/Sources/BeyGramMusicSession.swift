@@ -1,5 +1,6 @@
 import Foundation
 import SwiftSignalKit
+import BeyGramKit
 import BeyGramMedia
 import BeyGramYandexMusic
 import BGWaveSessionController
@@ -137,6 +138,9 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
     private var nowPlayingCenter: BeyGramNowPlayingCenter!
     private var metadataObserver: NSObjectProtocol?
     private var externalAudioObserver: NSObjectProtocol?
+    private let sleepTimer = BeyGramSleepTimer(accountId: 0)
+    private let sleepTimerPromise = ValuePromise<BeyGramSleepTimerState>(.off, ignoreRepeated: true)
+    private var sleepTimerTicker: Foundation.Timer?
 
     private override init() {
         self.player = BGMixPlayer.shared()
@@ -177,6 +181,15 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
         self.waveCoordinator = coordinator
         self.nowPlayingCenter = BeyGramNowPlayingCenter(session: self)
 
+        self.sleepTimer.onChange = { [weak self] state in
+            self?.sleepTimerPromise.set(state)
+            self?.updateSleepTimerTicker(active: state != .off)
+        }
+        self.sleepTimer.onFire = { [weak self] in
+            self?.player.pause()
+            self?.waveCoordinator?.stop()
+        }
+
         self.player.setTransitionDuration(initial.transitionDuration)
         self.player.setAdaptiveTransitions(initial.adaptiveTransitions)
         self.player.setBassSwap(initial.bassSwap)
@@ -215,6 +228,77 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
 
     public var currentWaveState: BGYandexWaveState {
         return self.waveStateValue.with { $0 }
+    }
+
+    // MARK: Sleep timer
+
+    public var sleepTimerSignal: Signal<BeyGramSleepTimerState, NoError> {
+        return self.sleepTimerPromise.get()
+    }
+
+    public var sleepTimerState: BeyGramSleepTimerState {
+        return self.sleepTimer.state
+    }
+
+    public func setSleepTimer(minutes: Int) {
+        DispatchQueue.main.async {
+            self.sleepTimer.setMinutes(minutes)
+        }
+    }
+
+    public func setSleepTimerUntilTrackEnd() {
+        DispatchQueue.main.async {
+            self.sleepTimer.setUntilTrackEnd()
+        }
+    }
+
+    public func extendSleepTimer() {
+        DispatchQueue.main.async {
+            self.sleepTimer.extend()
+        }
+    }
+
+    public func cancelSleepTimer() {
+        DispatchQueue.main.async {
+            self.sleepTimer.cancel()
+        }
+    }
+
+    /// Switching the account drops a timer set for another one.
+    public func sleepTimerAccountChanged(to accountId: Int64) {
+        DispatchQueue.main.async {
+            self.sleepTimer.accountChanged(to: accountId)
+        }
+    }
+
+    private func updateSleepTimerTicker(active: Bool) {
+        if active, self.sleepTimerTicker == nil {
+            self.sleepTimerTicker = Foundation.Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+                self?.sleepTimer.tick()
+            }
+        } else if !active {
+            self.sleepTimerTicker?.invalidate()
+            self.sleepTimerTicker = nil
+        }
+    }
+
+    /// Feeds the timer with the player's track, and ends a track-end timer when its track ends, is left, or starts its fade into the next.
+    private func updateSleepTimer(snapshot: BGMixSnapshot) {
+        let currentId = snapshot.currentTrack.map { String($0.identifier) }
+        let position = snapshot.position
+        let duration = snapshot.duration
+        let transitionActive = snapshot.transitionActive
+        // The timer is main-queue only; the player reports from its own queue.
+        DispatchQueue.main.async {
+            self.sleepTimer.trackChanged(to: currentId)
+            guard case let .untilTrackEnd(armedTrack, _) = self.sleepTimer.state, let armed = armedTrack else {
+                return
+            }
+            let nearEnd = duration > 0 && position >= duration - 0.4
+            if currentId != armed || nearEnd || transitionActive {
+                self.sleepTimer.trackEnded(trackId: armed)
+            }
+        }
     }
 
     public func startOrToggleWave() {
@@ -275,6 +359,8 @@ public final class BeyGramMusicSession: NSObject, BGMixPlayerObserver, BGYandexW
                 }
             }
         }
+
+        self.updateSleepTimer(snapshot: snapshot)
 
         let currentTrack = snapshot.currentTrack
         let nextReady = snapshot.nextTrack?.state == .ready
