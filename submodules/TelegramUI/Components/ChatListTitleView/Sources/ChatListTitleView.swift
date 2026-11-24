@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import BeyGramAppearance
 import AsyncDisplayKit
 import Display
 import TelegramPresentationData
@@ -13,6 +14,26 @@ import ComponentDisplayAdapters
 import AccountContext
 
 private let titleFont = Font.with(size: 17.0, design: .regular, weight: .semibold, traits: [.monospacedNumbers])
+
+/// The title weight of a BeyGram style (#146). The size stays 17pt: the title sits in a glass capsule of a fixed height,
+/// so the larger Android sizes are not applied here.
+private func beyGramChatListTitleFont() -> UIFont {
+    guard let spec = BeyGramAppearance.shared.chatListSpec else {
+        return titleFont
+    }
+    let weight: UIFont.Weight
+    switch spec.titleWeight {
+    case .normal:
+        weight = .regular
+    case .medium:
+        weight = .medium
+    case .semiBold:
+        weight = .semibold
+    case .bold:
+        weight = .bold
+    }
+    return Font.with(size: 17.0, design: .regular, weight: weight, traits: [.monospacedNumbers])
+}
 
 public struct NetworkStatusTitle: Equatable {
     public enum Status: Equatable {
@@ -82,7 +103,7 @@ public final class ChatListTitleView: UIView, NavigationBarTitleView, Navigation
         self._title = title
         
         if self._title != oldValue {
-            self.titleNode.attributedText = NSAttributedString(string: self.title.text, font: titleFont, textColor: self.theme.rootController.navigationBar.primaryTextColor)
+            self.titleNode.attributedText = NSAttributedString(string: self.title.text, font: beyGramChatListTitleFont(), textColor: self.theme.rootController.navigationBar.primaryTextColor)
             self.buttonView.accessibilityLabel = self.title.text
             self.activityIndicator.isHidden = !self.title.activity
            
@@ -215,7 +236,7 @@ public final class ChatListTitleView: UIView, NavigationBarTitleView, Navigation
     public var theme: PresentationTheme {
         didSet {
             if self.theme !== oldValue {
-                self.titleNode.attributedText = NSAttributedString(string: self.title.text, font: titleFont, textColor: self.theme.rootController.navigationBar.primaryTextColor)
+                self.titleNode.attributedText = NSAttributedString(string: self.title.text, font: beyGramChatListTitleFont(), textColor: self.theme.rootController.navigationBar.primaryTextColor)
                 
                 self.lockView.updateTheme(self.theme)
                 
