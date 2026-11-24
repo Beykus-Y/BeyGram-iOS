@@ -15,7 +15,7 @@ generated from them, never edited by hand.
 - Server-sent text (names, messages, URLs, file names, diagnostics) is never looked up here.
 
 Hardcoded `isRu ? "..." : "..."` switches in BeyGram modules are counted by `tools/l10n/hardcoded_strings_check.py`
-against `hardcoded_strings_baseline.txt` (a ratchet: it may only go down). Migrated so far: the sleep timer, the equalizer and the
+against `hardcoded_strings_baseline.txt` (a ratchet: it may only go down). None of the screens is migrated yet (the sleep timer and the equalizer are in #151; their strings can read the keys `player_sleep_*` and `equalizer_*`, which the table already holds). Previously planned:
 Now Playing tab titles; the rest (Yandex, Wave, settings, queue, mix) moves screen by screen as Android keys are matched.
 Not done: CI wiring of the two scripts, the manual screen matrix. `CFBundleLocalizations` is not needed: the language is Telegram's.
 The older `BeyGramL10n` (en/ru) stays until its keys are moved.
