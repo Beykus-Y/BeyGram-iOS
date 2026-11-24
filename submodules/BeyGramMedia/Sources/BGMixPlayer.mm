@@ -156,6 +156,8 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
 }
 @property (nonatomic, strong) AVAudioEngine *audioEngine;
 @property (nonatomic, strong) AVAudioSourceNode *sourceNode;
+// The user equalizer: one parametric band per frequency given to setEqualizerFrequenciesHz. Bypassed until enabled.
+@property (nonatomic, strong) AVAudioUnitEQ *equalizer;
 @property (nonatomic, strong) AVAudioFormat *renderFormat;
 @property (nonatomic, strong, nullable) CADisplayLink *displayLink;
 // Drives the update loop in the background while the mix sounds. Nil in the foreground.
@@ -275,8 +277,11 @@ static BGMixPlayer *sSharedPlayer = nil;
     }];
 
     self.audioEngine = [[AVAudioEngine alloc] init];
+    self.equalizer = [[AVAudioUnitEQ alloc] initWithNumberOfBands:10];
+    self.equalizer.bypass = YES;
     [self.audioEngine attachNode:self.sourceNode];
-    [self.audioEngine connect:self.sourceNode to:self.audioEngine.mainMixerNode format:format];
+    [self.audioEngine attachNode:self.equalizer];
+    [self connectGraphWithFormat:format];
 
     [self observeSystemEvents];
 
@@ -491,6 +496,12 @@ static BGMixPlayer *sSharedPlayer = nil;
     }
 }
 
+// source -> equalizer -> main mixer.
+- (void)connectGraphWithFormat:(AVAudioFormat *)format {
+    [self.audioEngine connect:self.sourceNode to:self.equalizer format:format];
+    [self.audioEngine connect:self.equalizer to:self.audioEngine.mainMixerNode format:format];
+}
+
 // The system stopped the engine, and the hardware format may have changed. Connect the graph again with the
 // format the source node renders, then start the engine if the mix is sounding. If the system refuses, the
 // mix pauses and lastError says why.
@@ -498,7 +509,7 @@ static BGMixPlayer *sSharedPlayer = nil;
     if (!_session) {
         return;
     }
-    [self.audioEngine connect:self.sourceNode to:self.audioEngine.mainMixerNode format:self.renderFormat];
+    [self connectGraphWithFormat:self.renderFormat];
     if ([self isSounding] && ![self ensureEngineRunning]) {
         _session->pause();
     }
@@ -574,6 +585,25 @@ static BGMixPlayer *sSharedPlayer = nil;
     // 3) Advance renderEpoch_ once more so retired PCM buffers from cleared decks are reclaimed immediately.
     _engine->render(_scratch, 1);
     _session->update();
+}
+
+- (void)setEqualizerEnabled:(BOOL)enabled frequenciesHz:(NSArray<NSNumber *> *)frequenciesHz gainsDb:(NSArray<NSNumber *> *)gainsDb {
+    AVAudioUnitEQ *equalizer = self.equalizer;
+    NSArray<AVAudioUnitEQFilterParameters *> *bands = equalizer.bands;
+    const NSUInteger count = MIN(MIN(bands.count, frequenciesHz.count), gainsDb.count);
+    for (NSUInteger index = 0; index < bands.count; index++) {
+        AVAudioUnitEQFilterParameters *band = bands[index];
+        if (index < count) {
+            band.filterType = AVAudioUnitEQFilterTypeParametric;
+            band.frequency = frequenciesHz[index].floatValue;
+            band.bandwidth = 1.0f;
+            band.gain = MAX(-96.0f, MIN(24.0f, gainsDb[index].floatValue));
+            band.bypass = NO;
+        } else {
+            band.bypass = YES;
+        }
+    }
+    equalizer.bypass = !enabled;
 }
 
 - (void)setPcmTap:(nullable void *)tap {

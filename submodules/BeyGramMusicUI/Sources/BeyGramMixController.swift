@@ -24,6 +24,7 @@ private final class BeyGramMixSettingsViewControllerImpl: BeyGramScrollViewContr
     private let engineCard = BeyGramCardView(spacing: 0, insets: UIEdgeInsets(top: 4, left: 16, bottom: 4, right: 16))
     private let adaptiveRow = BeyGramRowView()
     private let bassSwapRow = BeyGramRowView()
+    private let equalizerRow = BeyGramRowView()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -67,6 +68,7 @@ private final class BeyGramMixSettingsViewControllerImpl: BeyGramScrollViewContr
         self.stackView.addArrangedSubview(self.engineHeader)
         self.engineCard.contentStack.addArrangedSubview(self.adaptiveRow)
         self.engineCard.contentStack.addArrangedSubview(self.bassSwapRow)
+        self.engineCard.contentStack.addArrangedSubview(self.equalizerRow)
         self.stackView.addArrangedSubview(self.engineCard)
     }
 
@@ -121,9 +123,22 @@ private final class BeyGramMixSettingsViewControllerImpl: BeyGramScrollViewContr
             title: l10n.string(.bgMixBassSwap, languageCode: lang),
             subtitle: isRu ? "Плавно заменяет низкие частоты во время сведения" : "Smoothly swaps low-end frequencies during crossfades",
             switchValue: self.musicState.bassSwap,
-            showSeparator: false,
+            showSeparator: true,
             palette: palette,
             onSwitch: { val in BeyGramMusicSession.shared.setBassSwap(val) }
+        )
+        self.equalizerRow.configure(
+            iconName: "slider.vertical.3",
+            iconTint: palette.accent,
+            title: l10n.string(.equalizerTitle, languageCode: lang),
+            value: BeyGramMusicSession.shared.currentEqualizer.enabled ? l10n.string(.commonOn, languageCode: lang) : l10n.string(.commonOff, languageCode: lang),
+            showsChevron: true,
+            showSeparator: false,
+            palette: palette,
+            onTap: { [weak self] in
+                guard let self else { return }
+                (self.navigationController as? NavigationController)?.pushViewController(beyGramEqualizerController(context: self.context))
+            }
         )
     }
 
