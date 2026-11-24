@@ -8,12 +8,12 @@ generated from them, never edited by hand.
 - Output: `submodules/BeyGramKit/Sources/Generated/BeyGramAndroidStrings.swift` (keys are Android resource names;
   `%1$s` becomes `%1$@`, `%1$d` becomes `%1$lld`). Plurals use CLDR categories.
 - Lookup: `BeyGramAndroidStrings.shared.string("key", languageCode:, args...)` and `.quantityString(...)`. An unsupported
-  language falls back to Russian, as on Android. `setLanguageCode(nil)` follows the system; the switch applies at the next lookup.
+  language falls back to Russian, as on Android. The language is the one chosen in Telegram's native language screen: `BeyGramL10n.setLanguageCode` (called by `PresentationData`) forwards it, so there is no separate BeyGram setting; the switch applies at the next lookup.
 - Tests: `BeyGramKitTests` (`BeyGramAndroidStringsTests`) repeat the coverage and placeholder checks on the generated tables.
 - Which files are taken: the `FILES` list in the script. Add a file when its screen lands on iOS, then regenerate:
   `python3 tools/l10n/android_strings.py --android-res <BeyGram>/app/src/main/res`.
 - Server-sent text (names, messages, URLs, file names, diagnostics) is never looked up here.
 
-Not done yet: the language picker in BeyGram settings, moving the screens' hardcoded `isRu ? ... : ...` strings and the
+Not done yet: moving the screens' hardcoded `isRu ? ... : ...` strings and the
 older `BeyGramL10n` keys onto these tables, a CI search for hardcoded strings, `CFBundleLocalizations`, the manual screen matrix.
 The older `BeyGramL10n` (en/ru) stays until its keys are moved.
