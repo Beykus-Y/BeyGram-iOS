@@ -3562,8 +3562,14 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             }
             
             attributedText = renderInstantPagePreviewIcons(attributedText, font: textFont, textColor: theme.messageTextColor)
+            if unreadCount.unread, !unreadCount.muted, BeyGramAppearance.shared.chatListSpec?.unreadPreviewEmphasis == true, attributedText.length != 0 {
+                // Signature (#146): the preview of an unread, unmuted chat reads in the title colour.
+                let emphasised = NSMutableAttributedString(attributedString: attributedText)
+                emphasised.addAttribute(.foregroundColor, value: theme.titleColor, range: NSRange(location: 0, length: emphasised.length))
+                attributedText = emphasised
+            }
             textAttributedString = attributedText
-            
+
             let dateText: String
             var topIndex: EngineMessage.Index?
             switch item.content {
