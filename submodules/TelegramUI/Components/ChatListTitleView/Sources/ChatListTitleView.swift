@@ -21,7 +21,7 @@ private func beyGramChatListTitleFont() -> UIFont {
     guard let spec = BeyGramAppearance.shared.chatListSpec else {
         return titleFont
     }
-    let weight: UIFont.Weight
+    let weight: Font.Weight
     switch spec.titleWeight {
     case .normal:
         weight = .regular
