@@ -1,4 +1,4 @@
-load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library", "swift_test")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
 
@@ -78,5 +78,14 @@ swift_library(
     ],
     visibility = [
         "//visibility:public",
+    ],
+)
+
+# Pure logic only (no core): runs on the host with `bazel test //submodules/BeyGramProxy:BeyGramProxyTests`.
+swift_test(
+    name = "BeyGramProxyTests",
+    srcs = glob(["Tests/**/*.swift"]),
+    deps = [
+        ":BeyGramProxy",
     ],
 )

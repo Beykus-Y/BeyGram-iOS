@@ -61,3 +61,5 @@ Go-тесты:
 Ручная сборка архива (при необходимости отдельной проверки):
 
     ./submodules/BeyGramProxy/core/build-ios-archive.sh
+
+- `MihomoAutoSelectGate` — as Android's `TelegramAutoSelector`: the watchdog probes nodes only after Telegram has stayed `Connecting` or `WaitingForNetwork` for 8 seconds; a network change restarts that wait; while Telegram is connected nothing is probed. The state comes from the primary account (`BeyGramMihomoRuntime.observeTelegramConnection`, wired in `AppDelegate`). The 20-second watchdog stays. Not checked on a device (issue #141).

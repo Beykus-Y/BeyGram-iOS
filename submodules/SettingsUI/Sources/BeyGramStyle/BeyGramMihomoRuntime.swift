@@ -94,6 +94,25 @@ public final class BeyGramMihomoRuntime {
         }
     }
 
+    /// Feeds the primary account's connection state to the automatic node switch (issue #141). Call once, with the signal of the
+    /// primary account's network state.
+    public func observeTelegramConnection(_ states: Signal<AccountNetworkState, NoError>) -> Disposable {
+        return (states
+        |> map { state -> MihomoTelegramConnection in
+            switch state {
+            case .waitingForNetwork:
+                return .waitingForNetwork
+            case .connecting:
+                return .connecting
+            case .updating, .online:
+                return .connected
+            }
+        }
+        |> distinctUntilChanged).start(next: { [weak self] connection in
+            self?.controller.setTelegramConnection(connection)
+        })
+    }
+
     /// Turns the automatic node switch on or off.
     public func setAutoSelect(_ enabled: Bool) {
         self.controller.setAutoSelect(enabled)

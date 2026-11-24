@@ -1275,6 +1275,17 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                 return sharedContext.currentPresentationData.with({ $0 })
             })
             let sharedApplicationContext = SharedApplicationContext(sharedContext: sharedContext, notificationManager: notificationManager, wakeupManager: wakeupManager)
+            // BeyGram: the automatic Mihomo node switch follows the primary account's connection state (#141).
+            let _ = BeyGramMihomoRuntime.shared.observeTelegramConnection(sharedContext.activeAccountContexts
+            |> map { $0.primary }
+            |> distinctUntilChanged(isEqual: { $0 === $1 })
+            |> mapToSignal { context -> Signal<AccountNetworkState, NoError> in
+                if let context = context {
+                    return context.account.networkState
+                } else {
+                    return .single(.waitingForNetwork)
+                }
+            })
             sharedApplicationContext.sharedContext.mediaManager.overlayMediaManager.attachOverlayMediaController(sharedApplicationContext.overlayMediaController)
             
             return accountManager.transaction { transaction -> (SharedApplicationContext, LoggingSettings) in
