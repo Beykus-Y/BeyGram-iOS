@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import AsyncDisplayKit
 import SwiftSignalKit
+import BeyGramAppearance
 import UIKitRuntimeUtils
 
 public protocol StandalonePresentableController: ViewController {
@@ -292,6 +293,7 @@ public protocol CustomViewControllerNavigationDataSummary: AnyObject {
     public func overlayWantsToBeBelowKeyboardUpdated(transition: ContainedViewLayoutTransition) {
         self.internalOverlayWantsToBeBelowKeyboardUpdated?(transition)
     }
+    private var beyGramTopBarDecor: UIView?
     
     private var navigationBarOrigin: CGFloat = 0.0
         
@@ -522,6 +524,50 @@ public protocol CustomViewControllerNavigationDataSummary: AnyObject {
             }
             transition.updateFrame(node: navigationBar, frame: navigationBarFrame)
             navigationBar.setHidden(!self.displayNavigationBar, animated: transition.isAnimated)
+            self.updateBeyGramTopBarDecor(navigationBar: navigationBar, frame: navigationBarFrame)
+        }
+    }
+
+    /// The top bar of a BeyGram style (#147): Material 2 raises it with a real shadow, Signature underlines it with a
+    /// hairline. Flat and glass bars, and Telegram Original, get no decoration. Best effort: the decoration is a plain
+    /// view under the bar, coloured from the screen's own background.
+    private func updateBeyGramTopBarDecor(navigationBar: NavigationBar, frame: CGRect) {
+        let kind = BeyGramAppearance.shared.surfaceSpec?.topBar
+        let spec = BeyGramAppearance.shared.surfaceSpec
+        guard self.displayNavigationBar, let kind, kind == .elevated || kind == .signature, navigationBar.supernode === self.displayNode else {
+            self.beyGramTopBarDecor?.removeFromSuperview()
+            self.beyGramTopBarDecor = nil
+            return
+        }
+        let decor: UIView
+        if let current = self.beyGramTopBarDecor {
+            decor = current
+        } else {
+            decor = UIView()
+            decor.isUserInteractionEnabled = false
+            self.beyGramTopBarDecor = decor
+        }
+        if decor.superview !== self.displayNode.view {
+            self.displayNode.view.insertSubview(decor, belowSubview: navigationBar.view)
+        }
+        decor.frame = frame
+        switch kind {
+        case .elevated:
+            decor.backgroundColor = self.displayNode.backgroundColor ?? .clear
+            decor.layer.shadowColor = UIColor.black.cgColor
+            decor.layer.shadowOpacity = 0.25
+            decor.layer.shadowRadius = (spec?.barElevation ?? 4.0)
+            decor.layer.shadowOffset = CGSize(width: 0.0, height: (spec?.barElevation ?? 4.0) * 0.5)
+            decor.subviews.forEach { $0.removeFromSuperview() }
+        default:
+            decor.backgroundColor = .clear
+            decor.layer.shadowOpacity = 0.0
+            if decor.subviews.isEmpty {
+                let line = UIView()
+                line.backgroundColor = UIColor.separator
+                decor.addSubview(line)
+            }
+            decor.subviews.first?.frame = CGRect(x: 0.0, y: frame.height - UIScreenPixel, width: frame.width, height: UIScreenPixel)
         }
     }
     
