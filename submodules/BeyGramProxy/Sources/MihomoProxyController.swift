@@ -43,8 +43,6 @@ public final class MihomoProxyController {
     /// Bumped on every watchdog start and stop, so a tick scheduled earlier does nothing.
     private var watchdogGeneration = 0
     private static let watchdogIntervalSeconds = 20
-    /// Whether Telegram's connection state allows probing nodes. Used on `queue` only.
-    private var autoSelectGate = MihomoAutoSelectGate()
     private static let probeTimeoutMilliseconds = 5000
     /// After a change of the network, the core is checked once the network has stayed as it is for this long.
     private static let networkSettleSeconds = 2
@@ -77,14 +75,6 @@ public final class MihomoProxyController {
         lock.lock()
         defer { lock.unlock() }
         return state
-    }
-
-    /// Telegram's connection state, from its network layer. The automatic switch probes nodes only after Telegram has stayed
-    /// connecting for the handover delay (see `MihomoAutoSelectGate`). Safe to call from any thread.
-    public func setTelegramConnection(_ connection: MihomoTelegramConnection) {
-        queue.async {
-            self.autoSelectGate.report(connection, now: Date())
-        }
     }
 
     /// Keeps Telegram's proxy settings from before the first connect, or clears them with nil.
@@ -198,7 +188,6 @@ public final class MihomoProxyController {
             var result: Result<Void, Error> = .success(())
             self.stopWatchdog()
             self.stopNetworkWatch()
-            self.autoSelectGate.reset()
             self.profileYAML = nil
             do {
                 try self.client.stop()
@@ -370,11 +359,6 @@ public final class MihomoProxyController {
             return
         }
         // The probes wait on the network, so they run off `queue`: a check never holds up start, stop or a node change.
-        // Telegram connected and still reaching the world: no probing. Connecting for long enough: probe, as Android does.
-        guard autoSelectGate.shouldProbe(now: Date()) else {
-            scheduleNextTickIfActive(generation: generation)
-            return
-        }
         checkQueue.async {
             // The delay stored in the group can be stale, so the node in use is probed directly.
             let inUseDelay = (try? self.client.testDelay(proxy: group.now, timeoutMilliseconds: MihomoProxyController.probeTimeoutMilliseconds)) ?? -1
@@ -482,7 +466,6 @@ public final class MihomoProxyController {
             return
         }
         networkGeneration += 1
-        autoSelectGate.networkChanged(now: Date())
         let generation = networkGeneration
         queue.asyncAfter(deadline: .now() + .seconds(MihomoProxyController.networkSettleSeconds)) {
             self.recoverAfterNetworkChange(generation: generation)

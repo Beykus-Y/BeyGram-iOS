@@ -119,10 +119,6 @@ extern NSNotificationName const BGMixPlayerDidStopForExternalAudioNotification;
 - (void)setAdaptiveTransitions:(BOOL)enabled;
 - (void)setBassSwap:(BOOL)enabled;
 
-// The user equalizer in front of the output (up to 10 bands). Band i sits at frequenciesHz[i] with gainsDb[i];
-// bands past the given arrays are bypassed. Disabled means the whole effect is bypassed. Main thread only.
-- (void)setEqualizerEnabled:(BOOL)enabled frequenciesHz:(NSArray<NSNumber *> *)frequenciesHz gainsDb:(NSArray<NSNumber *> *)gainsDb;
-
 // The current state, read from the engine on each access.
 @property (nonatomic, readonly) BGMixSnapshot *snapshot;
 

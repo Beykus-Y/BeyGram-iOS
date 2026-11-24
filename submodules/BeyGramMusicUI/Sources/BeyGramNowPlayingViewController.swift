@@ -47,9 +47,6 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
     private let playPauseButton = UIButton(type: .system)
     private let nextButton = UIButton(type: .system)
     private let mixSettingsButton = UIButton(type: .system)
-    private let sleepTimerButton = UIButton(type: .system)
-    private var sleepTimerDisposable: Disposable?
-    private var sleepTimerState: BeyGramSleepTimerState = BeyGramMusicSession.shared.sleepTimerState
     private let errorLabel = BeyGramTypography.makeLabel(style: .footnote, weight: .medium, lines: 0)
 
     // Queue Panel
@@ -68,7 +65,6 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
 
     deinit {
         self.stateDisposable?.dispose()
-        self.sleepTimerDisposable?.dispose()
     }
 
     public override func viewDidLoad() {
@@ -150,29 +146,16 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
         self.mixSettingsButton.setImage(UIImage(systemName: "slider.horizontal.3", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
         self.mixSettingsButton.addTarget(self, action: #selector(self.mixSettingsTapped), for: .touchUpInside)
 
-        self.sleepTimerButton.setImage(UIImage(systemName: "moon.zzz", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
-        self.sleepTimerButton.addTarget(self, action: #selector(self.sleepTimerTapped), for: .touchUpInside)
-        self.sleepTimerDisposable = (BeyGramMusicSession.shared.sleepTimerSignal
-        |> deliverOnMainQueue).start(next: { [weak self] state in
-            guard let self else { return }
-            self.sleepTimerState = state
-            if self.isViewLoaded {
-                self.render()
-            }
-        })
-
         NSLayoutConstraint.activate([
             self.playPauseButton.widthAnchor.constraint(equalToConstant: 64),
             self.playPauseButton.heightAnchor.constraint(equalToConstant: 64),
             self.nextButton.widthAnchor.constraint(equalToConstant: 48),
             self.nextButton.heightAnchor.constraint(equalToConstant: 48),
             self.mixSettingsButton.widthAnchor.constraint(equalToConstant: 48),
-            self.mixSettingsButton.heightAnchor.constraint(equalToConstant: 48),
-            self.sleepTimerButton.widthAnchor.constraint(equalToConstant: 48),
-            self.sleepTimerButton.heightAnchor.constraint(equalToConstant: 48)
+            self.mixSettingsButton.heightAnchor.constraint(equalToConstant: 48)
         ])
 
-        let controlsRow = UIStackView(arrangedSubviews: [UIView(), self.mixSettingsButton, self.playPauseButton, self.nextButton, self.sleepTimerButton, UIView()])
+        let controlsRow = UIStackView(arrangedSubviews: [UIView(), self.mixSettingsButton, self.playPauseButton, self.nextButton, UIView()])
         controlsRow.axis = .horizontal
         controlsRow.alignment = .center
         controlsRow.spacing = 24
@@ -217,8 +200,8 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
 
         self.title = l10n.string(.musicTitle, languageCode: lang)
 
-        self.tabControl.setTitle(BeyGramAndroidStrings.shared.string("player_pane_title", languageCode: lang), forSegmentAt: 0)
-        self.tabControl.setTitle("\(BeyGramAndroidStrings.shared.string("player_queue", languageCode: lang)) (\(self.currentState.queue.count))", forSegmentAt: 1)
+        self.tabControl.setTitle(isRu ? "Плеер" : "Player", forSegmentAt: 0)
+        self.tabControl.setTitle(isRu ? "Очередь (\(self.currentState.queue.count))" : "Queue (\(self.currentState.queue.count))", forSegmentAt: 1)
         self.tabControl.setTitle(isRu ? "Текст" : "Lyrics", forSegmentAt: 2)
 
         self.playerContainer.isHidden = self.activeTab != .player
@@ -293,8 +276,6 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
         self.nextButton.tintColor = palette.primaryText
         self.nextButton.isEnabled = !self.currentState.queue.isEmpty
         self.mixSettingsButton.tintColor = palette.accent
-        self.sleepTimerButton.tintColor = self.sleepTimerState == .off ? palette.primaryText : palette.accent
-        self.sleepTimerButton.accessibilityLabel = BeyGramAndroidStrings.shared.string("player_sleep_timer", languageCode: self.presentationData.strings.primaryComponent.languageCode)
 
         if let err = self.currentState.lastError, !err.isEmpty {
             self.errorLabel.isHidden = false
@@ -462,43 +443,6 @@ public final class BeyGramNowPlayingViewController: BeyGramScrollViewController,
         } else {
             BeyGramMusicSession.shared.next()
         }
-    }
-
-    @objc private func sleepTimerTapped() {
-        let languageCode = self.presentationData.strings.primaryComponent.languageCode
-        let l10n = BeyGramAndroidStrings.shared
-        let session = BeyGramMusicSession.shared
-        let sheet = ActionSheetController(presentationData: self.presentationData)
-        var items: [ActionSheetItem] = [ActionSheetTextItem(title: l10n.string("player_sleep_timer", languageCode: languageCode))]
-        for minutes in BeyGramSleepTimer.presetMinutes {
-            items.append(ActionSheetButtonItem(title: l10n.string("player_sleep_in_minutes", languageCode: languageCode, minutes), action: { [weak sheet] in
-                sheet?.dismissAnimated()
-                session.setSleepTimer(minutes: minutes)
-            }))
-        }
-        items.append(ActionSheetButtonItem(title: l10n.string("player_sleep_until_track_end", languageCode: languageCode), action: { [weak sheet] in
-            sheet?.dismissAnimated()
-            session.setSleepTimerUntilTrackEnd()
-        }))
-        if self.sleepTimerState != .off {
-            items.append(ActionSheetButtonItem(title: l10n.string("player_sleep_extend", languageCode: languageCode, BeyGramSleepTimer.extensionMinutes), action: { [weak sheet] in
-                sheet?.dismissAnimated()
-                session.extendSleepTimer()
-            }))
-            items.append(ActionSheetButtonItem(title: l10n.string("player_sleep_cancel_plain", languageCode: languageCode), color: .destructive, action: { [weak sheet] in
-                sheet?.dismissAnimated()
-                session.cancelSleepTimer()
-            }))
-        }
-        sheet.setItemGroups([
-            ActionSheetItemGroup(items: items),
-            ActionSheetItemGroup(items: [
-                ActionSheetButtonItem(title: self.presentationData.strings.Common_Cancel, color: .accent, font: .bold, action: { [weak sheet] in
-                    sheet?.dismissAnimated()
-                })
-            ])
-        ])
-        self.present(sheet, in: .window(.root))
     }
 
     @objc private func mixSettingsTapped() {
