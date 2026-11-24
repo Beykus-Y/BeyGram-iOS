@@ -347,6 +347,10 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     let sentPeerMediaMessageEventsDisposable = MetaDisposable()
     weak var currentFailedMessagesAlertController: ViewController?
     let messageActionCallbackDisposable = MetaDisposable()
+    /// Stealth risk warning (issue #136): true once the user has confirmed a risky action on this screen.
+    var beyGramRiskConfirmed = false
+    /// Stealth consent (issue #137): true only while the confirmed opening of a one-time media runs.
+    var beyGramViewOnceConsentGiven = false
     let messageActionUrlAuthDisposable = MetaDisposable()
     let editMessageDisposable = MetaDisposable()
     let editMessageErrorsDisposable = MetaDisposable()
@@ -1873,6 +1877,13 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             
             self.openMessageReactionContextMenu(message: EngineMessage(message), sourceView: sourceView, gesture: gesture, value: value)
         }, updateMessageReaction: { [weak self] initialMessage, reaction, force, sourceView in
+            // Stealth risk warning (issue #136): ask once per screen before a reaction, then repeat it.
+            if let self, self.beyGramRiskyActionPending() {
+                self.beyGramConfirmRiskyAction(retry: { [weak self] in
+                    self?.controllerInteraction?.updateMessageReaction(initialMessage, reaction, force, sourceView)
+                })
+                return
+            }
             guard let strongSelf = self else {
                 return
             }
@@ -2828,6 +2839,13 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             }
             self.openGifEditing(file: file, addCaption: addCaption)
         }, requestMessageActionCallback: { [weak self] message, data, isGame, requiresPassword, progress in
+            // Stealth risk warning (issue #136): ask once per screen before a bot button, then run the same request.
+            if let self, self.beyGramRiskyActionPending() {
+                self.beyGramConfirmRiskyAction(retry: { [weak self] in
+                    self?.controllerInteraction?.requestMessageActionCallback(message, data, isGame, requiresPassword, progress)
+                })
+                return
+            }
             guard let strongSelf = self else {
                 return
             }
@@ -4241,6 +4259,13 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                 strongSelf.present(controller, in: .window(.root))
             }
         }, requestSelectMessagePollOptions: { [weak self] id, opaqueIdentifiers in
+            // Stealth risk warning (issue #136): ask once per screen before a poll vote, then repeat it.
+            if let self, self.beyGramRiskyActionPending() {
+                self.beyGramConfirmRiskyAction(retry: { [weak self] in
+                    self?.controllerInteraction?.requestSelectMessagePollOptions(id, opaqueIdentifiers)
+                })
+                return
+            }
             guard let strongSelf = self, let controllerInteraction = strongSelf.controllerInteraction else {
                 return
             }

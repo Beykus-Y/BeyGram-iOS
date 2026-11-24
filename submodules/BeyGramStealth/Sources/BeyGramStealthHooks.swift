@@ -12,6 +12,22 @@ public enum BeyGramStealthHooks {
         return BeyGramStealthStore.shared.settings(accountPeerId: accountPeerId).allows(effect, chatPeerId: chatPeerId)
     }
 
+    /// Whether a risky action (a bot button, a reaction, a poll vote) should ask first (`warnRiskyActions` with hidden presence).
+    public static func riskyActionNeedsConfirmation(accountPeerId: Int64) -> Bool {
+        guard BeyGramSettings.shared.isEnabled(.privacyPolicy) else {
+            return false
+        }
+        return BeyGramStealthStore.shared.settings(accountPeerId: accountPeerId).confirmsRiskyActions
+    }
+
+    /// Whether opening a one-time media may be reported to the server. Off while `noContentOpen` is on.
+    public static func allowsOpenContentReceipt(accountPeerId: Int64) -> Bool {
+        guard BeyGramSettings.shared.isEnabled(.privacyPolicy) else {
+            return true
+        }
+        return !BeyGramStealthStore.shared.settings(accountPeerId: accountPeerId).noContentOpen
+    }
+
     /// The decision for one outgoing message. See `BeyGramStealthSettings.sendDecision`.
     public static func sendDecision(accountPeerId: Int64, explicitScheduleTime: Int32?, unschedulableReason: BeyGramStealthRefusal?, nowSeconds: Int32) -> BeyGramStealthSendDecision {
         guard BeyGramSettings.shared.isEnabled(.privacyPolicy) else {

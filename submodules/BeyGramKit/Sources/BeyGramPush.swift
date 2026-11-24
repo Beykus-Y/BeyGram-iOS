@@ -279,15 +279,35 @@ public final class BeyGramPushStore {
     }
 }
 
-/// Открытие чата из уведомления. PWA строит ссылку локально: `beygram://push/open?account=<id>&peer=<id>&msg=<id>`.
-/// Нативный клиент проверяет параметры сам. Если аккаунт не совпадает или чата нет, открывается список чатов.
+/// Открытие чата из уведомления. Два формата, оба строятся PWA локально (issue #74, BG Push Navigation v2):
+/// - v2: `beygram://push/open?v=2&account=<userId>&kind=user|chat|channel&rawPeer=<id>&msg=<id>`, rawPeer это сырой
+///   облачный id в пространстве kind, а не упакованный PeerId;
+/// - legacy: `beygram://push/open?account=<id>&peer=<packed PeerId>&msg=<id>`, как раньше.
+/// Нативный клиент проверяет параметры сам. Неверная, неполная или неизвестная версия даёт обычное открытие приложения
+/// (все поля nil), и никогда не читается как legacy. NOT CHECKED BY COMPILATION.
 public struct BeyGramPushOpenRequest: Equatable {
-    /// Telegram user id аккаунта, которому пришло уведомление. Nil, если параметра нет.
+    public enum Kind: String, Equatable {
+        case user
+        case chat
+        case channel
+    }
+
+    /// Адресный переход v2: чат и, возможно, сообщение в облачном пространстве имён.
+    public struct Target: Equatable {
+        public let kind: Kind
+        /// Сырой положительный Telegram id в пространстве kind. Не упакованный PeerId.
+        public let rawPeerId: Int64
+        public let messageId: Int32?
+    }
+
+    /// Telegram user id аккаунта, которому пришло уведомление. Nil, если параметра нет или ссылка недействительна.
     public let accountUserId: Int64?
-    /// Id чата. Nil означает, что нужно открыть список чатов.
+    /// Legacy: упакованный iOS PeerId. Nil для v2.
     public let peerId: Int64?
-    /// Id сообщения. В интерфейсе пока не используется.
+    /// Legacy: id сообщения. Для v2 смотри `target`.
     public let messageId: Int32?
+    /// v2: проверенная цель. Nil для legacy, bare и недействительных v2.
+    public let target: Target?
 
     /// Nil для любой ссылки, кроме `beygram://push/open`.
     public init?(url: URL) {
@@ -295,6 +315,21 @@ public struct BeyGramPushOpenRequest: Equatable {
             return nil
         }
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        if items.contains(where: { $0.name == "v" }) {
+            // Версия 2 или ничего: неизвестная версия не читается как legacy.
+            if let target = BeyGramPushOpenRequest.parseV2(url: url, items: items) {
+                self.accountUserId = target.account
+                self.peerId = nil
+                self.messageId = nil
+                self.target = target.target
+            } else {
+                self.accountUserId = nil
+                self.peerId = nil
+                self.messageId = nil
+                self.target = nil
+            }
+            return
+        }
         func positiveValue(_ name: String) -> Int64? {
             guard let raw = items.first(where: { $0.name == name })?.value, let value = Int64(raw), value > 0 else {
                 return nil
@@ -304,5 +339,43 @@ public struct BeyGramPushOpenRequest: Equatable {
         self.accountUserId = positiveValue("account")
         self.peerId = positiveValue("peer")
         self.messageId = positiveValue("msg").flatMap({ Int32(exactly: $0) })
+        self.target = nil
+    }
+
+    /// Каноническое положительное десятичное число: ASCII, без знака, пробелов и ведущих нулей.
+    private static func canonicalPositive(_ raw: String) -> Int64? {
+        guard !raw.isEmpty, raw.utf8.count <= 19, raw.utf8.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }), raw.utf8.first != 0x30 else {
+            return nil
+        }
+        return Int64(raw)
+    }
+
+    private static func parseV2(url: URL, items: [URLQueryItem]) -> (account: Int64, target: Target)? {
+        let absolute = url.absoluteString
+        guard absolute.utf8.count <= 200, absolute.utf8.allSatisfy({ $0 < 0x80 }), !absolute.contains("%"), !absolute.contains("#") else {
+            return nil
+        }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false), components.user == nil, components.password == nil, components.port == nil, components.fragment == nil else {
+            return nil
+        }
+        let allowed: Set<String> = ["v", "account", "kind", "rawPeer", "msg"]
+        var values: [String: String] = [:]
+        for item in items {
+            guard allowed.contains(item.name), let value = item.value, values[item.name] == nil else {
+                return nil
+            }
+            values[item.name] = value
+        }
+        guard values["v"] == "2", let accountRaw = values["account"], let account = canonicalPositive(accountRaw), let kindRaw = values["kind"], let kind = Kind(rawValue: kindRaw), let rawPeerRaw = values["rawPeer"], let rawPeer = canonicalPositive(rawPeerRaw) else {
+            return nil
+        }
+        var messageId: Int32?
+        if let msgRaw = values["msg"] {
+            guard let msg = canonicalPositive(msgRaw), let exact = Int32(exactly: msg) else {
+                return nil
+            }
+            messageId = exact
+        }
+        return (account, Target(kind: kind, rawPeerId: rawPeer, messageId: messageId))
     }
 }

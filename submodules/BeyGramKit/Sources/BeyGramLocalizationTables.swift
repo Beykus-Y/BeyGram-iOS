@@ -106,6 +106,16 @@ public enum BeyGramLocalizationTables {
         .stealthRefusedTitle: "Stealth send unavailable",
         .stealthRefusedBody: "This message cannot be scheduled in Stealth Mode (secret chats and paid messages do not support scheduled sending). Sending it now will publish immediately and may reveal your activity.",
         .stealthSendNowAction: "Send without Stealth",
+        .chatStealthRowTitle: "Stealth mode",
+        .chatStealthSheetTitle: "Stealth in this chat",
+        .chatStealthInherit: "As in settings",
+        .chatStealthAllow: "Allow",
+        .chatStealthBlock: "Block",
+        .stealthRiskyTitle: "This action may show you online",
+        .stealthRiskyText: "Reactions, poll votes and bot buttons are visible to others, and Telegram may show you online for a while. Continue?",
+        .stealthRiskyConfirm: "Continue",
+        .stealthViewOnceTitle: "Open one-time media?",
+        .stealthViewOnceText: "Hidden mode is on: opening this will not be reported to the sender, so it stays unopened on their side.",
         .stealthSendNowConfirm: "Send now",
 
         // Mihomo
@@ -421,6 +431,16 @@ public enum BeyGramLocalizationTables {
         .stealthRefusedTitle: "Отложенная отправка недоступна",
         .stealthRefusedBody: "Это сообщение нельзя запланировать в режиме невидимки (секретные чаты и платные сообщения не поддерживают отложенную отправку). Обычная отправка опубликует его сразу и может показать вашу активность.",
         .stealthSendNowAction: "Отправить без невидимки",
+        .chatStealthRowTitle: "Режим невидимки",
+        .chatStealthSheetTitle: "Невидимка в этом чате",
+        .chatStealthInherit: "Как в настройках",
+        .chatStealthAllow: "Разрешить",
+        .chatStealthBlock: "Блокировать",
+        .stealthRiskyTitle: "Действие может показать вас в сети",
+        .stealthRiskyText: "Реакции, голоса в опросах и нажатия кнопок ботов видны другим, и Telegram может ненадолго показать вас в сети. Продолжить?",
+        .stealthRiskyConfirm: "Продолжить",
+        .stealthViewOnceTitle: "Открыть одноразовое медиа?",
+        .stealthViewOnceText: "Включён скрытый режим: открытие не будет передано отправителю, у него оно останется непросмотренным.",
         .stealthSendNowConfirm: "Отправить сейчас",
 
         // Mihomo

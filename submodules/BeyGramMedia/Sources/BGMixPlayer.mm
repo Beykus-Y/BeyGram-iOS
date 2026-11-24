@@ -157,6 +157,10 @@ BGMixTrack *trackWithIdentifier(NSArray<BGMixTrack *> *queue, uint64_t identifie
 @property (nonatomic, strong) AVAudioEngine *audioEngine;
 @property (nonatomic, strong) AVAudioSourceNode *sourceNode;
 @property (nonatomic, strong) AVAudioFormat *renderFormat;
+// Equalizer (issue #139). `equalizer` exists only when the user turned it on before the engine was built.
+@property (nonatomic, assign) BOOL equalizerRequested;
+@property (nonatomic, copy, nullable) NSArray<NSNumber *> *equalizerGains;
+@property (nonatomic, strong, nullable) AVAudioUnitEQ *equalizer;
 @property (nonatomic, strong, nullable) CADisplayLink *displayLink;
 // Drives the update loop in the background while the mix sounds. Nil in the foreground.
 @property (nonatomic, strong, nullable) NSTimer *backgroundTimer;
@@ -276,7 +280,12 @@ static BGMixPlayer *sSharedPlayer = nil;
 
     self.audioEngine = [[AVAudioEngine alloc] init];
     [self.audioEngine attachNode:self.sourceNode];
-    [self.audioEngine connect:self.sourceNode to:self.audioEngine.mainMixerNode format:format];
+    if (self.equalizerRequested) {
+        [self buildEqualizerWithFormat:format];
+        [self.audioEngine attachNode:self.equalizer];
+        [self.audioEngine connect:self.equalizer to:self.audioEngine.mainMixerNode format:format];
+    }
+    [self.audioEngine connect:self.sourceNode to:(self.equalizer ?: self.audioEngine.mainMixerNode) format:format];
 
     [self observeSystemEvents];
 
@@ -498,7 +507,7 @@ static BGMixPlayer *sSharedPlayer = nil;
     if (!_session) {
         return;
     }
-    [self.audioEngine connect:self.sourceNode to:self.audioEngine.mainMixerNode format:self.renderFormat];
+    [self.audioEngine connect:self.sourceNode to:(self.equalizer ?: self.audioEngine.mainMixerNode) format:self.renderFormat];
     if ([self isSounding] && ![self ensureEngineRunning]) {
         _session->pause();
     }
@@ -735,6 +744,38 @@ static BGMixPlayer *sSharedPlayer = nil;
     if (_session) {
         _session->setBassSwap(enabled);
     }
+}
+
+- (void)setEqualizerEnabled:(BOOL)enabled gainsDecibels:(NSArray<NSNumber *> *)gainsDecibels {
+    if (!enabled) {
+        self.equalizerRequested = NO;
+        self.equalizerGains = nil;
+        return;
+    }
+    self.equalizerRequested = YES;
+    self.equalizerGains = gainsDecibels;
+}
+
+/// The band frequencies of the five-band equalizer, in Hz.
+static const float kBeyGramEqualizerFrequencies[5] = { 60.0f, 230.0f, 910.0f, 3600.0f, 14000.0f };
+
+- (void)buildEqualizerWithFormat:(AVAudioFormat *)format {
+    (void)format;
+    AVAudioUnitEQ *eq = [[AVAudioUnitEQ alloc] initWithNumberOfBands:5];
+    for (NSInteger i = 0; i < 5; i++) {
+        AVAudioUnitEQFilterParameters *band = eq.bands[i];
+        band.filterType = AVAudioUnitEQFilterTypeParametric;
+        band.frequency = kBeyGramEqualizerFrequencies[i];
+        band.bandwidth = 1.0f;
+        float gain = 0.0f;
+        if (i < (NSInteger)self.equalizerGains.count) {
+            gain = self.equalizerGains[i].floatValue;
+        }
+        band.gain = MIN(12.0f, MAX(-12.0f, gain));
+        band.bypass = NO;
+    }
+    eq.globalGain = 0.0f;
+    self.equalizer = eq;
 }
 
 - (void)invalidate {

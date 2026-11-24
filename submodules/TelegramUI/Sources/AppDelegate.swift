@@ -2697,7 +2697,25 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         }
         |> deliverOnMainQueue).start(next: { sharedContext, context, authContext in
             if let pushRequest = BeyGramPushOpenRequest(url: url), BeyGramSettings.shared.isEnabled(.bgPush) {
-                if let context = context, let peerId = pushRequest.peerId {
+                if let context = context, let target = pushRequest.target {
+                    // BG Push Navigation v2 (issue #74): the raw cloud id and the kind give the real peer. A different
+                    // account, an id that does not fit or an unknown kind leaves the app as it is, no guessing.
+                    let activeUserId = context.context.account.peerId.id._internalGetInt64Value()
+                    let namespace: PeerId.Namespace
+                    switch target.kind {
+                    case .user:
+                        namespace = Namespaces.Peer.CloudUser
+                    case .chat:
+                        namespace = Namespaces.Peer.CloudGroup
+                    case .channel:
+                        namespace = Namespaces.Peer.CloudChannel
+                    }
+                    let peerId = PeerId(namespace: namespace, id: PeerId.Id._internalFromInt64Value(target.rawPeerId))
+                    if pushRequest.accountUserId == activeUserId, peerId.id._internalGetInt64Value() == target.rawPeerId {
+                        let messageId = target.messageId.map { MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: $0) }
+                        context.openChatWithPeerId(peerId: peerId, threadId: nil, messageId: messageId, activateInput: false, storyId: nil)
+                    }
+                } else if let context = context, let peerId = pushRequest.peerId {
                     let activeUserId = context.context.account.peerId.id._internalGetInt64Value()
                     if pushRequest.accountUserId == nil || pushRequest.accountUserId == activeUserId {
                         context.openChatWithPeerId(peerId: PeerId(peerId), threadId: nil, messageId: nil, activateInput: false, storyId: nil)

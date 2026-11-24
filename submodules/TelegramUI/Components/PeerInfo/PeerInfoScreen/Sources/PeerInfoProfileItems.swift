@@ -16,6 +16,8 @@ import WebUI
 import AvatarNode
 import PeerNameColorItem
 import BoostLevelIconComponent
+import BeyGramKit
+import BeyGramStealth
 
 private let enabledPublicBioEntities: EnabledEntityTypes = [.allUrl, .mention, .hashtag]
 private let enabledPrivateBioEntities: EnabledEntityTypes = [.internalUrl, .mention, .hashtag]
@@ -116,6 +118,7 @@ func infoItems(
         let ItemReport = 6002
         let ItemBlock = 6003
         let ItemEncryptionKey = 6004
+        let ItemChatStealth = 6005
         let ItemBalanceHeader = 7000
         let ItemBalanceTon = 7001
         let ItemBalanceStars = 7002
@@ -442,6 +445,13 @@ func infoItems(
         }
         
         if !isMyProfile {
+            if beyGramChatStealthRowVisible() {
+                let chatStealthMode = beyGramChatStealthMode(accountPeerId: context.account.peerId.toInt64(), chatPeerId: user.id)
+                items[currentPeerInfoSection]!.append(PeerInfoScreenDisclosureItem(id: ItemChatStealth, label: .text(beyGramChatStealthModeTitle(chatStealthMode)), text: BeyGramL10n.shared.string(.chatStealthRowTitle), icon: nil, action: {
+                    presentBeyGramChatStealthSheet(accountPeerId: context.account.peerId.toInt64(), chatPeerId: user.id, presentationData: presentationData, controller: interaction.getController())
+                }))
+            }
+
             if !data.isContact, user.botInfo == nil {
                 items[currentPeerInfoSection]!.append(PeerInfoScreenActionItem(id: ItemAddToContacts, text: presentationData.strings.PeerInfo_AddToContacts, action: {
                     interaction.openAddContact()

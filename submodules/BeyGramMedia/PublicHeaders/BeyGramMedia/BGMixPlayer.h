@@ -119,6 +119,11 @@ extern NSNotificationName const BGMixPlayerDidStopForExternalAudioNotification;
 - (void)setAdaptiveTransitions:(BOOL)enabled;
 - (void)setBassSwap:(BOOL)enabled;
 
+/// Equalizer for the BG Mix output (issue #139). Off by default: with it off the graph is the one that was always built.
+/// `gainsDecibels` has one value per band (5 bands, each clamped to -12...12 dB). It takes effect when the engine is next built, not
+/// while playing. NOT CHECKED ON A DEVICE: this changes the audio graph, so it is opt-in.
+- (void)setEqualizerEnabled:(BOOL)enabled gainsDecibels:(NSArray<NSNumber *> *)gainsDecibels;
+
 // The current state, read from the engine on each access.
 @property (nonatomic, readonly) BGMixSnapshot *snapshot;
 

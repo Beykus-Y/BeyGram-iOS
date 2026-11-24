@@ -118,6 +118,8 @@ import AudioWaveform
 import PeerNameColorScreen
 import ChatEmptyNode
 import ChatMediaInputStickerGridItem
+import BeyGramKit
+import BeyGramStealth
 
 extension ChatControllerImpl {
     func openViewOnceMediaMessage(_ message: EngineMessage) {
@@ -129,6 +131,23 @@ extension ChatControllerImpl {
         }
         
         let isIncoming = message.effectivelyIncoming(self.context.account.peerId)
+        
+        // Stealth consent (issue #137): with noContentOpen on, ask once per opening of an incoming one-time media.
+        if isIncoming, !self.beyGramViewOnceConsentGiven, !BeyGramStealthHooks.allowsOpenContentReceipt(accountPeerId: self.context.account.peerId.toInt64()) {
+            let consentController = textAlertController(context: self.context, updatedPresentationData: self.updatedPresentationData, title: BeyGramL10n.shared.string(.stealthViewOnceTitle), text: BeyGramL10n.shared.string(.stealthViewOnceText), actions: [
+                TextAlertAction(type: .genericAction, title: self.presentationData.strings.Common_Cancel, action: {}),
+                TextAlertAction(type: .defaultAction, title: BeyGramL10n.shared.string(.stealthRiskyConfirm), action: { [weak self] in
+                    guard let self else {
+                        return
+                    }
+                    self.beyGramViewOnceConsentGiven = true
+                    self.openViewOnceMediaMessage(message)
+                    self.beyGramViewOnceConsentGiven = false
+                })
+            ])
+            self.present(consentController, in: .window(.root))
+            return
+        }
         
         var presentImpl: ((ViewController) -> Void)?
         let configuration = ContextController.Configuration(
